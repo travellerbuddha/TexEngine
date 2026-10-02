@@ -28,6 +28,32 @@ def _search(rooms, session="sess-s"):
 	                     market="DE", session_id=session)["properties"][0]
 
 
+# what names a contract, its version, its market or its channel (G-71, R-52/R-53): never in a guest answer
+IDENTITY_KEYS = frozenset({"contract", "contract_code", "contract_name", "version", "version_no", "payload_hash",
+                           "market", "channel"})
+
+
+def contract_identities() -> set[str]:
+	"""Every contract docname, version id and payload hash: no guest answer carries one as a value."""
+	out = set(frappe.get_all("TEX Contract", pluck="name"))
+	for v in frappe.get_all("TEX Contract Version", fields=["name", "payload_hash"]):
+		out.add(v.name)
+		if v.payload_hash:
+			out.add(v.payload_hash)
+	return out
+
+
+def identity_leaks(payload, secrets: set[str], path: str = "$") -> list[str]:
+	"""Where ``payload`` names a contract's identity: an ``IDENTITY_KEYS`` key, or a value equal to a
+	contract docname, version id or payload hash."""
+	if isinstance(payload, dict):
+		return [leak for k, v in payload.items()
+		        for leak in ([f"{path}.{k}"] if k in IDENTITY_KEYS else []) + identity_leaks(v, secrets, f"{path}.{k}")]
+	if isinstance(payload, list | tuple):
+		return [leak for i, v in enumerate(payload) for leak in identity_leaks(v, secrets, f"{path}[{i}]")]
+	return [f"{path}={payload}"] if isinstance(payload, str) and payload in secrets else []
+
+
 class TestPublicBooking(TexTestCase):
 	def setUp(self):
 		super().setUp()
@@ -98,6 +124,64 @@ class TestPublicBooking(TexTestCase):
 		q = public.quote(site=SLUG, offer_key=prop["offers"][0]["rooms"][0]["offer_key"], session_id="sess-s")
 		for k in quoting.INTERNAL_TOTALS:
 			self.assertNotIn(k, q["quote"]["totals"])
+
+	def test_guest_answers_name_no_contract(self):
+		"""G-71: no guest answer names the contract, its version, its payload hash, the market or the channel
+		(search, quote, quote_rooms and their refusals, basket, book, booking status, site); staff keep them."""
+		secrets = contract_identities()
+		self.assertTrue(secrets)
+
+		def clean(name: str, payload) -> None:
+			self.assertEqual(identity_leaks(payload, secrets), [], f"{name} names the contract")
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2, "children": []}], market="DE", session_id="sess-g71")
+		clean("search", res)
+		prop = res["properties"][0]
+		offer = next(o for o in prop["offers"] if o["room_type"] == self.std and o["board"] == "AI"
+		             and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+		key = offer["rooms"][0]["offer_key"]
+		q = public.quote(site=SLUG, offer_key=key, session_id="sess-g71")
+		self.assertTrue(q["ok"], q)
+		clean("quote", q)
+		# what the booking app reads stays: the price, the promotions' names and the rate plan
+		self.assertTrue(q["quote"]["totals"]["total"] and q["quote"]["rate_plan"]["name"])
+		together = public.quote_rooms(site=SLUG, rooms=[{"offer_key": key, "extras": []}], session_id="sess-g71")
+		self.assertTrue(together["ok"], together)
+		clean("quote_rooms", together)
+		clean("basket", public.basket(site=SLUG, quote_ids=[q["quote_id"]], session_id="sess-g71"))
+		booked = public.book(site=SLUG, quote_ids=[q["quote_id"]], guest=GUEST, payment_method="Card",
+		                     session_id="sess-g71", idempotency_key="idem-g71")
+		clean("book", booked)
+		clean("booking_status", public.booking_status(token=booked["manage_token"]))
+		clean("site", public.site(slug=SLUG))
+
+		# a refusal answers with codes, never the engine's text (which may name the contract)
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		for name, out in (("quote refused", public.quote(site=SLUG, offer_key=key, session_id="sess-g71")),
+		                  ("quote_rooms refused", public.quote_rooms(site=SLUG, rooms=[{"offer_key": key, "extras": []}],
+		                                                             session_id="sess-g71")["rooms"][0])):
+			self.assertFalse(out["ok"], out)
+			clean(name, out)
+			self.assertEqual(out["reasons"], [{"code": "ROOM_NOT_SOLD"}], name)
+		frappe.db.set_value("Room Type", self.std, "disabled", 0)
+		# an extra refused for the market, the channel or the room type says only that it is not available
+		extras = public._guest_quote({"extras": [{"ok": False, "reason": "not available for market DE"},
+		                                         {"ok": False, "reason": "charged once per booking, on room 1"}]})
+		self.assertEqual([e["reason"] for e in extras["extras"]], ["not available", "charged once per booking, on room 1"])
+
+		# staff keep every identity (the call centre names the contract it sells)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent searches
+		staff = crs.search(check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)), rooms=[{"adults": 2, "children": []}],
+		                   market="DE", channel="CALL_CENTER", properties=[fx.PROPERTY])
+		self.assertEqual((staff["market"], staff["channel"]), ("DE", "CALL_CENTER"))
+		so = staff["properties"][0]["offers"][0]
+		self.assertTrue(so["contract"] and so["contract_code"] and so["version"] and so["market"])
+		sq = crs.quote(offer_key=so["rooms"][0]["offer_key"])
+		self.assertTrue(sq["ok"], sq)
+		self.assertTrue(sq["quote"]["contract"]["payload_hash"])
+		self.assertEqual(sq["quote"]["request"]["channel"], "CALL_CENTER")
 
 	def test_basket_lists_amount_due_per_method(self):
 		prop = _search([{"adults": 2, "children": [8]}], session="sess-b")
@@ -508,6 +592,151 @@ class TestRefusalCodes(TexTestCase):
 		self.assertNotIn("tex_params", frappe.local.response)
 
 
+	# ── G-70b: every refusal a guest can meet carries its code (HANDOFF_STAGE3 §5f) ──
+
+	def refused(self, code: str, fn, *args, params: dict | None = None, **kwargs) -> Exception:
+		"""``fn`` (a guest endpoint) refuses with ``code``, on the exception and in the error body; → the exception."""
+		from kamra.tex.services import refusals
+
+		with self.assertRaises(frappe.ValidationError if code not in PERMISSION_CODES else frappe.PermissionError) as cm:
+			fn(*args, **kwargs)
+		self.assertEqual((refusals.code_of(cm.exception), frappe.local.response.get("tex_code")), (code, code),
+		                 f"{fn.__name__}: {cm.exception!r}")
+		if params is not None:
+			self.assertEqual(frappe.local.response.get("tex_params"), params, fn.__name__)
+		frappe.clear_messages()
+		return cm.exception
+
+	def test_a_search_and_its_party_are_refused_by_code(self):
+		from frappe.utils import add_days
+
+		from kamra.tex.pricing import engine
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		ci, co = str(fx.d(6, 10)), str(fx.d(6, 13))
+
+		def search(**kw):
+			return public.search(**({"site": SLUG, "check_in": ci, "check_out": co, "rooms": [{"adults": 2}],
+			                         "session_id": "g70b-s"} | kw))
+
+		self.refused("SITE_NOT_FOUND", search, site="no-such-site")
+		self.refused("HOTEL_NOT_FOUND", search, hotel="NO-SUCH-HOTEL")
+		self.refused("CURRENCY_NOT_OFFERED", search, currency="JPY")
+		self.refused("DATES_INVALID", search, check_out=ci)
+		self.refused("STAY_TOO_LONG", search, check_out=str(add_days(fx.d(6, 10), engine.MAX_NIGHTS + 1)),
+		             params={"max": engine.MAX_NIGHTS})
+		self.refused("CHECKIN_PAST", search, check_in="2020-01-01", check_out="2020-01-03")
+		self.refused("ROOMS_COUNT", search, rooms=[], params={"max": quoting.MAX_ROOMS})
+		self.refused("PARTY_INVALID", search, rooms=[{"adults": 0}])
+		self.refused("CHILD_AGE_INVALID", search, rooms=[{"adults": 2, "children": [30]}])
+		self.refused("CHILD_DOB_INVALID", search, rooms=[{"adults": 2, "children": [{"dob": "not a date"}]}])
+		self.refused("CHILD_TOO_OLD", search, rooms=[{"adults": 2, "children": [{"dob": "1990-01-01"}]}],
+		             params={"child": 1, "age": 18})
+
+	def test_offers_and_quotes_are_refused_by_code(self):
+		room = next(o for o in _search([{"adults": 2, "children": []}], session="g70b-q")["offers"]
+		            if o["room_type"] == self.f["room_types"]["STD"])["rooms"][0]
+		self.refused("OFFER_INVALID", public.quote, site=SLUG, offer_key="not-a-key", session_id="g70b-q")
+		stale = quoting.sign({**quoting.verify(room["offer_key"]), "exp": "2020-01-01T00:00:00"})
+		self.refused("OFFER_EXPIRED", public.quote, site=SLUG, offer_key=stale, session_id="g70b-q")
+		self.refused("EXTRA_NOT_ONLINE", public.quote, site=SLUG, offer_key=room["offer_key"],
+		             extras=[{"code": "NO-SUCH-EXTRA", "quantity": 1}], session_id="g70b-q")
+		self.refused("EXTRAS_INVALID", public.quote, site=SLUG, offer_key=room["offer_key"], extras="[1]",
+		             session_id="g70b-q")
+		self.refused("INVALID_REQUEST", public.quote, site=SLUG, offer_key=room["offer_key"], extras="{not json",
+		             session_id="g70b-q")
+		self.refused("ROOMS_COUNT", public.quote_rooms, site=SLUG, rooms=[], session_id="g70b-q",
+		             params={"max": quoting.MAX_ROOMS})
+		self.refused("QUOTE_INVALID", public.basket, site=SLUG, quote_ids=["TQ-NO-SUCH"], session_id="g70b-q")
+
+	def test_a_booking_is_refused_by_code(self):
+		import dataclasses
+		from unittest import mock
+
+		from kamra.tex.services import booking as booking_svc
+
+		room = next(o for o in _search([{"adults": 2, "children": []}], session="g70b-b")["offers"]
+		            if o["room_type"] == self.f["room_types"]["STD"] and o["board"] == "AI"
+		            and o["rate_plan"] == self.f["rate_plans"]["FLEX"])["rooms"][0]     # payable at the hotel
+
+		def quoted() -> str:
+			frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor quotes
+			return public.quote(site=SLUG, offer_key=room["offer_key"], session_id="g70b-b")["quote_id"]
+
+		def book(quote_id: str, key: str, **kw):
+			frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor books
+			return public.book(**({"site": SLUG, "quote_ids": [quote_id], "guest": GUEST,
+			                       "payment_method": "Pay at Hotel", "session_id": "g70b-b",
+			                       "idempotency_key": key} | kw))
+
+		q = quoted()
+		self.refused("GUEST_FIRST_NAME_REQUIRED", book, q, "k-name", guest={**GUEST, "first_name": ""})
+		self.refused("GUEST_CONTACT_REQUIRED", book, q, "k-contact", guest={**GUEST, "email": "", "phone": ""})
+		self.refused("PAYMENT_METHOD_UNAVAILABLE", book, q, "k-method", payment_method="Crypto")
+		# the last room went between the quote and the booking: the room's name and the night
+		real = booking_svc.avail.stay_availability
+
+		def none_left(*args, **kwargs):
+			_count, days = real(*args, **kwargs)
+			return 0, [dataclasses.replace(d, available=0) for d in days]
+
+		std = frappe.db.get_value("Room Type", self.f["room_types"]["STD"], "room_type_name")
+		with mock.patch.object(booking_svc.avail, "stay_availability", side_effect=none_left):
+			self.refused("SOLD_OUT", book, q, "k-sold", params={"room": std, "date": str(fx.d(6, 10))})
+		book(q, "k-ok")
+		self.refused("QUOTE_USED", book, q, "k-again")
+		late = quoted()
+		frappe.db.set_value("TEX Quote", late, "expires_at", "2020-01-01 00:00:00")
+		self.refused("QUOTE_EXPIRED", book, late, "k-late")
+		withdrawn = quoted()
+		frappe.db.set_value("TEX Quote", withdrawn, "status", "Expired")    # its version was withdrawn (O-13)
+		self.refused("NOT_ON_SALE", book, withdrawn, "k-withdrawn")
+
+	def test_an_expired_payment_link_says_LINK_EXPIRED(self):
+		from kamra.tex.payments import service as pay
+
+		b = guest_books(session="g70b-link", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the call centre sends a link
+		link = pay.create_link(property=fx.PROPERTY, amount="50", currency="EUR", description="Deposit",
+		                       booking=b["booking"], idempotency_key="g70b-link")
+		frappe.db.set_value("TEX Payment Link", link["link"], "expires_at", "2020-01-01 00:00:00")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens the link
+		self.refused("LINK_EXPIRED", public.pay_link, token=link["token"])
+		self.refused("LINK_INVALID", public.pay_link, token="x" * 40)
+
+	def test_the_booking_page_is_refused_by_code(self):
+		b = guest_books(session="g70b-manage", method="Pay at Hotel")
+		token, res = b["manage_token"], b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's booking page
+		self.refused("MANAGE_LINK_INVALID", public.booking_status, token="y" * 40)
+		self.refused("MANAGE_RESERVATION_INVALID", public.manage_cancel, token=token, reservation="RES-NO-SUCH")
+		self.refused("PAYMENT_METHOD_UNAVAILABLE", public.pay_booking, token=token, payment_method="Crypto")
+		frappe.db.set_value("TEX Booking", b["booking"], "manage_token_expires", "2020-01-01 00:00:00")
+		self.refused("MANAGE_LINK_EXPIRED", public.booking_status, token=token)
+		frappe.db.set_value("TEX Booking", b["booking"], "manage_token_expires", None)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff cancel the room
+		crs.cancel(reservation=res, reason="the guest phoned")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's page was open: the stale cancel
+		self.refused("ROOM_NOT_ACTIVE", public.manage_cancel, token=token, reservation=res, params={"status": "Cancelled"})
+
+	def test_the_very_busy_answer_is_BUSY(self):
+		from unittest import mock
+
+		from kamra.tex.services import txn
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		deadlock = frappe.QueryDeadlockError("Deadlock found")
+		# every attempt meets a deadlock (the rollback kept out: the test's fixtures are its transaction)
+		with mock.patch.object(quoting, "verify", side_effect=deadlock), mock.patch.object(txn.time, "sleep"), \
+				mock.patch.object(frappe.db, "rollback"):
+			self.refused("BUSY", public.quote, site=SLUG, offer_key="k" * 30, session_id="g70b-busy")
+
+
+# the codes whose refusal stays a 403 (``frappe.PermissionError``): the manage link and its rooms
+PERMISSION_CODES = frozenset({"MANAGE_LINK_INVALID", "MANAGE_LINK_EXPIRED", "MANAGE_RESERVATION_INVALID",
+                              "MANAGE_REQUEST_INVALID", "SITE_CLOSED"})
+
+
 def market_stay() -> dict:
 	return {"check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 13)), "rooms": [{"adults": 2, "children": []}]}
 
@@ -572,6 +801,25 @@ class TestMarketIntegrity(TexTestCase):
 		totals = lambda r: sorted(o["total"] for o in r["properties"][0]["offers"])  # noqa: E731
 		self.assertTrue(totals(res))
 		self.assertEqual(totals(res), totals(self.search("o8-1c", market="DE")))
+
+	def test_a_guest_error_body_names_no_market(self):
+		"""2G-3 review round 1 (S2): a guest's error body names no market (G-71): a residents-only refusal carries the
+		countries only, and a link country two markets share is refused without naming them. The exception keeps the
+		market for staff (the Call Center)."""
+		saved, frappe.local.response = frappe.local.response, frappe._dict({"docs": []})
+		try:
+			e = self.assertRefused("MARKET_RESIDENCY", self.search, "r1-mk", market="TR", country="DE")
+			self.assertEqual(e.params, {"market": "TR", "countries": ["TR"]})
+			self.assertEqual(frappe.local.response["tex_params"], {"countries": ["TR"]})
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- two markets share a country
+			for code in ("RAT1", "RAT2"):
+				fx.ensure("TEX Market", {"market_code": code}, {"market_code": code, "market_name": code, "countries": "AT"})
+			e = self.assertRefused("MARKET_AMBIGUOUS", self.search, "r1-mk2", country="AT")
+			self.assertNotIn("RAT1", str(e))
+			self.assertNotIn("tex_params", frappe.local.response)
+		finally:
+			frappe.local.response = saved
+			frappe.clear_messages()
 
 	def test_a_residents_only_market_is_refused_for_another_link_country(self):
 		e = self.assertRefused("MARKET_RESIDENCY", self.search, "o8-2", market="TR", country="DE")

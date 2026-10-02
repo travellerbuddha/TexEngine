@@ -26,7 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
-from kamra.tex.services.refusals import refusal
+from kamra.tex.services.refusals import Refusal, refusal
 from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost, undo_to
 
 
@@ -160,7 +160,7 @@ def check_return_url(property: str, url: str) -> str:
 	u = urlparse(url or "")
 	if u.scheme not in ("https", "http") or (u.scheme == "http" and not frappe.conf.get("developer_mode")) \
 			or u.hostname not in allowed_return_hosts(property):
-		frappe.throw(_("Invalid return address."), frappe.ValidationError)
+		frappe.throw(_("Invalid return address."), refusal("RETURN_URL_INVALID"))
 	return url
 
 
@@ -377,11 +377,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	lease is young is told so (``PaymentBusy``); a failed checkout is on record before the caller hears."""
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
-		frappe.throw(_("Nothing to pay."))
+		frappe.throw(_("Nothing to pay."), refusal("NOTHING_DUE"))
 	acc_property = frappe.db.get_value("TEX Payment Provider Account", provider_account, "property")
 	if acc_property != property:
 		# a guest must never route a hotel's payment through another hotel's gateway
-		frappe.throw(_("This payment method is not available."), frappe.PermissionError)
+		frappe.throw(_("This payment method is not available."),
+		             refusal("PAYMENT_METHOD_UNAVAILABLE", frappe.PermissionError))
 	check_return_url(property, return_url)
 	idempotency_key = ns_key(property, idempotency_key, "charge")
 	existing = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key}, "name")
@@ -393,7 +394,8 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		                               ["name", "status", "provider_account", "amount", "currency",
 		                                "checkout_started_at"], as_dict=True, for_update=True)
 	if existing and existing.status != "Pending":
-		frappe.throw(_("This payment was already processed ({0}).").format(existing.status))
+		frappe.throw(_("This payment was already processed ({0}).").format(existing.status),
+		             refusal("PAYMENT_ALREADY_PROCESSED", status=existing.status))
 	stamp = now_datetime()
 	if existing and existing.checkout_started_at and \
 			get_datetime(existing.checkout_started_at) > add_to_date(stamp, seconds=-CHECKOUT_LEASE_SECONDS):
@@ -403,7 +405,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	if existing and (existing.provider_account != provider_account or existing.currency != currency
 	                 or from_db(existing.amount, existing.currency) != amount):
 		# a reused charge is exactly the charge that was started, never re-routed or re-priced
-		frappe.throw(_("This payment was started with another method or amount."))
+		frappe.throw(_("This payment was started with another method or amount."), refusal("PAYMENT_MISMATCH"))
 	provider = provider_for(provider_account)
 	# a booking waiting for its payment: the attempt is refused once its hold is over, else it
 	# keeps the rooms until its own deadline, never longer (K-2a)
@@ -477,7 +479,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 			txn.save(ignore_permissions=True)
 		# a charge a callback settled meanwhile (an earlier checkout of a reused one) keeps its status
 		_commit_step()
-		frappe.throw(_("The payment could not be started. Please try another method."))
+		frappe.throw(_("The payment could not be started. Please try another method."), refusal("PAYMENT_START_FAILED"))
 	# ── (c) the answer, recorded under the charge's lock; its status is never changed here ──
 	txn = frappe.get_doc("TEX Payment Transaction", txn.name, for_update=True)          # as it is now
 	if checkout.provider_ref:
@@ -532,7 +534,7 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	row = frappe.db.get_value("TEX Payment Transaction", transaction,
 	                          ["name", "status", "provider_account", "provider_ref", "payment_link"], as_dict=True)
 	if not row:
-		frappe.throw(_("Unknown payment."), frappe.DoesNotExistError)
+		frappe.throw(_("Unknown payment."), refusal("PAYMENT_UNKNOWN", frappe.DoesNotExistError))
 	if row.status not in SETTLEABLE:
 		return {"transaction": row.name, "status": row.status, "replay": True}
 	provider = provider_for(row.provider_account, purpose="settle", transaction=row.name)
@@ -861,7 +863,7 @@ def lock_link(name: str, *, nowait: bool = False) -> frappe._dict:
 	except frappe.QueryTimeoutError:
 		frappe.throw(_("A payment for this link is being started. Please wait a moment and try again."), PaymentBusy)
 	if not rows:
-		frappe.throw(_("This payment link is not valid."), frappe.DoesNotExistError)
+		frappe.throw(_("This payment link is not valid."), refusal("LINK_INVALID", frappe.DoesNotExistError))
 	return rows[0]
 
 
@@ -882,7 +884,8 @@ def link_charge_key(link: str, due, provider_account: str, property: str) -> str
 		status = frappe.db.get_value("TEX Payment Transaction", name, "status", for_update=True) if name else None
 		if status not in ("Failed", "Cancelled"):
 			return key          # a new charge, the Pending one to reuse, or a paid one start_payment refuses
-	frappe.throw(_("This payment link has had too many attempts. Please contact the hotel."))
+	frappe.throw(_("This payment link has had too many attempts. Please contact the hotel."),
+	             refusal("LINK_TOO_MANY_ATTEMPTS"))
 
 
 def _after_charge(txn) -> None:
@@ -1913,7 +1916,7 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 		why = link_refusal(link.booking, from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency),
 		                   link.currency, guest=False)
 		if why:
-			frappe.throw(why)
+			frappe.throw(str(why), why)
 	token = secrets.token_urlsafe(24)
 	link.flags.tex_system_update = True
 	link.token_hash = link_token_hash(token)
@@ -1930,34 +1933,40 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 	        "expires_at": str(link.expires_at) if link.expires_at else None}
 
 
-def link_refusal(booking: str, amount, currency: str, *, guest: bool) -> str | None:
+def link_refusal(booking: str, amount, currency: str, *, guest: bool) -> Refusal | None:
 	"""E4: why a link of ``booking`` asking ``amount`` may not be paid, nor sent again: it asks another
 	currency than the booking's (a booking is paid in its own currency, D-10: a link made before that
 	rule); its booking cannot take the money (cancelled, expired, its rooms given back:
 	``late_payments.problem``; a link's money is on its way, never kept as a fee, C6); or it owes less
 	than the link asks. None when it may. Locks the booking (after the link: the order of a link's
-	payment). ``guest``: told to the guest, else to staff."""
+	payment). ``guest``: told to the guest, else to staff. → a coded refusal (G-70b): raise it with
+	``frappe.throw(str(why), why)``."""
 	from kamra.tex.services import late_payments
 
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if currency != b.currency:
-		return (_("This payment link cannot be paid online. Please contact the hotel.") if guest else
-		        _("Booking {0} is in {1}; this link asks {2}: cancel it and send a new link in {1}.").format(
-			        b.name, b.currency, currency))
+		return Refusal(_("This payment link cannot be paid online. Please contact the hotel.") if guest else
+		               _("Booking {0} is in {1}; this link asks {2}: cancel it and send a new link in {1}.").format(
+			               b.name, b.currency, currency), code="LINK_CURRENCY")
 	amount = quantize(D(amount), currency)
 	if late_payments.problem(b, amount=amount, in_flight=True):
-		return (_("This payment link can no longer be paid: its booking cannot take payments any more. Please "
-		          "contact the hotel.") if guest else
-		        _("Booking {0} ({1}) cannot take this link's payment: cancel the link.").format(b.name, _(b.status)))
+		return Refusal(_("This payment link can no longer be paid: its booking cannot take payments any more. "
+		                 "Please contact the hotel.") if guest else
+		               _("Booking {0} ({1}) cannot take this link's payment: cancel the link.").format(
+			               b.name, _(b.status)), code="LINK_BOOKING_CLOSED")
 	owed = quantize(from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency), b.currency)
 	if amount <= owed:
 		return None
-	if guest:
-		return (_("This payment link can no longer be paid: its booking is paid in full.") if owed <= ZERO else
-		        _("This payment link asks {0} {1}, more than its booking still owes ({2} {1}). Please contact the "
-		          "hotel for a new link.").format(to_str(amount), currency, to_str(owed)))
-	return _("Booking {0} owes {1} {2}, less than this link asks ({3} {2}): cancel it and send a new link.").format(
-		b.name, to_str(max(owed, ZERO)), currency, to_str(amount))
+	if owed <= ZERO:
+		return Refusal(_("This payment link can no longer be paid: its booking is paid in full.") if guest else
+		               _("Booking {0} owes {1} {2}, less than this link asks ({3} {2}): cancel it and send a new "
+		                 "link.").format(b.name, to_str(max(owed, ZERO)), currency, to_str(amount)),
+		               code="LINK_BOOKING_PAID")
+	return Refusal(_("This payment link asks {0} {1}, more than its booking still owes ({2} {1}). Please contact "
+	                 "the hotel for a new link.").format(to_str(amount), currency, to_str(owed)) if guest else
+	               _("Booking {0} owes {1} {2}, less than this link asks ({3} {2}): cancel it and send a new "
+	                 "link.").format(b.name, to_str(owed), currency, to_str(amount)),
+	               code="LINK_OVER_OWED", params={"amount": to_str(amount), "owed": to_str(owed), "currency": currency})
 
 
 def close_links_of(booking: str, why: str) -> list[str]:
@@ -1987,7 +1996,7 @@ def close_links_of(booking: str, why: str) -> list[str]:
 def link_by_token(token: str):
 	name = frappe.db.get_value("TEX Payment Link", {"token_hash": link_token_hash(token or "")})
 	if not name:
-		frappe.throw(_("This payment link is not valid."), frappe.DoesNotExistError)
+		frappe.throw(_("This payment link is not valid."), refusal("LINK_INVALID", frappe.DoesNotExistError))
 	link = frappe.get_doc("TEX Payment Link", name)
 	if link.status == "Active" and link.expires_at and get_datetime(link.expires_at) < now_datetime():
 		link.flags.tex_system_update = True

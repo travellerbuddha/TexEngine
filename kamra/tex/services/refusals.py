@@ -24,6 +24,10 @@ import frappe
 
 from kamra.tex.refusal_codes import CODES
 
+# what a guest's error body never carries, whatever a refusal's own params say (staff keep them on the exception): the
+# market and the channel a sale was priced on (G-71; 2G-3 review round 1)
+GUEST_HIDDEN = frozenset({"market", "channel"})
+
 # what an uncoded refusal of these kinds tells the guest: a 429, a 404, a 403 (checked in this order: the rate
 # limit error is a ValidationError, a missing record is not a permission error)
 FALLBACK: tuple[tuple[type[Exception], str], ...] = (
@@ -85,6 +89,17 @@ def refusal(code: str, base: type[Exception] | None = None, **params) -> Excepti
 	return e
 
 
+def with_code(e: Exception, code: str | None = None, **params) -> Exception:
+	"""``e`` (an instance of an existing exception class, its message kept) with a refusal code (default: its
+	class's) and guest-safe params, for a refusal raised without ``frappe.throw``::
+
+	    raise with_code(ExtraSoldOut(msg), extra=name, date=day.isoformat())"""
+	if code is not None:
+		e.code = _known(code)
+	e.params = _safe(params)
+	return e
+
+
 def code_of(e: BaseException) -> str | None:
 	"""The refusal code ``e`` carries: a registered string only (a werkzeug error's ``code`` is its HTTP status)."""
 	code = getattr(e, "code", None)
@@ -116,8 +131,8 @@ def coded(fn):
 			code = guest_code(e)
 			if code and resp is not None:
 				resp["tex_code"] = code
-				params = _safe(getattr(e, "params", None)) if code_of(e) and isinstance(getattr(e, "params", None), dict) \
-					else None
+				params = {k: v for k, v in _safe(e.params).items() if k not in GUEST_HIDDEN} \
+					if code_of(e) and isinstance(getattr(e, "params", None), dict) else None
 				if params:
 					resp["tex_params"] = params
 			raise

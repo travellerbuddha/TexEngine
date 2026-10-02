@@ -127,8 +127,10 @@ class TestGuestPayment(TexTestCase):
 		txn = pmt["transaction"]
 
 		# a forged signature is rejected and changes nothing
-		with self.assertRaises(ProviderError):
+		with self.assertRaises(ProviderError) as cm:
 			public.mock_pay(transaction=txn, outcome="success", sig="0" * 64)
+		# ... a coded 417 since G-70b, never a server error
+		self.assertEqual((cm.exception.code, cm.exception.http_status_code), ("PAYMENT_SIGNATURE_INVALID", 417))
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "status"), "Pending")
 
 		out = public.mock_pay(transaction=txn, outcome="success", sig=pmt["fields"]["success_sig"])
@@ -461,6 +463,43 @@ class TestSelfService(TexTestCase):
 			penalty, basis = booking.cancellation_penalty(res, today=fx.d(6, 1))
 			self.assertEqual((to_str(penalty), basis["rule"]), ("0.00", rule))
 
+	def test_a_change_the_engine_refuses_never_tells_the_guest_its_reasons(self):
+		"""2G-3 review round 1 (S1): a change past the contract's last stay day is refused with CHANGE_NOT_SELLABLE and
+		the engine's codes, never the engine's text (it names the contract's dates, its code, the market)."""
+		b = guest_books(session="r1-s1", method="Pay at Hotel")
+		token, res = b["manage_token"], b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		late = {"check_in": str(fx.d(10, 29)), "check_out": str(fx.d(11, 2))}       # past the contract's stays
+		up = public.manage_propose(token=token, reservation=res, changes=late)
+		self.assertFalse(up["sellable"])
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot be sold") as cm:
+			public.manage_apply(token=token, proposal_token=up["proposal_token"])
+		for internal in ("contract", str(fx.STAY_TO), "'code'"):
+			self.assertNotIn(internal, str(cm.exception))
+		self.assertEqual(cm.exception.code, "CHANGE_NOT_SELLABLE")
+		self.assertIn("STAY_WINDOW", cm.exception.params["reasons"])
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_in_date"), fx.d(6, 10))
+
+	def test_the_manage_view_of_a_channels_booking_offers_no_change_or_cancel(self):
+		"""LO-12 (PR #16 Kalanlar, audit 2K-3): a channel's booking is changed and cancelled on the channel (D-11, Y-8):
+		the guest's page offers neither (before: ``can_change`` and ``can_cancel`` were true and the server refused
+		both), and says who sold it by the connection's label, never its id."""
+		b = guest_books(session="lo12", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the channel manager's connection
+		conn = frappe.get_doc({"doctype": "TEX Integration Connection", "label": "Sandbox CM", "property": fx.PROPERTY,
+		                       "category": "Channel Manager", "adapter": "sandbox_channel", "environment": "Sandbox",
+		                       "enabled": 1, "secret": "lo12-secret"}).insert(ignore_permissions=True)
+		frappe.db.set_value("TEX Booking", b["booking"], {"channel_connection": conn.name, "external_ref": "OTA-LO12"})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's booking page
+		view = public.booking_status(token=b["manage_token"])
+		self.assertEqual([(r["can_change"], r["can_cancel"]) for r in view["rooms"]], [(False, False)])
+		self.assertEqual(view["sold_by"], {"label": "Sandbox CM"})
+		self.assertNotIn(conn.name, json.dumps(view))
+		# a TEX booking is the guest's to change: no channel named
+		own = public.booking_status(token=guest_books(session="lo12-own", method="Pay at Hotel")["manage_token"])
+		self.assertIsNone(own["sold_by"])
+		self.assertEqual([(r["can_change"], r["can_cancel"]) for r in own["rooms"]], [(True, True)])
+
 	def test_no_online_cancellation_from_the_arrival_day(self):
 		# O-16 (audit Part 2A, user decision): from the arrival day the stay may have started; giving its
 		# nights back would resell a room the guest is in. A change still starts on the arrival day
@@ -480,8 +519,11 @@ class TestSelfService(TexTestCase):
 		for day in (add_days(arrival, 1), arrival):                       # arrived yesterday, arriving today
 			with on(day):
 				self.assertFalse(room()["can_cancel"], day)
-				with self.assertRaisesRegex(frappe.ValidationError, "no longer be changed online"):
+				with self.assertRaisesRegex(frappe.ValidationError, "no longer be changed online") as cm:
 					public.manage_cancel(token=token, reservation=res)
+				# the code of a cancellation too late, not of a change refused (same English text, G-70b)
+				self.assertEqual((cm.exception.code, frappe.local.response["tex_code"]),
+				                 ("CANCEL_TOO_LATE", "CANCEL_TOO_LATE"))
 		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
 		with on(arrival):                                                  # the change flow is still open
 			self.assertTrue(room()["can_change"])

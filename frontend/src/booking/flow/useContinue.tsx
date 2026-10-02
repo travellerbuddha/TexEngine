@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react"
 import { useI18n } from "../i18n"
 import { extraAnchor, refusalText } from "../lib/extras"
+import { refusalMessage } from "../lib/refusals"
 import { Button } from "../ui/controls"
 import { Alert } from "../ui/feedback"
 import { countryNames, regionDisplay } from "../../lib/residency"
@@ -57,7 +58,8 @@ export function useBackToExtras() {
 }
 
 export function FlowErrorAlert() {
-  const { t, locale } = useI18n()
+  const i18n = useI18n()
+  const { t, locale } = i18n
   const b = useBooking()
   const ref = useRef<HTMLDivElement>(null)
   const e = b.flowError
@@ -95,7 +97,8 @@ export function FlowErrorAlert() {
 
   const roomLabel = (err: FlowError) => (err.room !== undefined && b.criteria.rooms.length > 1 ? `${t("guests.room", { n: err.room + 1 })}: ` : "")
   let title = t("errors.genericTitle")
-  let body: string = e.message || t("errors.generic")
+  // the refusal's own text in the guest's language (G-70b), else the server's message
+  let body: string = refusalMessage(i18n, e)
   let action = (
     <Button size="sm" onClick={() => b.setFlowError(null)} variant="secondary">
       {t("common.dismiss")}
@@ -112,7 +115,7 @@ export function FlowErrorAlert() {
   } else if (e.kind === "extra_sold_out") {
     title = t("errors.extraSoldOutTitle")
     // every room alone still gets its extras, the rooms together need more than is left
-    body = [e.message, t(b.extrasClash ? "errors.extraSoldOutTogether" : "errors.extraSoldOutBody")].filter(Boolean).join(" ")
+    body = [e.code || e.message ? refusalMessage(i18n, e) : "", t(b.extrasClash ? "errors.extraSoldOutTogether" : "errors.extraSoldOutBody")].filter(Boolean).join(" ")
     if (b.step !== "extras" && b.hasExtras)
       action = (
         <Button size="sm" onClick={() => void backToExtras(e)} busy={b.pending}>
@@ -147,6 +150,22 @@ export function FlowErrorAlert() {
           {t("details.standardPrices")}
         </Button>
       )
+  } else if (e.kind === "retry") {
+    // the hotel or a payment is busy (G-70b): the same step again in a moment
+    title = t("errors.retryTitle")
+    body = e.code ? refusalMessage(i18n, e) : t("errors.retryBody")
+  } else if (e.code === "HOLD_EXPIRED_TRANSFER") {
+    // too late for a bank transfer, the rooms still held: the guest may pay by card (its own text says so)
+    title = t("errors.holdExpiredTitle")
+  } else if (e.kind === "hold_expired") {
+    // the time to pay is over and the rooms were given back: search again
+    title = t("errors.holdExpiredTitle")
+    body = t("errors.holdExpiredBody")
+    action = (
+      <Button size="sm" onClick={research} busy={b.pending}>
+        {t("errors.seeAvailable")}
+      </Button>
+    )
   } else if (e.kind === "rate_limit") {
     title = t("errors.rateLimitTitle")
     body = t("errors.rateLimitBody")

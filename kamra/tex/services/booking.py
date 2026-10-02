@@ -33,6 +33,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, audit_refusal, log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import holds, quoting
+from kamra.tex.services.refusals import refusal
 
 SOURCE_BY_CHANNEL = {"DIRECT_WEB": "Website", "CALL_CENTER": "Phone", "OTA": "OTA", "META": "Website"}
 CREATED_VIA = {"DIRECT_WEB": "Booking Engine", "META": "Booking Engine", "CALL_CENTER": "Call Center",
@@ -69,18 +70,18 @@ def new_manage_token() -> tuple[str, str]:
 def _clean_guest(g: dict) -> dict:
 	g = {k: (v.strip() if isinstance(v, str) else v) for k, v in (g or {}).items()}
 	if not g.get("first_name"):
-		frappe.throw(_("Guest first name is required."))
+		frappe.throw(_("Guest first name is required."), refusal("GUEST_FIRST_NAME_REQUIRED"))
 	if not g.get("last_name"):
-		frappe.throw(_("Guest last name is required."))
+		frappe.throw(_("Guest last name is required."), refusal("GUEST_LAST_NAME_REQUIRED"))
 	if not (g.get("email") or g.get("phone")):
-		frappe.throw(_("An email or phone number is required."))
+		frappe.throw(_("An email or phone number is required."), refusal("GUEST_CONTACT_REQUIRED"))
 	if g.get("email"):
 		g["email"] = g["email"].lower()
 		if "@" not in g["email"] or len(g["email"]) > 140:
-			frappe.throw(_("Invalid email address."))
+			frappe.throw(_("Invalid email address."), refusal("GUEST_EMAIL_INVALID"))
 	for f in ("first_name", "last_name"):
 		if len(g[f]) > 80:
-			frappe.throw(_("Name is too long."))
+			frappe.throw(_("Name is too long."), refusal("GUEST_NAME_TOO_LONG"))
 	# a country of residence or nationality given as an ISO code (the Call Center, the booking engine) or a Country
 	# name: the profile keeps Frappe's Country name (``tex_country`` is a Link). An unknown country is not kept; a
 	# nationality that names no country stays as typed (the profile's field is free text)
@@ -227,7 +228,7 @@ def _fixed(amount, policy: dict | None, result: dict) -> D:
 		return quantize(policy_money.fixed_in_sell(amount, policy, result), result["currency"])
 	except PricingError as e:
 		# a fixed amount in a third currency: ``POLICY_CURRENCY`` keeps it from being published; fail closed
-		frappe.throw(_("This rate's fixed amount cannot be converted: {0}").format(str(e)))
+		frappe.throw(_("This rate's fixed amount cannot be converted: {0}").format(str(e)), refusal("RATE_UNAVAILABLE"))
 
 
 def _fixed_fx(amount, policy: dict | None, result: dict) -> dict | None:
@@ -275,7 +276,7 @@ def amount_due_now(result: dict, method: str | None, *, fixed_share: D | None = 
 	policy = (result.get("rate_plan") or {}).get("payment_policy") or {"deposit_type": "FULL"}
 	if method == "Pay at Hotel":
 		if not policy.get("allow_pay_at_hotel") and policy.get("deposit_type") not in ("NONE",):
-			frappe.throw(_("This rate cannot be paid at the hotel."))
+			frappe.throw(_("This rate cannot be paid at the hotel."), refusal("PAY_AT_HOTEL_NOT_ALLOWED"))
 		return ZERO, "Pay at Hotel"
 	kind = policy.get("deposit_type") or "FULL"
 	v = D(policy.get("deposit_value"))
@@ -360,10 +361,10 @@ def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
 	``quoting.load_quote`` results (callers check access first)."""
 	props = {row.property for row, _req, _res in loaded}
 	if len(props) != 1:
-		frappe.throw(_("All rooms of a booking must be at the same hotel."))
+		frappe.throw(_("All rooms of a booking must be at the same hotel."), refusal("SEARCH_AGAIN"))
 	keys = {(result["currency"], req.get("market"), req.get("channel")) for _row, req, result in loaded}
 	if len(keys) != 1:
-		frappe.throw(_("All rooms must share currency, market and channel."))
+		frappe.throw(_("All rooms must share currency, market and channel."), refusal("SEARCH_AGAIN"))
 	ccy, market, channel = keys.pop()
 	rooms = []
 	total = ZERO
@@ -464,7 +465,7 @@ def check_booking_basket(rooms: list[tuple[dict, dict]]) -> None:
 	for req, _result in rooms:
 		recorded = req.get("booking_basket")
 		if recorded not in (None, "") and (D(recorded) != actual or int(req.get("booking_rooms") or 0) != len(rooms)):
-			frappe.throw(_(BASKET_NOT_TOGETHER))
+			frappe.throw(_(BASKET_NOT_TOGETHER), refusal("BASKET_NOT_TOGETHER"))
 	if len(rooms) < 2:
 		return
 	covered = engine.eligible_baskets((room_basket(r), [t["promo_id"] for t in basket_terms(r)]) for _q, r in rooms)
@@ -474,7 +475,7 @@ def check_booking_basket(rooms: list[tuple[dict, dict]]) -> None:
 		for p in result.get("promotions") or []:
 			if not p.get("applied") and p.get("rule") == "MIN_BASKET" and p.get("minimum") not in (None, "") \
 					and D(p["minimum"]) <= covered.get(p["promo_id"], (actual, 0))[0]:
-				frappe.throw(_(BASKET_NOT_TOGETHER))
+				frappe.throw(_(BASKET_NOT_TOGETHER), refusal("BASKET_NOT_TOGETHER"))
 
 
 NOT_LIVE = ("Cancelled", "No Show")
@@ -666,14 +667,14 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 				scope.require("reservation.view", done.property)
 			return booking_summary(done.name, replay=True)
 	if not quote_ids:
-		frappe.throw(_("Select at least one room."))
+		frappe.throw(_("Select at least one room."), refusal("ROOMS_COUNT", max=quoting.MAX_ROOMS))
 	if len(quote_ids) > quoting.MAX_ROOMS:
-		frappe.throw(_("Too many rooms."))
+		frappe.throw(_("Too many rooms."), refusal("ROOMS_COUNT", max=quoting.MAX_ROOMS))
 	# an unknown method is refused before any quote is locked, never stored as it came (O-15); none (staff API
 	# only: the screen always names one) keeps today's way: a deposit is due, held as a card is
 	payment_method = payment_method or None
 	if payment_method and payment_method not in (*METHODS, *((holds.LINK,) if staff else ())):
-		frappe.throw(_("This payment method is not available."))
+		frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
 	guest = _clean_guest(guest)
 	now = now_datetime()
 
@@ -683,33 +684,33 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	# duplicated id is still refused below (``room_index``)
 	for qid in sorted(quote_ids):
 		row, req, result = quoting.load_quote(qid, for_update=True)
-		problem = quoting.quote_is_usable(row)
-		if problem:
-			frappe.throw(problem)
+		why = quoting.quote_refusal(row)
+		if why:
+			frappe.throw(str(why), why)
 		rows.append((row, req, result))
 	props = {r[0].property for r in rows}
 	if len(props) != 1:
-		frappe.throw(_("All rooms of a booking must be at the same hotel."))
+		frappe.throw(_("All rooms of a booking must be at the same hotel."), refusal("SEARCH_AGAIN"))
 	# room 1 of the search carries the booking-level terms (per-booking extras, fixed
 	# booking discounts), so it is booked exactly once, with rooms of the same search (ADR-029)
 	indexes = [int(r[1].get("room_index") or 0) for r in rows]
 	if indexes.count(0) != 1 or len(set(indexes)) != len(indexes):
 		frappe.throw(_("The rooms of one booking must come from one search, including its first room. "
-		               "Please search again."))
+		               "Please search again."), refusal("SEARCH_AGAIN"))
 	rows.sort(key=lambda r: int(r[1].get("room_index") or 0))
 	property = props.pop()
 	currencies = {r[2]["currency"] for r in rows}
 	markets = {r[1]["market"] for r in rows}
 	channels = {r[1]["channel"] for r in rows}
 	if len(currencies) != 1 or len(markets) != 1 or len(channels) != 1:
-		frappe.throw(_("All rooms must share currency, market and channel."))
+		frappe.throw(_("All rooms must share currency, market and channel."), refusal("SEARCH_AGAIN"))
 	currency, market, channel = currencies.pop(), markets.pop(), channels.pop()
 
 	if booking_site or not staff:
 		# a booking site sells on a web channel only, whoever books on it: a guest, or a signed-in
 		# staff member at the price any guest gets there (ADR-050, review)
 		if channel not in WEB_CHANNELS:
-			frappe.throw(_("Not permitted."), frappe.PermissionError)
+			frappe.throw(_("Not permitted."), refusal("SITE_CLOSED", frappe.PermissionError))
 	if staff:
 		scope.require("reservation.create", property)
 		if not booking_site:
@@ -726,12 +727,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		from kamra.tex.payments import service as pay
 
 		if not pay.method_offered(property, payment_method, market=market, currency=currency, channel=channel):
-			frappe.throw(_("This payment method is not available."))
+			frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
 	# a quote of a room type disabled since it was made no longer books (LO-03, ADR-048)
 	for rt in sorted({r[1]["room_type"] for r in rows}):
 		if frappe.db.get_value("Room Type", rt, "disabled"):
-			from kamra.tex.services.refusals import refusal
-
 			frappe.throw(_("{0} is no longer sold — please search again.").format(
 				frappe.db.get_value("Room Type", rt, "room_type_name") or rt), refusal("ROOM_NOT_SOLD"))
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
@@ -758,9 +757,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		                                          locking=True)
 		for d in per_day:
 			if d.available < need[(pool, d.day)]:
-				frappe.throw(_("Sorry — {0} has just sold out for {1}.").format(
-					frappe.db.get_value("Room Type", req["room_type"], "room_type_name") or req["room_type"],
-					d.day.isoformat()), title=_("Sold out"))
+				room = frappe.db.get_value("Room Type", req["room_type"], "room_type_name") or req["room_type"]
+				frappe.throw(_("Sorry — {0} has just sold out for {1}.").format(room, d.day.isoformat()),
+				             refusal("SOLD_OUT", room=room, date=d.day.isoformat()), title=_("Sold out"))
 	cells = avail.restriction_cells(property, min(getdate(r[1]["check_in"]) for r in rows),
 	                                max(getdate(r[1]["check_out"]) for r in rows))
 	for _row, req, result in rows:
@@ -768,7 +767,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		v = avail.check_restrictions(property, sc, getdate(req["check_in"]), getdate(req["check_out"]), now.date(),
 		                             cells)
 		if v:
-			frappe.throw(_("This stay is no longer bookable: {0}").format(v[0].message))
+			frappe.throw(_("This stay is no longer bookable: {0}").format(v[0].message),
+			             refusal("STAY_RESTRICTED", reason=v[0].code))
 	check_booking_basket([(req, result) for _row, req, result in rows])
 
 	# ── limited extras: every room's units together, re-checked under the day locks (G-19) ──
@@ -788,7 +788,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	if not staff and payment_method == holds.TRANSFER and due_now > 0 and len(rows) > holds.WEB_TRANSFER_MAX_ROOMS:
 		# one visitor must not lock many rooms for a day by choosing a transfer (C2, user decision)
 		frappe.throw(_("A bank transfer booking made online can hold at most {0} rooms. Please pay by card, or "
-		               "contact the hotel.").format(holds.WEB_TRANSFER_MAX_ROOMS))
+		               "contact the hotel.").format(holds.WEB_TRANSFER_MAX_ROOMS),
+		             refusal("WEB_TRANSFER_ROOMS", max=holds.WEB_TRANSFER_MAX_ROOMS))
 	if staff and confirm_without_payment and due_now > 0:
 		# confirming before the deposit arrives is a credit decision, not an agent default
 		scope.require("reservation.confirm_unpaid", property)
@@ -999,12 +1000,14 @@ def _check_redemption_limits(root: str, name: str, gkey: str | None, *, exclude_
 			{"p": root, "ex": exclude_booking, "g": guest_key})[0][0])
 
 	if limit and used() >= int(limit):
-		frappe.throw(_("Promotion {0} has just been fully redeemed.").format(name))
+		frappe.throw(_("Promotion {0} has just been fully redeemed.").format(name), refusal("PROMO_EXHAUSTED", promotion=name))
 	if per_guest:
 		if not gkey:
-			frappe.throw(_("Promotion {0} needs the guest's e-mail address or phone number.").format(name))
+			frappe.throw(_("Promotion {0} needs the guest's e-mail address or phone number.").format(name),
+			             refusal("PROMO_NEEDS_CONTACT", promotion=name))
 		if used(gkey) >= int(per_guest):
-			frappe.throw(_("Promotion {0} has already been used by this guest.").format(name))
+			frappe.throw(_("Promotion {0} has already been used by this guest.").format(name),
+			             refusal("PROMO_ALREADY_USED", promotion=name))
 
 
 # ─── confirm / payments ──────────────────────────────────────────────────
@@ -1201,6 +1204,13 @@ def channel_of(booking: str | None) -> dict | None:
 	return {"connection": row.channel_connection, "label": label or row.channel_connection, "ref": row.external_ref}
 
 
+def sold_by(booking: str | None) -> dict:
+	"""A refusal's params naming who sold a channel's booking (``CHANNEL_BOOKING``, G-70b): its label; {} for any
+	other booking."""
+	ch = channel_of(booking)
+	return {"sold_by": ch["label"]} if ch else {}
+
+
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
                        source: str = "Desk", _guest_authorized: bool = False, channel_override: bool = False) -> dict:
 	"""``_guest_authorized`` is set only by the self-service API after it verified the
@@ -1221,16 +1231,18 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	if not _guest_authorized:
 		scope.require("reservation.cancel", res.property)
 	elif waive_penalty:
-		frappe.throw(_("Guests cannot waive cancellation fees."), frappe.PermissionError)
+		frappe.throw(_("Guests cannot waive cancellation fees."), refusal("INVALID_REQUEST", frappe.PermissionError))
 	sold_by = channel_of(res.tex_booking) if source != "Channel" else None
 	if sold_by:
 		if not channel_override:
-			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["label"]))
+			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["label"]),
+			             refusal("CHANNEL_BOOKING", sold_by=sold_by["label"]))
 		scope.require("channel.manage", res.property)
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
-		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status))
+		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status),
+		             refusal("ROOM_NOT_ACTIVE", status=res.status))
 	if not (reason or "").strip():
-		frappe.throw(_("A cancellation reason is required."))
+		frappe.throw(_("A cancellation reason is required."), refusal("INVALID_REQUEST"))
 	if sold_by:
 		audit("reservation.channel_cancel_override", reference_doctype="Reservation", reference_name=res.name,
 		      property=res.property, new={**sold_by, "warning": "the channel may still sell the room"}, reason=reason)

@@ -18,13 +18,15 @@ from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
+from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.pricing import versions
-from kamra.tex.pricing.extras import guest_safe
+from kamra.tex.pricing.extras import guest_reason, guest_safe
 from kamra.tex.refusal_codes import MARKET_REFUSALS
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, refusals, sites
+from kamra.tex.services.refusals import refusal
 from kamra.tex.services.txn import retry_on_deadlock, undo_step
 
 
@@ -55,7 +57,7 @@ def _charge_rooms(n: int) -> None:
 		frappe.cache.setex(key, WRITE_LIMIT["seconds"], 0)
 	if frappe.cache.incrby(key, n) > WRITE_LIMIT["limit"]():
 		frappe.throw(_("You hit the rate limit because of too many requests. Please try after sometime."),
-		             frappe.RateLimitExceededError)
+		             refusal("RATE_LIMITED", frappe.RateLimitExceededError))
 
 
 # ─── site ────────────────────────────────────────────────────────────────
@@ -69,14 +71,14 @@ def _site(slug: str | None = None, domain: str | None = None):
 		d = domain.strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
 		name = frappe.db.get_value("TEX Booking Domain", {"domain": d, "verified": 1}, "parent")
 	if not name:
-		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
+		frappe.throw(_("Booking site not found."), refusal("SITE_NOT_FOUND", frappe.DoesNotExistError))
 	site = frappe.get_cached_doc("TEX Booking Site", name)
 	if not site.enabled:
-		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
+		frappe.throw(_("Booking site not found."), refusal("SITE_NOT_FOUND", frappe.DoesNotExistError))
 	# a hotel's own booking host answers for its site only (G-21)
 	pinned = sites.pinned_slug()
 	if pinned and pinned != site.site_slug:
-		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
+		frappe.throw(_("Booking site not found."), refusal("SITE_NOT_FOUND", frappe.DoesNotExistError))
 	return site
 
 
@@ -92,7 +94,7 @@ def _channel(site) -> str:
 	review) sells nothing: its prices are not the public's."""
 	channel = site.sales_channel or "DIRECT_WEB"
 	if channel not in WEB_CHANNELS:
-		frappe.throw(_("This booking site is not open for online booking."), frappe.PermissionError)
+		frappe.throw(_("This booking site is not open for online booking."), refusal("SITE_CLOSED", frappe.PermissionError))
 	return channel
 
 
@@ -147,7 +149,6 @@ def site(slug: str | None = None, domain: str | None = None):
 		"slug": s.site_slug, "name": s.site_name, "hotels": hotels, "group": bool(s.hotel_group and not s.property),
 		"default_language": s.default_language or "en", "languages": _csv(s.languages) or ["en"],
 		"default_currency": s.default_currency, "currencies": _csv(s.currencies),
-		"default_market": s.default_market,
 		"branding": {"logo": s.logo, "primary": s.primary_color, "accent": s.accent_color,
 		             "background": s.background_color, "font": s.font_family, "radius": s.radius,
 		             "card_radius": s.card_radius, "button_style": s.button_style, "header": s.header_layout,
@@ -208,7 +209,10 @@ def _market(site, market: str | None, country: str | None) -> versions.MarketDef
 		                                     default=site.default_market)
 	except versions.MarketResolutionError as e:
 		params = {"market": market.strip().upper()} if e.code == "MARKET_NOT_ALLOWED" and market else {}
-		frappe.throw(str(e), MarketRefused(code=e.code, params=params), title=_("Market"))
+		# the markets a link country belongs to are never named to a guest (G-71); the other texts name only the link's
+		frappe.throw(_("The country in your link belongs to more than one offer: choose one.")
+		             if e.code == "MARKET_AMBIGUOUS" else str(e), MarketRefused(code=e.code, params=params),
+		             title=_("Market"))
 	m = next(m for m in markets if m.code == code)
 	# the link's own market (named, or its country's) for a country outside it; a site's residents-only default is
 	# priced (searching again without the link would only come back to it) and the booking decides
@@ -226,6 +230,63 @@ def residency(market: versions.MarketDef | str | None) -> dict | None:
 	return {"countries": sorted(market.countries)} if market and market.residency_required else None
 
 
+# ─── what a guest answer leaves out (G-71, R-52, R-53) ──────────────────
+
+# a reason by its code, the room it is about and the limit it names (MAX_ADULTS / MAX_CHILDREN / MAX_OCCUPANTS)
+_REASON_LIMITS = ("max_adults", "max_children", "max_occupants")
+# what the booking app shows of a promotion
+_PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added")
+
+
+def _guest_reasons(reasons) -> list[dict]:
+	"""Reasons as codes, the room each is about and the limit it names; never the engine's text, which may name
+	the contract or its dates ("STD is not sold under SUMMER", "contract stays end on …")."""
+	out = []
+	for r in reasons or []:
+		if isinstance(r, dict):
+			out.append({k: r[k] for k in ("code", "room_index") if k in r}
+			           | {k: r[k] for k in _REASON_LIMITS if isinstance(r.get(k), int)})
+	return out
+
+
+def _guest_quote(q: dict | None) -> dict | None:
+	"""A room quote as the guest sees it: no contract block (id, code, version, payload hash, market), no request
+	(market, channel, sale time), no engine version; promotions by name and amount; reasons by code."""
+	if not isinstance(q, dict):
+		return q
+	for k in ("contract", "request", "engine_version"):
+		q.pop(k, None)
+	if isinstance(q.get("promotions"), list):
+		q["promotions"] = [{k: pr.get(k) for k in _PROMOTION_KEYS} for pr in q["promotions"] if isinstance(pr, dict)]
+	if "reasons" in q:
+		q["reasons"] = _guest_reasons(q["reasons"])
+	for e in q.get("extras") or []:
+		# "not available for market DE / on channel … / with room …": only that it is not available
+		if isinstance(e, dict):
+			e["reason"] = guest_reason(e.get("reason"))
+	return q
+
+
+def _guest_offer(o: dict) -> dict:
+	"""A search offer as the guest sees it: no contract, contract code, version or market."""
+	for k in ("contract", "contract_code", "version", "market"):
+		o.pop(k, None)
+	for r in o.get("rooms") or []:
+		_guest_quote(r.get("quote"))
+	for k in ("reasons", "room_reasons"):
+		if k in o:
+			o[k] = _guest_reasons(o[k])
+	return o
+
+
+def _guest_answer(out: dict) -> dict:
+	"""A quote answer (``create_quote``, or one room of ``create_quotes``) as the guest sees it."""
+	_guest_quote(out.get("quote"))
+	if "reasons" in out:
+		out["reasons"] = _guest_reasons(out["reasons"])
+	return out
+
+
 # ─── search / quote / book ───────────────────────────────────────────────
 
 
@@ -239,28 +300,27 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	props = _site_properties(s)
 	if hotel:
 		if hotel not in props:
-			frappe.throw(_("Hotel not found."))
+			frappe.throw(_("Hotel not found."), refusal("HOTEL_NOT_FOUND"))
 		props = [hotel]
 	allowed_ccy = _csv(s.currencies)
 	if currency and allowed_ccy and currency not in allowed_ccy:
-		frappe.throw(_("Currency not offered."))
+		frappe.throw(_("Currency not offered."), refusal("CURRENCY_NOT_OFFERED"))
 	m = _market(s, market, country)
 	mkt = m.code
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
 	                     channel=_channel(s), currency=currency or s.default_currency or None,
 	                     promo_codes=[promo_code] if promo_code else (), internal=False)
-	for p in res["properties"]:
-		p.pop("messages", None)
-		for o in p["unavailable"]:
-			o.pop("contract", None)
-			o.pop("version", None)
-		for o in p["offers"]:
-			o.pop("contract", None)
-			o.pop("version", None)
-	res["market"] = mkt
 	# a residents-only market's prices: checkout asks the guest's country of residence (O-8)
 	res["residency"] = residency(m)
 	content.Localizer(content.guest_language()).search(res)
+	# after the localizer, which reads each quote's request (room type, board): the guest is not told the contract
+	# that priced an offer, its version, the market or the channel (G-71)
+	res.pop("market", None)
+	res.pop("channel", None)
+	for p in res["properties"]:
+		p.pop("messages", None)
+		for o in p["offers"] + p["unavailable"]:
+			_guest_offer(o)
 	# the party as ages on arrival: a child's date of birth never reaches analytics (G-52 review)
 	parties = quoting.parse_rooms(rooms, arrival=getdate(check_in))
 	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out,
@@ -279,10 +339,10 @@ LOW_STOCK = 3
 def extras_availability(site: str, hotel: str, check_in: str, check_out: str, session_id: str | None = None):
 	s = _site(site)
 	if hotel not in _site_properties(s):
-		frappe.throw(_("Invalid hotel."))
+		frappe.throw(_("Invalid hotel."), refusal("HOTEL_NOT_FOUND"))
 	ci, co = getdate(check_in), getdate(check_out)
 	if co <= ci or (co - ci).days > 60:
-		frappe.throw(_("Invalid dates."))
+		frappe.throw(_("Invalid dates."), refusal("DATES_INVALID"))
 	from kamra.tex.availability import extras_repository as xinv
 	from kamra.tex.commercial.context import listed_extras
 
@@ -302,13 +362,13 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	channel = _channel(s)
 	offer = quoting.verify(offer_key)
 	if offer["property"] not in _site_properties(s) or offer["channel"] != channel:
-		frappe.throw(_("Invalid offer."))
+		frappe.throw(_("Invalid offer."), refusal("OFFER_INVALID"))
 	from kamra.tex.commercial.context import listed_extras
 
 	online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
 	requested = quoting.extra_items(extras)
 	if any(e["code"].upper() not in online for e in requested):
-		frappe.throw(_("This extra cannot be booked online."))
+		frappe.throw(_("This extra cannot be booked online."), refusal("EXTRA_NOT_ONLINE"))
 	out = quoting.create_quote(offer_key, extras=requested,
 	                           promo_codes=[promo_code] if promo_code else None, session_id=session_id)
 	if out.get("quote"):
@@ -316,7 +376,7 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	if out.get("ok"):
 		_track(s, session_id, "quote", {"quote": out["quote_id"], "total": out["quote"]["totals"]["total"],
 		                                "currency": out["quote"]["currency"]})
-	return guest_safe(out)                            # guests never see how many are left (G-19)
+	return guest_safe(_guest_answer(out))             # guests never see how many are left (G-19)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -340,20 +400,20 @@ def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str
 	for r in items:
 		offer = quoting.verify(r["offer_key"])
 		if offer["property"] not in props or offer["channel"] != channel:
-			frappe.throw(_("Invalid offer."))
+			frappe.throw(_("Invalid offer."), refusal("OFFER_INVALID"))
 		online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
 		if any(e["code"].upper() not in online for e in r["extras"]):
-			frappe.throw(_("This extra cannot be booked online."))
+			frappe.throw(_("This extra cannot be booked online."), refusal("EXTRA_NOT_ONLINE"))
 	out = quoting.create_quotes(items, promo_codes=[promo_code] if promo_code else None, session_id=session_id)
 	loc = content.Localizer(content.guest_language())
 	rooms_out = []
 	for r in out["rooms"]:
 		if r.get("quote"):
 			loc.quote(r["quote"]["request"]["property"], r["quote"])
-		rooms_out.append(guest_safe(r))              # guests never see how many are left (G-19)
 		if r.get("ok"):
 			_track(s, session_id, "quote", {"quote": r["quote_id"], "total": r["quote"]["totals"]["total"],
 			                                "currency": r["quote"]["currency"]})
+		rooms_out.append(guest_safe(_guest_answer(r)))   # guests never see how many are left (G-19)
 	return {"ok": out["ok"], "rooms": rooms_out}
 
 
@@ -365,15 +425,16 @@ def _site_quotes(s, quote_ids, session_id: str | None) -> list[str]:
 	"""Quote ids of this site's hotels and channel, made in the caller's session."""
 	ids = [str(q) for q in (parse(quote_ids, []) or [])]
 	if not ids or len(ids) > quoting.MAX_ROOMS:
-		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
+		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS),
+		             refusal("ROOMS_COUNT", max=quoting.MAX_ROOMS))
 	props = set(_site_properties(s))
 	session_hash = _session_hash(session_id)
 	for qid in ids:
 		row = frappe.db.get_value("TEX Quote", qid, ["property", "session_hash", "sales_channel"], as_dict=True)
 		if not row or row.property not in props or row.sales_channel != _channel(s):
-			frappe.throw(_("Invalid quote."))
+			frappe.throw(_("Invalid quote."), refusal("QUOTE_INVALID"))
 		if row.session_hash and row.session_hash != session_hash:
-			frappe.throw(_("Invalid quote."))
+			frappe.throw(_("Invalid quote."), refusal("QUOTE_INVALID"))
 	return ids
 
 
@@ -459,7 +520,7 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 				s, result, due=due, method=method, provider_account=provider_account, language=language,
 				customer={"name": b.booker_name, "email": b.booker_email, "phone": b.booker_phone},
 				return_url=return_url, replay=True)
-		return result
+		return _guest_summary(result)
 	due = D(result["due_now"])
 	if due > 0:
 		_track(s, session_id, "payment_started", {"booking": result["booking"]})
@@ -471,7 +532,15 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 			return_url=return_url)
 	else:
 		_track(s, session_id, "booked", {"booking": result["booking"], "total": result["total"]})
-	return result
+	return _guest_summary(result)
+
+
+def _guest_summary(summary: dict) -> dict:
+	"""A booking summary as the guest sees it: not the market it was priced in nor the channel (G-71); read only
+	once the payment was started (its methods are the market's and the channel's)."""
+	summary.pop("market", None)
+	summary.pop("channel", None)
+	return summary
 
 
 def _start_booking_payment(s, result: dict, *, due, method: str, provider_account: str | None,
@@ -487,7 +556,7 @@ def _start_booking_payment(s, result: dict, *, due, method: str, provider_accoun
 	if not chosen or not chosen["provider_account"]:
 		if replay:
 			return None
-		frappe.throw(_("This payment method is not available."))
+		frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
 	key = f"book:{result['booking']}:{to_str(due)}"
 	if replay:
 		# restart the original attempt only while it is still open; after a failed or
@@ -561,14 +630,14 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 	due = (from_db(b.amount_due_now, ccy) if b.status in ("Pending Payment", "Held") else from_db(b.total_amount, ccy))
 	due -= paid
 	if due <= 0:
-		frappe.throw(_("Nothing is due on this booking."))
+		frappe.throw(_("Nothing is due on this booking."), refusal("NOTHING_DUE"))
 	if b.status == "Cancelled":
-		frappe.throw(_("This booking is cancelled."))
+		frappe.throw(_("This booking is cancelled."), refusal("BOOKING_CANCELLED"))
 	methods = pay.payment_methods(b.property, market=b.market, currency=ccy, channel=b.sales_channel)
 	chosen = next((m for m in methods if m["method"] == payment_method and m["provider_account"]
 	               and (not provider_account or m["provider_account"] == provider_account)), None)
 	if not chosen:
-		frappe.throw(_("This payment method is not available."))
+		frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
 	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
 	default_return = sites.guest_url(site, "manage") if site else sites.platform_url("/book")
 	attempt = frappe.db.count("TEX Payment Transaction", {"booking": b.name, "txn_type": "Charge"}) + 1
@@ -584,6 +653,11 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 # ─── payment callbacks & links ───────────────────────────────────────────
 
 
+class SignatureRefused(ProviderError, frappe.ValidationError):
+	"""A sandbox payment page's answer without a valid signature (G-10): a coded 417 (G-70b), and still the
+	``ProviderError`` it always was for whoever catches one."""
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60)
 @refusals.coded
@@ -593,15 +667,14 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 	import hmac
 
 	from kamra.tex.payments import service as pay
-	from kamra.tex.payments.providers.base import ProviderError
 	from kamra.tex.payments.providers.simple import mock_signature
 
 	if frappe.db.get_value("TEX Payment Transaction", transaction, "provider") != "Mock":
-		frappe.throw(_("Not a sandbox payment."))
+		frappe.throw(_("Not a sandbox payment."), refusal("SANDBOX_ONLY"))
 	# the signature first: a replay of a finished payment tells nothing to whoever cannot sign it (G-10)
 	if outcome not in ("success", "fail") or not hmac.compare_digest(
 			mock_signature(pay._mock_secret(), transaction, outcome), str(sig or "")):
-		raise ProviderError("invalid mock signature")
+		frappe.throw(_("Invalid payment signature."), refusal("PAYMENT_SIGNATURE_INVALID", SignatureRefused))
 	from kamra.tex.security.audit import audit_source
 
 	# the sandbox payment page stands in for a gateway's page: its answer is a gateway return (G-74)
@@ -629,6 +702,10 @@ def payment_link(token: str):
 	        "late_payment": late_payments.guest_notice(link.booking)}
 
 
+# a payment link that no longer takes payments, by its status (any other: LINK_CLOSED)
+LINK_STATUS_CODES = {"Expired": "LINK_EXPIRED", "Paid": "LINK_PAID", "Cancelled": "LINK_CANCELLED"}
+
+
 def _link_due(link):
 	"""What the link asks now, under its lock. One start at a time per link (G-68): a second,
 	simultaneous start is told at once that a payment is being started, rather than waiting behind the
@@ -638,12 +715,14 @@ def _link_due(link):
 
 	now = pay.lock_link(link.name, nowait=True)
 	if now.status not in ("Active", "Partially Paid"):
-		frappe.throw(_("This payment link is {0}.").format(now.status.lower()))
+		code = LINK_STATUS_CODES.get(now.status)
+		frappe.throw(_("This payment link is {0}.").format(now.status.lower()),
+		             refusal(code) if code else refusal("LINK_CLOSED", status=now.status))
 	due = from_db(now.amount, now.currency) - from_db(now.paid_amount, now.currency)
 	why = pay.link_refusal(link.booking, due, now.currency, guest=True) if link.booking else None
 	if why:
 		# its booking takes no more money, or less than it asks: never 200 paid for 100 (E4)
-		frappe.throw(why)
+		frappe.throw(str(why), why)
 	return due
 
 
@@ -661,12 +740,12 @@ def pay_link(token: str, provider_account: str | None = None):
 	if link.provider_account:
 		# the hotel fixed the gateway for this link; the guest cannot choose another
 		if provider_account and provider_account != link.provider_account:
-			frappe.throw(_("This payment method is not available."))
+			frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
 		account = link.provider_account
 	else:
 		account = provider_account or (sorted(methods)[0] if len(methods) == 1 else None)
 		if not account or account not in methods:
-			frappe.throw(_("No card payment is configured for this link."))
+			frappe.throw(_("No card payment is configured for this link."), refusal("LINK_NO_CARD"))
 	for attempt in (1, 2):
 		if attempt == 2:
 			# the first attempt's failed checkout was put on record, which ended the transaction and its
@@ -805,7 +884,7 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 @refusals.coded
 def track(site: str, session_id: str, event: str, payload=None):
 	if event not in BROWSER_EVENT_FIELDS:
-		frappe.throw(_("Unknown event."))
+		frappe.throw(_("Unknown event."), refusal("INVALID_REQUEST"))
 	s = _site(site)
 	_track(s, session_id, event, _browser_payload(s, session_id, event, parse(payload, {})))
 	return {"ok": True}
@@ -816,20 +895,20 @@ def track(site: str, session_id: str, event: str, payload=None):
 
 def _booking_by_token(token: str):
 	if not token or len(token) < 20 or len(token) > 1000:
-		frappe.throw(_("Invalid link."), frappe.PermissionError)
+		frappe.throw(_("Invalid link."), refusal("MANAGE_LINK_INVALID", frappe.PermissionError))
 	if "." in token:   # manage tokens are url-safe base64 (no dots); resume tokens are signed
 		try:
 			name = quoting.verify(token, kind="booking-resume")["booking"]
 		except frappe.ValidationError:
 			frappe.clear_messages()
-			frappe.throw(_("Invalid link."), frappe.PermissionError)
+			frappe.throw(_("Invalid link."), refusal("MANAGE_LINK_INVALID", frappe.PermissionError))
 	else:
 		name = frappe.db.get_value("TEX Booking", {"manage_token_hash": booking_svc.token_hash(token)})
 	if not name:
-		frappe.throw(_("Invalid link."), frappe.PermissionError)
+		frappe.throw(_("Invalid link."), refusal("MANAGE_LINK_INVALID", frappe.PermissionError))
 	b = frappe.get_doc("TEX Booking", name)
 	if b.manage_token_expires and get_datetime(b.manage_token_expires) < now_datetime():
-		frappe.throw(_("This link has expired."), frappe.PermissionError)
+		frappe.throw(_("This link has expired."), refusal("MANAGE_LINK_EXPIRED", frappe.PermissionError))
 	return b
 
 
@@ -859,7 +938,9 @@ def _basket_view(claw: dict | None) -> dict | None:
 
 
 def _guest_booking(b) -> dict:
-	summary = booking_svc.booking_summary(b.name)
+	summary = _guest_summary(booking_svc.booking_summary(b.name))
+	# a channel's booking is changed and cancelled on the channel (D-11, Y-8; LO-12): its page offers neither
+	sold_by = booking_svc.channel_of(b.name)
 	loc = content.Localizer(content.guest_language() or content.guest_language(b.language))
 	rooms = []
 	for r in summary["rooms"]:
@@ -877,9 +958,9 @@ def _guest_booking(b) -> dict:
 		              # in the fee: the discount the other rooms keep once this one is gone (G-84 review H1)
 		              "cancellation_basket": _basket_view(claw),
 		              # the guest may change this room online (confirmed, not arrived yet)
-		              "can_change": guest_changes.room_changeable(res),
+		              "can_change": not sold_by and guest_changes.room_changeable(res),
 		              # ... and cancel it only before the arrival day (O-16)
-		              "can_cancel": _cancellable_online(res),
+		              "can_cancel": not sold_by and _cancellable_online(res),
 		              "last_change": guest_changes.guest_outcome(last) if (last := guest_changes.last_request(res))
 		              else None})
 	credit, refund_due = guest_changes.guest_credit(b.name)
@@ -896,7 +977,9 @@ def _guest_booking(b) -> dict:
 	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
 	        "can_pay_online": bool(guest_changes.card_account(b)),
 	        # money that came when the booking could no longer take it: "refund" / "contact" (B5)
-	        "late_payment": late_payments.guest_notice(b.name)}
+	        "late_payment": late_payments.guest_notice(b.name),
+	        # who sold a channel's booking, by the connection's label (LO-13), never its id: the page sends the guest there
+	        "sold_by": {"label": sold_by["label"]} if sold_by else None}
 
 
 def _cancellable_online(res) -> bool:
@@ -910,7 +993,7 @@ def _cancellable_online(res) -> bool:
 
 def _own_reservation(b, reservation: str) -> None:
 	if reservation not in [r.reservation for r in b.rooms]:
-		frappe.throw(_("Invalid reservation."), frappe.PermissionError)
+		frappe.throw(_("Invalid reservation."), refusal("MANAGE_RESERVATION_INVALID", frappe.PermissionError))
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -921,12 +1004,16 @@ def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to cancel."))
-	if not _cancellable_online(frappe.db.get_value("Reservation", reservation, ["status", "check_in_date"],
-	                                               as_dict=True)):
+		frappe.throw(_("Please contact the hotel to cancel."), refusal("SELF_SERVICE_OFF"))
+	room = frappe.db.get_value("Reservation", reservation, ["status", "check_in_date"], as_dict=True)
+	if room.status in (*booking_svc.NOT_LIVE, "Checked Out"):
+		# cancelled meanwhile (by the hotel, in another tab): said so, never "too late" (G-70b)
+		frappe.throw(_("This room is already {0}.").format(room.status.lower()),
+		             refusal("ROOM_NOT_ACTIVE", status=room.status))
+	if not _cancellable_online(room):
 		# the arrival day has come (or the stay is closed): the hotel handles it at the desk (O-16)
 		frappe.throw(_("This room can no longer be changed online. Please contact the hotel."),
-		             guest_changes.ChangeRefused)
+		             refusal("CANCEL_TOO_LATE", guest_changes.ChangeRefused))
 	frappe.flags.tex_source = "Guest"
 	out = booking_svc.cancel_reservation(reservation, reason=text(reason, 300) or "Cancelled by guest online",
 	                                     source="Guest", _guest_authorized=True)
@@ -945,7 +1032,7 @@ def manage_propose(token: str, reservation: str, changes):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to change your booking."))
+		frappe.throw(_("Please contact the hotel to change your booking."), refusal("SELF_SERVICE_OFF"))
 	guest_changes.guard(b)
 	guest_changes.guard_room(frappe.get_doc("Reservation", reservation))
 	# extras are added through manage_extras_* (priced on their own; the stay stays price-locked)
@@ -982,7 +1069,7 @@ def manage_extras(token: str, reservation: str):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to change your booking."))
+		frappe.throw(_("Please contact the hotel to change your booking."), refusal("SELF_SERVICE_OFF"))
 	from kamra.tex.services import addons as addon_svc
 	from kamra.tex.services.content import Localizer, guest_language
 
@@ -1004,7 +1091,7 @@ def manage_extras_propose(token: str, reservation: str, extras):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to change your booking."))
+		frappe.throw(_("Please contact the hotel to change your booking."), refusal("SELF_SERVICE_OFF"))
 	from kamra.tex.services import addons as addon_svc
 
 	p = addon_svc.propose(reservation, parse(extras, []), guest=True)
@@ -1021,7 +1108,7 @@ def manage_extras_apply(token: str, proposal_token: str):
 	p = quoting.verify(proposal_token, kind="addon", allow_expired=True)       # the service checks freshness
 	_own_reservation(b, p["reservation"])
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to change your booking."))
+		frappe.throw(_("Please contact the hotel to change your booking."), refusal("SELF_SERVICE_OFF"))
 	from kamra.tex.services import addons as addon_svc
 
 	frappe.flags.tex_source = "Guest"
@@ -1047,7 +1134,7 @@ def manage_apply(token: str, proposal_token: str, note: str | None = None, retur
 	p = quoting.verify(proposal_token, kind="proposal", allow_expired=True)       # the service checks freshness
 	_own_reservation(b, p["reservation"])
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to change your booking."))
+		frappe.throw(_("Please contact the hotel to change your booking."), refusal("SELF_SERVICE_OFF"))
 	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
 	frappe.flags.tex_source = "Guest"
 	return guest_changes.submit(b, proposal_token, note=text(note, 300),
@@ -1065,7 +1152,7 @@ def manage_change_pay(token: str, request: str, return_url: str | None = None):
 	``applied`` or ``processing``. Once its proposal expired the guest makes the change again."""
 	b = _booking_by_token(token)
 	if not _self_service_allowed(b):
-		frappe.throw(_("Please contact the hotel to change your booking."))
+		frappe.throw(_("Please contact the hotel to change your booking."), refusal("SELF_SERVICE_OFF"))
 	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
 	frappe.flags.tex_source = "Guest"
 	return guest_changes.pay_again(b, text(request, 40),

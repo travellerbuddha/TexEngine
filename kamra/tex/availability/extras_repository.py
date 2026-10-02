@@ -23,6 +23,7 @@ from frappe.utils import getdate, now_datetime
 from kamra.tex.pricing.enums import ExtraPricingMode as M
 from kamra.tex.pricing.model import ExtraDayAvailability
 from kamra.tex.security.changes import SEP
+from kamra.tex.services.refusals import with_code
 
 Key = tuple[str, date]            # (extra code, service day)
 # a stay that happened keeps its units (the service was delivered); cancelled or no-show frees them
@@ -152,13 +153,15 @@ def check(property: str, need: dict[Key, int], *, credit: dict[Key, int] | None 
 		cap = (int(row[0].capacity or 0) if row else 0) or trk[code]["capacity"]
 		left = cap - (int(row[0].sold or 0) if row else 0) + credit.get((code, d), 0)
 		name = trk[code]["name"] or code
+		# the extra's name and the day (ISO: the booking app writes it in the guest's language, G-70b)
 		if row and row[0].closed:
-			raise ExtraSoldOut(_("{0} is not available on {1}.").format(name, frappe.format(d, "Date")))
+			raise with_code(ExtraSoldOut(_("{0} is not available on {1}.").format(name, frappe.format(d, "Date"))),
+			                extra=name, date=d.isoformat(), closed=True)
 		if units > left:
 			# never how many are left: this can reach a guest (ADR-033); staff see counts in the grid
-			raise ExtraSoldOut(_("Sorry — {0} has just sold out for {1}.").format(name, frappe.format(d, "Date"))
-			                   if left <= 0 else _("Sorry — there is not enough {0} left for {1}.").format(
-				                   name, frappe.format(d, "Date")))
+			raise with_code(ExtraSoldOut(_("Sorry — {0} has just sold out for {1}.").format(name, frappe.format(d, "Date"))
+			                             if left <= 0 else _("Sorry — there is not enough {0} left for {1}.").format(
+				                             name, frappe.format(d, "Date"))), extra=name, date=d.isoformat())
 
 
 def _add_sold(property: str, code: str, d: date, units: int) -> None:

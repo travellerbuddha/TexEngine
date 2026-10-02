@@ -65,7 +65,6 @@ export interface Site {
   languages: string[]
   default_currency?: string | null
   currencies: string[]
-  default_market?: string | null
   branding: Branding
   contact: { phone?: string | null; email?: string | null; whatsapp?: string | null; address?: string | null }
   /** { "<lang>": { headline, tagline, search_button, confirmation_note, footer_note, … } } */
@@ -157,13 +156,19 @@ export interface RoomQuote {
   nights: { date: string; amount: Money }[]
 }
 
-export interface Reason {
+/** Why a search offer or a quote cannot be sold: a code and the limit it names, never the engine's text
+ * (which may name the contract, G-71). */
+export interface OfferReason {
   code: string
-  message: string
   /** occupancy limits, on MAX_ADULTS / MAX_CHILDREN / MAX_OCCUPANTS */
   max_adults?: number
   max_children?: number
   max_occupants?: number
+}
+
+/** A warning or refusal of the manage page (a change, extras added to a stay), with its text. */
+export interface Reason extends OfferReason {
+  message: string
 }
 
 export interface OfferRoom {
@@ -172,7 +177,7 @@ export interface OfferRoom {
   quote: RoomQuote
 }
 
-export interface RoomReason extends Reason {
+export interface RoomReason extends OfferReason {
   room_index: number
 }
 
@@ -191,7 +196,7 @@ export interface Offer {
   refundable?: boolean
   rate_plan_info?: RatePlanInfo | null
   bookable: boolean
-  reasons?: Reason[]
+  reasons?: OfferReason[]
   rooms: OfferRoom[]
   room_indexes: number[]
   /** fits every requested room */
@@ -232,7 +237,6 @@ export interface SearchResult {
   check_in: string
   check_out: string
   nights: number
-  market: string
   /** these prices are for residents of these countries (a residents-only market, O-8): checkout asks the guest */
   residency?: Residency | null
   rooms: { adults: number; children: { age: number | null }[] }[]
@@ -241,7 +245,7 @@ export interface SearchResult {
 
 export interface QuoteResponse {
   ok: boolean
-  reasons?: Reason[]
+  reasons?: OfferReason[]
   quote_id?: string
   expires_at?: string
   price_changed?: boolean
@@ -390,6 +394,8 @@ export interface BookingSummary {
   can_pay_online?: boolean
   /** money that came when the booking could no longer take it: refunded, or the hotel will contact the guest (B5) */
   late_payment?: LatePayment | null
+  /** a channel's booking (LO-12): who sold it, by the channel's label; it is changed and cancelled there */
+  sold_by?: { label: string } | null
 }
 
 export type LatePayment = "refund" | "contact"

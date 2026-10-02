@@ -15,6 +15,14 @@ test("from the arrival day the page offers no cancellation, while a change still
   assert.equal(roomActions({ status: "Confirmed", can_change: true, can_cancel: true }, open).cancel, true)
 })
 
+test("a channel's booking offers nothing: it is changed and cancelled on the channel (LO-12)", () => {
+  const none = { change: false, extras: false, cancel: false }
+  const channel = { ...open, sold_by: { label: "Booking.com" } }
+  assert.deepEqual(roomActions({ status: "Confirmed", can_change: true, can_cancel: true }, channel), none)
+  assert.deepEqual(roomActions({ status: "Confirmed", can_change: true, can_cancel: true }, { ...open, sold_by: null }),
+    { change: true, extras: true, cancel: true })
+})
+
 test("a room the server says nothing about offers no cancellation", () => {
   assert.equal(roomActions({ status: "Confirmed", can_change: true }, open).cancel, false)
 })

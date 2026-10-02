@@ -61,8 +61,8 @@ spot-checked) — re-verify each card before you change code (§3).
 | 1 | **3A market integrity** → "2G-2" — **merged (PR #18)** | G-70a (the coded refusal transport) → O-8 (+ p71, ADR-070) → G-55b (+ p72) | HIGH | D-5 and the CRS override capability (§7) |
 | 2 | **K-B payments** → "2K-1" — **merged (PR #19)** | LO-04, LO-05, LO-07, LO-16, LO-17, LO-19, LO-21, LO-18 | MED | — |
 | 3 | **K-A points always come back as points** → "2K-2" — **merged (PR #20)** | LO-01 (O-19b), LO-02, LO-06, LO-23, LO-24, LO-25, LO-26 (verify first), LO-47 (decide first) | MED | D-12 (default: loyalty is live) |
-| 4 | **K-C channels and disabled room types** → "2K-3" — **done (2K-3 PR, §6K3)** | LO-03, LO-13, LO-11, LO-09, LO-15 | MED | — |
-| 5 | **3B guest payloads and codes** → "2G-3" | G-71 → G-70b (+ LO-12; LO-30 optional) | MED | — |
+| 4 | **K-C channels and disabled room types** → "2K-3" — **merged (PR #21)** | LO-03, LO-13, LO-11, LO-09, LO-15 | MED | — |
+| 5 | **3B guest payloads and codes** → "2G-3" — **done (2G-3 PR, §6G3)** | G-71 → G-70b (+ LO-12; LO-30 optional: left to batch 7) | MED | — |
 | 6 | **K-D operations** → "2K-4" | LO-08, LO-10, LO-28, LO-39, LO-37, LO-22, LO-20, LO-48 | LOW | LO-37 ties to D-13 |
 | 7 | **K-E guest booking frontend** → "2K-5" | LO-35, LO-14, LO-32, LO-33, LO-31, LO-49 (+ LO-30 if 3B left it) | LOW | after 3B |
 | 8 | **K-F staff frontend + K-G tests and tooling** → "2K-6" (or two PRs) | LO-34, LO-38, LO-40, LO-45, LO-42a, LO-27; LO-46, LO-36, LO-44, LO-29, LO-41, LO-42b, LO-43 | LOW | — |
@@ -190,8 +190,8 @@ Per batch:
   Fixtures that commit (thread tests) must clean up: CI runs every integration module alphabetically on ONE site, so
   committed rows leak into later modules (`test_concurrency.PROPERTY_TABLES` cleans them). The scheduler smoke test
   (`test_scheduler_smoke`) must stay green. Check the real "today" value before you write a fail-first assertion.
-- **Frontend:** strings through i18n `t()` in 6 languages (de, en, pl, ro, ru, tr; `npm run i18n:tex` — note that it
-  does not check the booking app's catalogs until G-70b fixes its path), TEX design-system components in
+- **Frontend:** strings through i18n `t()` in 6 languages (de, en, pl, ro, ru, tr; `npm run i18n:tex` checks the
+  admin and the booking app's catalogs since G-70b), TEX design-system components in
   `frontend/src/tex/ui`. **Bundles:** until 2Z, never commit `kamra/public` (CI's Playwright builds from the PR's
   source); 2Z makes the build reproducible, rebuilds once and adds a drift check — from then on every frontend change
   commits its rebuilt bundles.

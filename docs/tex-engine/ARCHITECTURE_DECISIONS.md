@@ -104,6 +104,10 @@ checked by.)
 `Reservation`s (one per room). Each reservation stores the pricing snapshot, contract version,
 payload hash, FX snapshot, sale timestamp; confirmation sets `tex_price_locked`.
 **Consequences.** Cheap searches, authoritative quotes, clear parent/child booking structure.
+- *Note (Part 2G-3, G-71): the offer key and the change proposal token are signed, not encrypted.* An offer key's
+  body (base64 JSON) names the contract (CTR-…), the version id and the market; a guest's change proposal token
+  (`manage_propose`) names the version; a guest who decodes them learns them. Accepted residual: changing them touches
+  `verify` on every path and the CRS. Every other guest answer leaves them out (ADR-026's G-71 addendum).
 
 ## ADR-010 Modification = proposal + revision; legacy auto-price neutralised for TEX
 **Decision.** Reservation changes go through `propose_modification` (read-only OLD vs PROPOSED) and
@@ -150,6 +154,27 @@ guest-facing strings use Frappe `_()`. Legacy Kamra screens keep the existing en
   guest refusal (HANDOFF_STAGE3 §5f),
   adds `refusal.<CODE>` texts in the six catalogs and drops the wording. `unit/test_guest_refusal_codes` fails on a
   guest endpoint without the decorator.
+- *Addendum (Part 2G-3, G-70b): every guest refusal is coded, and said in the guest's language.* Every `frappe.throw`
+  and `raise` of `api/public.py` and of the service functions a guest endpoint reaches (HANDOFF_STAGE3 §5f; the
+  list `GUEST_PATHS` in `unit/test_guest_refusal_codes`, an AST check) passes a coded exception: `refusal(code, base,
+  **params)`, `with_code(existing_instance, code, **params)` for a refusal raised without `frappe.throw`
+  (`ExtraSoldOut` with the extra and its ISO day, `HoldExpired` as `HOLD_EXPIRED_TRANSFER`, `PayloadMismatch` as
+  `CHANGE_NOT_ONLINE` for a guest), a class with a registered `code`, or a helper's coded answer
+  (`quoting.quote_refusal`, `payments.link_refusal`: a `Refusal`, raised as `frappe.throw(str(why), why)`). The English
+  texts are unchanged for staff and logs; those that named internals say less to a guest: the market in
+  `modification._resolve`, the version id in `contracts.load_terms` (`PayloadMismatch.detail` keeps the staff text,
+  which the audit records), and the engine's reasons of a change that cannot be sold (its warnings are still told;
+  the codes of both are `params.reasons`, review round 1). One English text may carry two codes (O-16's
+  arrival-day cancellation is `CANCEL_TOO_LATE`, a change refused `CHANGE_REFUSED`); a room cancelled meanwhile is
+  `ROOM_NOT_ACTIVE` before O-16's day check; a forged sandbox signature is a coded 417, no longer a 500. A guest's
+  channel booking is `CHANNEL_BOOKING` with `params.sold_by` (the connection's label, LO-13). The booking app keeps
+  `KIND_BY_CODE` and `refusalMessage` in `booking/lib/refusals.ts`: kinds `payment_method` (choose another method),
+  `retry` (busy), `hold_expired` (the time to pay is over) join the others, and an error without a code is
+  classified by its status and type only — no wording. Every page shows `refusal.<CODE>` with its params (days in the
+  guest's format, amounts with their currency, countries by name), else the server's message; all 99 codes have a
+  text in the six catalogs (`unit/test_guest_refusal_codes` compares `CODES` with en.json; `npm run i18n:tex` now
+  checks the booking catalogs too: its root was `src/booking/i18n/locales`, which never existed). The market codes
+  keep the kinds G-55b gave them (no separate "market" kind: the search and checkout act on the code itself).
 
 ## ADR-014 Hide, don't delete, PMS modules
 **Decision.** TEX navigation omits housekeeping, laundry, POS, banquet, night audit, maintenance
@@ -273,6 +298,23 @@ Rate-plan and policy dicts are shared with cached contract terms, so the localis
 copies. Translations are cached per hotel in Redis and invalidated on every change.
 **Consequences.** Staff screens keep the hotel's own texts; guest e-mails do not name rooms.
 Promotion names (group-level) are not yet translatable.
+- *Addendum (Part 2G-3, G-71, R-52/R-53): a guest answer names no contract.* After localisation (the localiser reads
+  each quote's request) `public.search`, `quote` and `quote_rooms` strip, guest side only: an offer's `contract`,
+  `contract_code`, `version`, `market`; a room quote's `contract` block (id, code, name, version, version number,
+  payload hash, market, currency, basis), `request` (market, channel, sale time) and `engine_version`; promotions keep
+  `promo_id`, `name`, `applied`, `discount`, `code`, `value_added`; reasons keep `code`, `room_index` and the numeric
+  `max_*` limits, never the engine's text ("STD is not sold under SUMMER", "contract stays end on …"); an extra whose
+  reason names the market, the channel or the room type's record says only "not available" (its capacity on a day
+  and "charged once per booking" stay). The search's top-level `market`/`channel`, `book`'s and `booking_status`'s `market`/`channel`
+  (popped after the payment was started with them) and `site`'s `default_market` are gone. Staff answers
+  (`crs.*`, `ui_crs.*`), the stored `TEX Quote.result_json` and reservation snapshots keep everything
+  (`quoting.strip_internal` and `RoomQuote.to_dict` unchanged). Residual: the signed offer key and change proposal token (ADR-009 note).
+  Review round 1: a guest's error body carries no market or channel either (`refusals.GUEST_HIDDEN`; the exception
+  keeps them for staff), a link country two markets share is refused without naming them, and `extras.guest_reason`
+  says "not available" for an extra limited to other markets, channels or room types in every guest answer that goes
+  through `guest_safe` (a change's warnings and extras added after booking too).
+  Test: `test_public_booking.TestPublicBooking.test_guest_answers_name_no_contract` (a recursive scan of every guest
+  answer for those keys and for any contract docname, version id or payload hash).
 
 ## ADR-027 Legacy endpoints declare the record behind every id argument
 **Context.** `require_roles` scoped legacy Kamra endpoints only through the arguments

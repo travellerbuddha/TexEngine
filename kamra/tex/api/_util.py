@@ -7,6 +7,8 @@ import json
 import frappe
 from frappe import _
 
+from kamra.tex.services.refusals import refusal
+
 
 def parse(value, default=None):
 	"""Accept JSON strings (form posts) or already-parsed values."""
@@ -16,7 +18,7 @@ def parse(value, default=None):
 		try:
 			return json.loads(value)
 		except json.JSONDecodeError:
-			frappe.throw(_("Invalid JSON payload."))
+			frappe.throw(_("Invalid JSON payload."), refusal("INVALID_REQUEST"))
 	return value
 
 

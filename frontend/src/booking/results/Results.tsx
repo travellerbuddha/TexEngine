@@ -4,13 +4,14 @@ import { useI18n } from "../i18n"
 import { nightsBetween } from "../lib/dates"
 import { isZero } from "../lib/format"
 import { boardLabel, cancellation, paymentTerms, reasonText } from "../lib/policy"
+import { refusalMessage } from "../lib/refusals"
 import { trackRoomView } from "../lib/track"
 import { useBooking } from "../flow/BookingContext"
 import { Summary, uniformNight } from "../flow/Summary"
 import { useContinue } from "../flow/useContinue"
 import { partyText } from "../search/GuestsPicker"
 import { useSite } from "../site/SiteContext"
-import type { Offer, PropertyResult, Reason, RoomContent } from "../types"
+import type { Offer, OfferReason, PropertyResult, RoomContent } from "../types"
 import { countryNames, regionDisplay, type Residency } from "../../lib/residency"
 import { marketNotice as noticeKey, type MarketRefusal } from "../lib/marketLink"
 import { Badge, Button } from "../ui/controls"
@@ -407,7 +408,7 @@ function RoomList({ property }: { property: PropertyResult }) {
   // room types this room cannot have, with the reason for THIS room
   const unavailable = useMemo(() => {
     const ok = new Set(fitting.map((o) => o.room_type))
-    const m = new Map<string, Reason[] | undefined>()
+    const m = new Map<string, OfferReason[] | undefined>()
     for (const o of [...property.offers, ...property.unavailable]) {
       if (ok.has(o.room_type) || m.has(o.room_type)) continue
       const own = o.room_reasons?.find((r) => r.room_index === activeRoom)
@@ -562,7 +563,8 @@ function MarketNotice({ notice }: { notice: MarketRefusal }) {
 }
 
 export default function Results() {
-  const { t, money } = useI18n()
+  const i18n = useI18n()
+  const { t, money } = i18n
   const { site } = useSite()
   const { search, criteria, runSearch, flow, allSelected, marketNotice } = useBooking()
   const { error, errorView } = useContinue()
@@ -578,7 +580,7 @@ export default function Results() {
         title={search.error?.kind === "rate_limit" ? t("errors.rateLimitTitle") : t("results.errorTitle")}
         actions={<Button onClick={() => void runSearch({ force: true })}>{t("common.retry")}</Button>}
       >
-        {search.error?.message || t("errors.network")}
+        {search.error?.code ? refusalMessage(i18n, search.error) : search.error?.message || t("errors.network")}
       </Alert>
     )
   } else if (!data) {

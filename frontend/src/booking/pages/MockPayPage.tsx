@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
+import { refusalMessage } from "../lib/refusals"
 import { forgetPayment, returnPathFor, storedPayment } from "../lib/storage"
 import { resumeAt } from "../flow/payment"
 import { HOME_PATH } from "../lib/mount"
@@ -20,7 +21,8 @@ interface MockResult {
 /** Sandbox gateway for the Mock provider: a stand-in for a real card page. It never
  * asks for card data and can only complete transactions of Sandbox accounts. */
 export default function MockPayPage() {
-  const { t, money } = useI18n()
+  const i18n = useI18n()
+  const { t, money } = i18n
   const { txn = "" } = useParams()
   const navigate = useNavigate()
   const stored = useRef(storedPayment(txn)).current
@@ -46,7 +48,7 @@ export default function MockPayPage() {
       resumeAt(returnPathFor(txn) ?? (r.return_url || HOME_PATH), query, navigate)
     } catch (e) {
       setBusy(null)
-      setError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+      setError(refusalMessage(i18n, e instanceof ApiError ? e : null))
     }
   }
 

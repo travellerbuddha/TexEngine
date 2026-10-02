@@ -2510,10 +2510,11 @@ class TestRefusedAfterTheHold(HoldCase):
 		first = guest_books(session="p19-reuse")                    # booked by card; the guest's response was lost
 		quote_id = frappe.db.get_value("TEX Quote", {"booking": first["booking"]}, "name")
 		passes(first["booking"], 26)                                # the hold and the card attempt are over
-		with self.assertRaises(holds.HoldExpired):
+		with self.assertRaises(holds.HoldExpired) as cm:
 			public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Card", session_id="p19-reuse",
 			            idempotency_key="idem-p19-reuse")
 		self.assertEqual(self.statuses(first), ("Cancelled", ["Cancelled"]))
+		self.assertEqual((cm.exception.code, frappe.local.response["tex_code"]), ("HOLD_EXPIRED", "HOLD_EXPIRED"))
 
 	def test_a_recovery_link_is_sent_inside_the_3ds_margin(self):
 		b = self.book()
@@ -2536,8 +2537,11 @@ class TestRefusedAfterTheHold(HoldCase):
 		b = self.book()
 		self.start_payment(b)
 		passes(b["booking"], 22)                                   # the card attempt still holds the rooms
-		with self.assertRaises(holds.HoldExpired):
+		with self.assertRaises(holds.HoldExpired) as cm:
 			public.pay_booking(token=b["manage_token"], payment_method="Bank Transfer")
+		# the guest may still pay by card: not the code of a hold that is over (G-70b)
+		self.assertEqual((cm.exception.code, frappe.local.response["tex_code"]),
+		                 ("HOLD_EXPIRED_TRANSFER", "HOLD_EXPIRED_TRANSFER"))
 		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"booking": b["booking"],
 		                                                              "provider": "Bank Transfer"}))
 		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
@@ -3336,6 +3340,7 @@ class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
 		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's second tab
 		with self.assertRaisesRegex(pay.PaymentBusy, "A payment is being started"):
 			public.pay_booking(token=self.d["manage_token"], payment_method="Card")
+		self.assertEqual(frappe.local.response["tex_code"], "PAYMENT_BUSY")
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
 		frappe.db.rollback()
 		self.assertEqual(frappe.get_all("TEX Payment Transaction", filters={"booking": b}, pluck="name"),

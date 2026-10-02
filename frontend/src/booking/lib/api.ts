@@ -1,12 +1,19 @@
 // Guest API client for kamra.tex.api.public. Every call is a POST with a JSON body
 // so tokens never travel in query strings (and never reach access logs). Money is
 // returned as decimal strings and is never recomputed here.
+import { KIND_BY_CODE } from "./refusals.ts"
 
 export type ErrorKind =
   | "sold_out"
   /** a limited extra (spa slot, transfer…) ran out while booking — the room is not affected */
   | "extra_sold_out"
   | "expired"
+  /** the payment method chosen cannot be used: choose another (G-70b) */
+  | "payment_method"
+  /** the hotel or a payment is busy: the same step again in a moment (G-70b) */
+  | "retry"
+  /** the time to pay for the booking is over: its rooms are given back (G-70b) */
+  | "hold_expired"
   | "rate_limit"
   | "not_found"
   | "permission"
@@ -42,41 +49,17 @@ function clean(s: string) {
     .trim()
 }
 
-// The server's wording for the states the guest must recover from by searching again: only for a refusal
-// that carries no code yet (G-70b codes them all and drops the wording).
-const SOLD_OUT = /sold out|no longer available|not enough rooms/i
-const EXPIRED = /expired|search again|no longer on sale|already used|invalid offer|invalid quote/i
-
 /** A refusal code as the server sends it (kamra/tex/refusal_codes.py): UPPER_SNAKE. */
 const CODE = /^[A-Z][A-Z0-9_]{1,63}$/
 
-/** The kind a code means, whatever the language of its message (G-70a). A code missing here (the server's
- * fallback codes NOT_FOUND / NOT_PERMITTED / RATE_LIMITED included) is classified as before, by its wording and
- * status; a market code is a refusal the search or checkout recovers from (G-55b, O-8), never sold out: a quote of a
- * market the site no longer sells is searched again (expired), a residents-only market's goes back to the guest's
- * country of residence. */
-const KIND_BY_CODE: Record<string, ErrorKind> = {
-  SOLD_OUT: "sold_out",
-  EXTRA_SOLD_OUT: "extra_sold_out",
-  CONTRACT_NOT_ON_SALE: "expired",
-  CONTRACT_SUSPENDED: "expired",
-  // a room type disabled since the search (LO-03): search again
-  ROOM_NOT_SOLD: "expired",
-  MARKET_UNKNOWN: "invalid",
-  MARKET_AMBIGUOUS: "invalid",
-  MARKET_REQUIRED: "invalid",
-  MARKET_NOT_ALLOWED: "expired",
-  MARKET_RESIDENCY: "invalid",
-}
-
-function classify(message: string, status: number, type: string, code: string | null): ErrorKind {
+/** The kind of an error: by its refusal code (G-70: every guest refusal carries one; `lib/refusals.ts`), else by
+ * its HTTP status and type — never by the wording of its message, which is in the guest's language or English. */
+function classify(status: number, type: string, code: string | null): ErrorKind {
   if (status === 429 || type === "RateLimitExceededError") return "rate_limit"
   const byCode = code ? KIND_BY_CODE[code] : undefined
   if (byCode) return byCode
-  // before the wording test: "Spa has just sold out…" is an extra, not the room (G-19)
+  // an extra sold out (G-19) whatever its message: an extra, not the room
   if (type === "ExtraSoldOut" || type.endsWith(".ExtraSoldOut")) return "extra_sold_out"
-  if (SOLD_OUT.test(message)) return "sold_out"
-  if (EXPIRED.test(message)) return "expired"
   if (status === 404 || type === "DoesNotExistError") return "not_found"
   if (status === 403 || type === "PermissionError") return "permission"
   if (status === 417 || type === "ValidationError") return "invalid"
@@ -121,7 +104,7 @@ export function parseError(body: string, status: number): ApiError {
   } catch {
     /* not JSON */
   }
-  return new ApiError(message, status, type, classify(message, status, type, code), code, params)
+  return new ApiError(message, status, type, classify(status, type, code), code, params)
 }
 
 let acceptLanguage = "en"

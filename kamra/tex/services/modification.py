@@ -50,6 +50,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import quoting, sold_terms
+from kamra.tex.services.refusals import refusal
 
 BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE", "CURRENT")
 CAPACITY_REASONS = ("sold out on ", "only ", "closed on ")     # pricing.extras.capacity_refusal
@@ -60,9 +61,23 @@ EDITABLE = ("check_in", "check_out", "room_type", "adults", "children", "board",
 PRODUCT_FIELDS = ("room_type", "rate_plan", "board", "market")
 
 
+def guest_unsellable(result: dict) -> None:
+	"""Refuse a guest's change that cannot be sold. Its warnings (no room left, a restriction, a limited extra) are
+	told as they are, made guest-safe; the engine's reasons never: they may name the contract, its dates, the market
+	or the channel (G-71; G-70b review round 1). The codes of both go in the refusal's params; staff are told the
+	reasons themselves."""
+	warnings = result.get("warnings") or []
+	rows = [*warnings, *((result.get("proposed") or {}).get("reasons") or [])]
+	why = guest_reason("; ".join(w["message"] for w in warnings if w.get("message")))
+	frappe.throw(_("The modified stay cannot be sold: {0}").format(why) if why else
+	             _("The modified stay cannot be sold. Please choose other dates or contact the hotel."),
+	             refusal("CHANGE_NOT_SELLABLE", reasons=[r["code"] for r in rows if isinstance(r, dict) and r.get("code")]))
+
+
 def _snapshot(res) -> dict:
 	if not res.tex_pricing_snapshot:
-		frappe.throw(_("Reservation {0} was not priced by TEX; it cannot be re-priced here.").format(res.name))
+		frappe.throw(_("Reservation {0} was not priced by TEX; it cannot be re-priced here.").format(res.name),
+		             refusal("NOT_TEX_PRICED"))
 	return json.loads(res.tex_pricing_snapshot)
 
 
@@ -107,7 +122,7 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 	# the channel is not EDITABLE: a change is priced on the channel the stay was sold on (ADR-050)
 	unknown = set(changes) - set(EDITABLE)
 	if unknown:
-		frappe.throw(_("Cannot change: {0}").format(", ".join(sorted(unknown))))
+		frappe.throw(_("Cannot change: {0}").format(", ".join(sorted(unknown))), refusal("INVALID_REQUEST"))
 	arrival = getdate(changes.get("check_in") or base["check_in"])
 	for k, v in changes.items():
 		if k in ("check_in", "check_out"):
@@ -239,13 +254,16 @@ def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[s
 	elif basis == "HISTORICAL_SALE_DATE":
 		at = historical_sale_at(basis_sale_at)
 	else:
-		frappe.throw(_("Unknown pricing basis {0}.").format(basis))
+		frappe.throw(_("Unknown pricing basis {0}.").format(basis), refusal("INVALID_REQUEST"))
 	historical = basis != "CURRENT" or bool(sale_at)
 	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=historical)
 	same = [c for c in cands if c[0].name == snap["contract"]["contract"]]
 	pick = (same or cands or [None])[0]
 	if not pick:
-		frappe.throw(_("No contract sold this stay for market {0} at {1}.").format(req.market, at))
+		# a guest is never told the market (G-71, G-70b)
+		frappe.throw(_("This change cannot be sold online. Please contact the hotel.") if frappe.session.user == "Guest"
+		             else _("No contract sold this stay for market {0} at {1}.").format(req.market, at),
+		             refusal("CHANGE_NOT_SELLABLE"))
 	return pick[1], at, f"contract {pick[0].contract_code} on sale at {at}"
 
 
@@ -334,31 +352,31 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		if basis == "HISTORICAL_SALE_DATE":
 			scope.require("price.override", res.property)
 	if basis not in BASES:
-		frappe.throw(_("Unknown pricing basis {0}.").format(basis))
+		frappe.throw(_("Unknown pricing basis {0}.").format(basis), refusal("INVALID_REQUEST"))
 	if basis == "HISTORICAL_SALE_DATE":
 		basis_sale_at = str(historical_sale_at(basis_sale_at))
 	elif basis_sale_at not in (None, ""):
 		# never silently ignored: a sale date prices only on the historical sale date basis
-		frappe.throw(_("A sale date is used only with the historical sale date basis."))
+		frappe.throw(_("A sale date is used only with the historical sale date basis."), refusal("INVALID_REQUEST"))
 	else:
 		basis_sale_at = None
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
-		frappe.throw(_("A {0} reservation cannot be modified.").format(res.status.lower()))
+		frappe.throw(_("A {0} reservation cannot be modified.").format(res.status.lower()),
+		             refusal("ROOM_NOT_ACTIVE", status=res.status))
 	if res.get("tex_pricing_source") == "Channel":
 		# its price and its stay are the channel's: changes arrive from the channel (G-69)
-		frappe.throw(_("This booking came from a channel: change it in the channel, and the change arrives here."))
+		frappe.throw(_("This booking came from a channel: change it in the channel, and the change arrives here."),
+		             refusal("CHANNEL_BOOKING", **booking_svc.sold_by(res.tex_booking)))
 	changes = {k: v for k, v in (changes or {}).items() if v is not None}
 	moved_to = changes.get("room_type")
 	if moved_to and moved_to != res.room_type and frappe.db.get_value("Room Type", moved_to, "disabled"):
 		# a room type no longer sold is never sold by a change either; a stay already in it keeps changing (LO-03,
 		# ADR-048)
-		from kamra.tex.services.refusals import refusal
-
 		frappe.throw(_("{0} is no longer sold: choose another room type.").format(
 			frappe.db.get_value("Room Type", moved_to, "room_type_name") or moved_to), refusal("ROOM_NOT_SOLD"))
 	if "sale_at" in changes:
 		frappe.throw(_("A change has no sale time of its own: to price it as if sold at another time, "
-		               "choose the historical sale date basis and its date."))
+		               "choose the historical sale date basis and its date."), refusal("INVALID_REQUEST"))
 	if _check_permission:
 		require_product_channel(res, changes)
 	if "drop_addons" in changes:
@@ -414,7 +432,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	drop = set(changes.get("drop_addons") or ())
 	unknown = drop - {a["id"] for a in snap.get("addons") or []}
 	if unknown:
-		frappe.throw(_("Not added to this reservation: {0}").format(", ".join(sorted(unknown))))
+		frappe.throw(_("Not added to this reservation: {0}").format(", ".join(sorted(unknown))),
+		             refusal("INVALID_REQUEST"))
 	for a in snap.get("addons") or []:
 		if a["id"] in drop:
 			continue
@@ -498,11 +517,12 @@ def require_proposer(p: dict, *, guest: bool) -> None:
 	G-51 names nobody and is refused: it expired within ``PROPOSAL_TTL_MINUTES`` anyway."""
 	if guest:
 		if p.get("origin") != "guest":
-			frappe.throw(_("This change was not proposed on your booking page."), frappe.PermissionError)
+			frappe.throw(_("This change was not proposed on your booking page."),
+			             refusal("PROPOSAL_INVALID", frappe.PermissionError))
 		return
 	if p.get("origin") != "staff" or p.get("by") != frappe.session.user:
 		frappe.throw(_("This proposal was made by another user: propose the change again."),
-		             frappe.PermissionError)
+		             refusal("PROPOSAL_INVALID", frappe.PermissionError))
 
 
 def apply(proposal_token: str | None, *, reason: str, override_amount=None, source: str = "Desk",
@@ -539,13 +559,14 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	if _proposal is not None:
 		p = _proposal
 		if not p.get("pricing_sale_at") or p.get("kind") != "proposal":
-			frappe.throw(_("This change cannot be applied: its proposal carries no price time."))
+			frappe.throw(_("This change cannot be applied: its proposal carries no price time."),
+			             refusal("PROPOSAL_INVALID"))
 		if _from_payment and get_datetime(_paid_at or now_datetime()) > payment_deadline(p):
-			frappe.throw(_("The payment arrived after the price of this change expired."))
+			frappe.throw(_("The payment arrived after the price of this change expired."), refusal("PROPOSAL_EXPIRED"))
 		pin = p["pricing_sale_at"] if p["basis"] == "CURRENT" else None
 	else:
 		if _from_payment:
-			frappe.throw(_("A paid change applies from its stored proposal."))
+			frappe.throw(_("A paid change applies from its stored proposal."), refusal("PROPOSAL_INVALID"))
 		p = quoting.verify(proposal_token, kind="proposal")
 		require_proposer(p, guest=_guest_authorized)
 		pin = None
@@ -557,13 +578,14 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	res = frappe.get_doc("Reservation", p["reservation"], for_update=True)
 	if _proposal is None and (p.get("property") != res.property or p.get("booking") != res.tex_booking):
 		frappe.throw(_("This proposal was made for another reservation: propose the change again."),
-		             frappe.PermissionError)
+		             refusal("PROPOSAL_INVALID", frappe.PermissionError))
 	if _guest_authorized:
 		if override_amount not in (None, "") or reprice:
-			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)
+			frappe.throw(_("Guests cannot override prices."), refusal("INVALID_REQUEST", frappe.PermissionError))
 		if p["basis"] != "CURRENT":
 			# a guest changes the stay at today's prices, the only basis the manage page proposes
-			frappe.throw(_("This change cannot be made online. Please contact the hotel."), frappe.PermissionError)
+			frappe.throw(_("This change cannot be made online. Please contact the hotel."),
+			             refusal("CHANGE_NOT_ONLINE", frappe.PermissionError))
 	else:
 		scope.require("reservation.modify", res.property)
 		# whoever applies a proposal needs the right to make it: a token carries the change,
@@ -576,16 +598,18 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	if override_restrictions:
 		# only staff applying their own proposal, who may change the restrictions themselves (G-48)
 		if _guest_authorized or _proposal is not None:
-			frappe.throw(_("Restrictions cannot be overridden here."), frappe.PermissionError)
+			frappe.throw(_("Restrictions cannot be overridden here."), refusal("INVALID_REQUEST", frappe.PermissionError))
 		scope.require("restriction.edit", res.property)
 	if str(res.modified) != p["modified"]:
-		frappe.throw(_("The reservation changed since this proposal was made — review it again."))
+		frappe.throw(_("The reservation changed since this proposal was made — review it again."),
+		             refusal("RESERVATION_CHANGED"))
 	if not (reason or "").strip():
-		frappe.throw(_("A reason is required for every modification."))
+		frappe.throw(_("A reason is required for every modification."), refusal("INVALID_REQUEST"))
 	if override_amount not in (None, ""):
 		scope.require("price.override", res.property)
 		if reprice:
-			frappe.throw(_("Choose one: keep a price set by hand, or use the price of the change."))
+			frappe.throw(_("Choose one: keep a price set by hand, or use the price of the change."),
+			             refusal("INVALID_REQUEST"))
 	manual = booking_svc.manual_price(res)
 
 	# lock the new nights first, then recompute deterministically under the lock
@@ -602,9 +626,10 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	overridden_restrictions = result["restrictions"] if override_restrictions and \
 		result["sellable_ignoring_restrictions"] else []
 	if not result["sellable"] and not overridden_restrictions:
+		if _guest_authorized:
+			guest_unsellable(result)
 		why = "; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")
-		frappe.throw(_("The modified stay cannot be sold: {0}").format(
-			guest_reason(str(why)) if _guest_authorized else why))
+		frappe.throw(_("The modified stay cannot be sold: {0}").format(why), refusal("CHANGE_NOT_SELLABLE"))
 	new = result["proposed"]
 	if _proposal is not None and not _from_payment:
 		# staff approving a guest's request (ADR-044), maybe days later: at the price the guest
@@ -615,13 +640,13 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		if stopped:
 			frappe.throw(str(stopped), type(stopped))
 	if new["totals"]["total"] != p["new_total"]:
-		frappe.throw(_("The price moved since this proposal was made — review it again."))
+		frappe.throw(_("The price moved since this proposal was made — review it again."), refusal("PRICE_MOVED"))
 	dropped = manual is not None and override_amount in (None, "")
 	if dropped and not reprice:
 		# a price staff set is never replaced silently (D-9): keep it or take the change's price
 		frappe.throw(_("The price of this stay was set by hand: {0} {2}. The change is priced {1} {2}. Keep the "
 		               "price set by hand, or use the price of the change.").format(
-			to_str(manual), new["totals"]["total"], new["currency"]))
+			to_str(manual), new["totals"]["total"], new["currency"]), refusal("INVALID_REQUEST"))
 	# limited extras: give back the old units and take the new ones under the day locks (G-19)
 	from kamra.tex.availability import extras_repository as xinv
 
@@ -631,7 +656,7 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	new_total = D(new["totals"]["total"])
 	final_total = quantize(D(override_amount), ccy) if override_amount not in (None, "") else new_total
 	if final_total < 0:
-		frappe.throw(_("A price cannot be negative."))
+		frappe.throw(_("A price cannot be negative."), refusal("INVALID_REQUEST"))
 
 	before = {f: res.get(f) for f in ("check_in_date", "check_out_date", "room_type", "adults", "children",
 	                                   "tex_board", "rate_plan", "tex_market", "tex_total_amount",

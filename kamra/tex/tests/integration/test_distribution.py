@@ -521,6 +521,32 @@ class TestChannelBookings(DistributionCase):
 		self.assertIsNone(crs_api.cancellation_preview(reservation=res)["channel"])
 		self.assertIsNone(crs_api.reservation(res)["channel_booking"])
 
+	def test_the_guest_page_of_a_channels_booking_refuses_by_code(self):
+		"""G-70b: the guest's page refuses to cancel, change or add extras to a channel's booking with CHANNEL_BOOKING,
+		and names the channel by its label (params ``sold_by``), never the connection's id."""
+		from kamra.tex.api import public
+
+		booking_name, rooms = self.booked("L1")
+		res = rooms["L1"]
+		token = public.resume_token(booking_name)        # a guest who still holds a link to the booking
+		saved, frappe.local.response = frappe.local.response, frappe._dict({"docs": []})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's booking page
+		try:
+			for call in (lambda: public.manage_cancel(token=token, reservation=res),
+			             lambda: public.manage_propose(token=token, reservation=res,
+			                                           changes={"check_out": str(fx.d(6, 14))}),
+			             lambda: public.manage_extras(token=token, reservation=res)):
+				with self.assertRaises(frappe.ValidationError) as cm:
+					call()
+				self.assertEqual((cm.exception.code, frappe.local.response["tex_code"]),
+				                 ("CHANNEL_BOOKING", "CHANNEL_BOOKING"))
+				self.assertEqual(frappe.local.response["tex_params"], {"sold_by": "Sandbox CM"})
+				self.assertNotIn(self.conn.name, str(cm.exception))
+				frappe.clear_messages()
+		finally:
+			frappe.local.response = saved
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+
 	def test_staff_retry_only_the_latest_message_of_a_booking(self):
 		"""A dead old message retried after a newer one was applied would put the booking back as it was."""
 		self.send(message())
