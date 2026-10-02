@@ -9,9 +9,12 @@ import { asset } from "./lib/asset"
 import { AuthProvider } from "./lib/auth"
 import { CashierAuthProvider } from "./lib/cashierAuth"
 import { ROUTER_BASENAME } from "./lib/routing"
+import { installBackGuard } from "./tex/lib/backGuard"
 
 initTheme()
 initLang()
+// before the router: its popstate listener must run first (unsaved edits on Back/Forward)
+installBackGuard()
 
 // Favicons, base-aware (see index.html note).
 function setIcon(rel: string, href: string, type?: string) {

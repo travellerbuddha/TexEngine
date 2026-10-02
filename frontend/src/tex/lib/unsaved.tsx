@@ -4,9 +4,12 @@
 //   * an in-app link (sidebar, breadcrumbs, a chip): the click is caught on the document before
 //     the router sees it, and stopped when the user stays;
 //   * the hotel switcher and the command palette (`confirmLeave`);
+//   * the browser's Back and Forward buttons inside the app (./backGuard.ts, installed before the
+//     router);
 //   * a reload or closing the tab (beforeunload, the browser's own prompt).
-// The browser's Back button inside the app is not caught (no blocker without a data router).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react"
+import { useLocation } from "react-router-dom"
+import { noteLocation, setBackGuard } from "./backGuard"
 
 type Check = () => boolean
 
@@ -33,6 +36,16 @@ export function UnsavedChangesProvider({ message, children }: { message: string;
   const checks = useRef(new Set<Check>())
   const pending = useCallback(() => [...checks.current].some((c) => c()), [])
   const confirmLeave = useCallback(() => !pending() || window.confirm(message), [pending, message])
+  const location = useLocation()
+
+  // Back / Forward: the guard knows where the user is, and asks this provider's question
+  useEffect(() => {
+    noteLocation()
+  }, [location])
+  useEffect(() => {
+    setBackGuard(confirmLeave)
+    return () => setBackGuard(null)
+  }, [confirmLeave])
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
