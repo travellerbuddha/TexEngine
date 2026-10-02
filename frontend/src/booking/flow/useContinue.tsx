@@ -180,15 +180,25 @@ export function FlowErrorAlert() {
   )
 }
 
-/** Shown after quoting when the server's price differs from the search result. */
+/** Shown after quoting when the server's price differs from the search result. Focused and scrolled into view
+ * when it appears (LO-33): on a phone the guest books from the foot of the page, far below it. */
 export function PriceChangeNotice() {
   const { t, money } = useI18n()
   const b = useBooking()
+  const ref = useRef<HTMLDivElement>(null)
   const changes = b.flow.priceChanges
-  if (!changes.length) return null
+  const shown = changes.length > 0
+  useEffect(() => {
+    if (shown) {
+      ref.current?.focus()
+      ref.current?.scrollIntoView({ block: "center" })
+    }
+  }, [shown])
+  if (!shown) return null
   const multi = b.criteria.rooms.length > 1
   return (
     <Alert
+      ref={ref}
       tone="warn"
       title={t("errors.priceChangedTitle")}
       actions={
