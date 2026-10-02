@@ -73,6 +73,7 @@ const RE_ADJUST_PERCENT = new RegExp(`^([+-]) *${NUM} *%$`)
 const RE_ADD = new RegExp(`^\\+ *${NUM}$`)
 const RE_SUBTRACT = new RegExp(`^- *${NUM}$`)
 const RE_BASE = /^base$/i
+const RE_PERCENT_FIRST = /^([+-]?) *% *([0-9]+(?:[.,][0-9]+)?)$/
 const RE_DECIMAL = new RegExp(`^([+-]?)${NUM}$`)
 
 function minorUnitsOf(opts: { minorUnits?: number } | undefined): number {
@@ -150,6 +151,10 @@ export function parseShorthand(input: string, ctx: ShContext, opts?: ShParseOpti
   )
   if (s.length > MAX_INPUT_LENGTH) return { ok: false, code: "SYNTAX" }
   if (s === "") return { ok: true, kind: "clear" }
+  // the Turkish way of writing a percentage, "%30", "+%10", "-%30" (UX revision 2026-10): the same
+  // entry as "30%", "+10%", "-30%" (the sign keeps its meaning; a bare "%30" is a share, as "30%")
+  const tr = RE_PERCENT_FIRST.exec(s)
+  if (tr) return parseShorthand(`${tr[1]}${tr[2]}%`, ctx, opts)
   if (RE_BASE.test(s)) return ctx === "board" ? { ok: true, kind: "base" } : { ok: false, code: "SYNTAX" }
   const form = matchForm(s, ctx)
   if (!form) return { ok: false, code: "SYNTAX" }
