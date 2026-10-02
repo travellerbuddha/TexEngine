@@ -557,20 +557,28 @@ def return_points(booking: str, *, reason: str) -> int:
 
 	The caller holds the booking's lock (and its rooms'). Locks taken here: the guests who may have spent
 	points on it, the Loyalty charges (name order), then their burn rows. → the points given back."""
+	return sum((s["points"] for s in give_back(booking, reason=reason)), 0)
+
+
+def give_back(booking: str, *, reason: str, limit=None) -> list[dict]:
+	"""``return_points``, at most ``limit`` of money (a lower price's refund, LO-01: the points' share of it comes
+	back as points before any cash). → each share given back: {"transaction", "refund", "amount", "points"}."""
 	from kamra.tex.crm.service import lock_guest
 	from kamra.tex.payments import service as pay
 
 	b = frappe.db.get_value("TEX Booking", booking, ["property", "currency", "booker_guest", "paid_amount",
 	                                                  "total_amount"], as_dict=True, for_update=True)
 	if not b:
-		return 0
+		return []
 	ccy = b.currency
 	waiting = sum((from_db(r.amount, r.currency) for r in frappe.db.sql(PENDING_REFUNDS_OF, {"b": booking}, as_dict=True)),
 	              ZERO)
 	over = from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy) - waiting
+	if limit is not None:
+		over = min(over, D(limit))
 	charges = loyalty_charges_on(booking) if over > 0 else []
 	if not charges:
-		return 0
+		return []
 	guests = sorted({b.booker_guest, *frappe.get_all("Reservation", filters={"tex_booking": booking},
 	                                                  pluck="guest")} - {None})
 	for g in guests:
@@ -598,7 +606,7 @@ def return_points(booking: str, *, reason: str) -> int:
 			continue
 		take = min(held, left)
 		pts = lots.points_of(-int(burn.points), from_db(t.amount, t.currency), pay.refunded_of(t.name, lock=True), take)
-		pay.points_back(t.name, booking=booking, amount=take, points=pts, reason=reason)
+		refund = pay.points_back(t.name, booking=booking, amount=take, points=pts, reason=reason)
 		if pts:
 			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": burn.program, "guest": burn.guest,
 			                "entry_type": "Reverse", "points": pts, "status": "Available", "booking": booking,
@@ -607,11 +615,12 @@ def return_points(booking: str, *, reason: str) -> int:
 		settle_for[(burn.guest, burn.program)] = None
 		left -= take
 		points += pts
-		shares.append({"transaction": t.name, "amount": to_str(take), "points": pts})
+		shares.append({"transaction": t.name, "refund": refund, "amount": to_str(take), "points": pts})
 	for guest, program in settle_for:
 		settle(guest, program)                         # a lot closed meanwhile: the points that came back expire at once
 		_sync_guest(guest)
 	if shares:
 		audit("loyalty.return", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
-		      new={"points": points, "value": to_str(over - left), "currency": ccy, "charges": shares}, reason=reason)
-	return points
+		      new={"points": points, "value": to_str(over - left), "currency": ccy,
+		           "charges": [{k: v for k, v in s.items() if k != "refund"} for s in shares]}, reason=reason)
+	return shares

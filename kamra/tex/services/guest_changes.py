@@ -996,6 +996,7 @@ def settle(request: str) -> dict:
 	was recorded for the refund, and saying something else, stops the refunds of the request for
 	good: staff reconcile it (third review). What no charge can refund waits for staff ("Refund
 	by staff")."""
+	from kamra.tex.crm import loyalty
 	from kamra.tex.payments import service as pay
 
 	req = _lock(request)
@@ -1032,6 +1033,13 @@ def settle(request: str) -> dict:
 				capped, first = target - left, False
 			if left <= 0:
 				break
+			# the points' share comes back as points, before any cash (O-19b, LO-01): never planned as money nor
+			# left to staff; their refunds are the request's, counted as it refunded
+			back = loyalty.give_back(req.booking, reason=f"the guest's change {req.name} lowered the price", limit=left)
+			if back:
+				req.refund_rows = "\n".join([*_refunds_made(req), *(s["refund"] for s in back)])
+				refunded += sum((D(s["amount"]) for s in back), ZERO)
+				continue
 			plan, rest = refundable_now(req.booking, left, except_request=req.name, failed=failed)
 			if not plan:
 				short = rest
@@ -1590,8 +1598,9 @@ def _record_outside(req, amount: D, reason: str) -> D:
 		cap = max(ZERO, from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy)
 		          - earmarked(req.booking, except_request=req.name))
 		reserved = _reserved(req.booking, req.name)
+		# points are never recorded as money given back (O-19b, LO-01): cash at most what is over less the points
 		sources = [st.Charge(c["transaction"], min(c["available"], pay.booking_nets(c["transaction"]).get(
-			req.booking, ZERO) - pay.in_flight_from(c["transaction"], req.booking)), True, c["at"])
+			req.booking, ZERO) - pay.in_flight_from(c["transaction"], req.booking)), True, c["at"], points=c["points"])
 			for c in pay.booking_charges(req.booking) if c["transaction"] not in reserved]
 	else:
 		sources = [st.Charge(txn, held, True, at) for txn, held, at in _left_to_staff(req)]

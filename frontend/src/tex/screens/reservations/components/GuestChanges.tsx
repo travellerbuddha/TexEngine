@@ -296,6 +296,7 @@ function ResolveDialog({
                 ]}
               />
               {!canRefund && <p className="text-xs text-zinc-500">{t("res.gcr.no_refund_cap")}</p>}
+              {settlement === "Refund" && <p className="text-xs text-zinc-500">{t("res.gcr.refund_points_first")}</p>}
             </div>
           )}
           {verify && (
