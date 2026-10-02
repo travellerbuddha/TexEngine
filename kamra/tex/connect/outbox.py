@@ -18,7 +18,7 @@ import time
 from functools import partial
 
 import frappe
-from frappe.utils import add_to_date, get_datetime, now_datetime
+from frappe.utils import add_to_date, now_datetime
 
 from kamra.tex.connect import adapters
 
@@ -116,37 +116,33 @@ def _failed(name: str, e: Exception) -> None:
 def _claim(limit: int, token: str, connection: str | None = None) -> list[str]:
 	"""Claim for one run (``token``) the first undelivered message of each reservation and connection, when it is
 	due and no worker holds it (NEW-7); at most ``limit``. Kind Reservation only: ARI jobs coalesce and need no
-	order (``distribution.claim``). Undelivered = Pending or Failed, read oldest first (``creation``, ``name``):
+	order (``distribution.claim``). Undelivered = Pending or Failed, in the order written (``creation``, ``name``):
 
 	* a reservation's later messages are never claimed while an earlier one is undelivered — one waiting in
 	  back-off, one claimed by another worker — so a "cancelled" never overtakes a "modified". Dead and Sent
-	  messages are not read: a Dead one never blocks;
+	  messages do not count: a Dead one never blocks;
 	* due = ``next_attempt_at <= now``; a NULL ``next_attempt_at`` is NOT due (as in ``distribution.claim``);
 	* free = ``claim_token`` NULL, or ``claimed_until`` before now (a NULL ``claimed_until`` of a claimed row is
 	  not free: its worker's lease is unknown).
 
-	The claim is one conditional UPDATE by name (the same conditions: a row another worker took or sent since
-	the read is left alone), committed so it is visible at once, read back by this run's token."""
+	The read returns only those first messages, oldest first, at most ``limit`` (LO-10): the database finds them
+	(whether a message has an earlier undelivered one through ``tex_outbox_ref_order``), so a long outage that
+	leaves thousands in back-off is never read whole into each round. The claim is one conditional UPDATE by
+	name (the same conditions: a row another worker took or sent since the read is left alone), committed so it is
+	visible at once, read back by this run's token."""
 	from kamra.tex.distribution.repository import CLAIM_MINUTES, _commit
 
 	now = now_datetime()
-	rows = frappe.db.sql(
-		"""SELECT name, connection, reference_name, next_attempt_at, claim_token, claimed_until
-		   FROM `tabTEX Integration Outbox`
-		   WHERE kind='Reservation' AND status IN ('Pending', 'Failed') AND (%(c)s IS NULL OR connection=%(c)s)
-		   ORDER BY creation ASC, name ASC""", {"c": connection}, as_dict=True)
-	first, take = set(), []
-	for r in rows:
-		key = (r.connection, r.reference_name)
-		if key in first:
-			continue                                   # an earlier message of this reservation is not delivered yet
-		first.add(key)
-		due = r.next_attempt_at is not None and get_datetime(r.next_attempt_at) <= now
-		free = r.claim_token is None or (r.claimed_until is not None and get_datetime(r.claimed_until) < now)
-		if due and free:
-			take.append(r.name)
-			if len(take) >= limit:
-				break
+	take = frappe.db.sql(
+		"""SELECT o.name FROM `tabTEX Integration Outbox` o
+		   WHERE o.kind='Reservation' AND o.status IN ('Pending', 'Failed') AND o.next_attempt_at <= %(n)s
+		     AND (o.claim_token IS NULL OR o.claimed_until < %(n)s) AND (%(c)s IS NULL OR o.connection=%(c)s)
+		     AND NOT EXISTS (SELECT 1 FROM `tabTEX Integration Outbox` p
+		                     WHERE p.connection <=> o.connection AND p.reference_name <=> o.reference_name
+		                       AND p.kind='Reservation' AND p.status IN ('Pending', 'Failed')
+		                       AND (p.creation < o.creation OR (p.creation = o.creation AND p.name < o.name)))
+		   ORDER BY o.creation ASC, o.name ASC LIMIT %(limit)s""",
+		{"n": now, "c": connection, "limit": int(limit)}, pluck=True)
 	if not take:
 		return []
 	frappe.db.sql(

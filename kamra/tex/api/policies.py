@@ -331,8 +331,18 @@ def fx_rates(provider: str = "TCMB", days: int = 14, base: str | None = None):
 		# a manual rate is its hotel's: the caller's hotels' and the global ones (O-12); the provider's are shared
 		mine = scope.permitted_properties()
 		rows = [r for r in rows if not r.property or r.property in mine]
-	# the exact rate, never a float (G-72); who entered a manual rate is shown (the audit trail has it too)
-	return [r | {"rate": api_value(r.rate), "source_ref": r.source_ref if r.provider == "MANUAL" else None}
+	# the exact rate, never a float (G-72). Who entered a manual rate (a user's e-mail) only to who manages rates
+	# at its hotel, for a rate of every hotel at one of theirs (LO-39); the audit trail has it either way
+	sees: dict[str | None, bool] = {}
+
+	def names_who(prop: str | None) -> bool:
+		if prop not in sees:
+			sees[prop] = scope.is_platform_admin() or any(scope.has_capability(c, prop)
+			                                              for c in ("fx.manual_rate", "settings.admin"))
+		return sees[prop]
+
+	return [r | {"rate": api_value(r.rate),
+	             "source_ref": r.source_ref if r.provider == "MANUAL" and names_who(r.property) else None}
 	        for r in rows]
 
 

@@ -124,9 +124,11 @@ REASONS: dict[str, str] = {
 	"job_stopped": "The TEX job {job} is stopped.",
 	"job_never_ran": "The TEX job {job} has never run.",
 	"job_late": "The TEX job {job} last ran {minutes} minutes ago.",
+	"job_waiting": "The TEX job {job} has waited {minutes} minutes for a background worker.",
 	"job_errors": "{count} TEX job error(s) in the last {hours} hours (see the Error Log).",
 	"redis_unreachable": "The background job queue (Redis) cannot be reached.",
 	"no_workers": "No background worker is running.",
+	"queue_unserved": "No background worker listens on the {queue} queue: the jobs queued there never run.",
 	"backlog": "{count} background job(s) are waiting in the queues.",
 	"key_missing": "The site has no encryption_key: offers, payment callbacks and webhooks cannot be signed.",
 	"snapshot_isolation_on": "MariaDB innodb_snapshot_isolation is ON ({level}): a booking that waited for the last "
@@ -260,9 +262,11 @@ def scheduler_check(*, inactive_reason: str | None, live: bool) -> dict:
 	return make("scheduler", issues, scope="platform")
 
 
-def jobs_check(jobs: dict[str, dict], now: datetime, *, live: bool) -> dict:
+def jobs_check(jobs: dict[str, dict], now: datetime, *, live: bool, waiting: dict[str, int] | None = None) -> dict:
 	"""``jobs``: {method: {"last_execution": datetime|None, "stopped": bool}} of the Scheduled
-	Job Types found for the TEX jobs in ``JOB_MAX_AGE_MINUTES``."""
+	Job Types found for the TEX jobs in ``JOB_MAX_AGE_MINUTES``. ``waiting``: {method: minutes} of the work a
+	cron entry only queues (the PMS outbox, LO-08) still waiting in its queue for a worker: late as the job would
+	be."""
 	issues, since = [], None
 	for method, limit in JOB_MAX_AGE_MINUTES.items():
 		job = method.rsplit(".", 1)[-1]
@@ -279,6 +283,12 @@ def jobs_check(jobs: dict[str, dict], now: datetime, *, live: bool) -> dict:
 				issues.append(issue("job_late", FAIL if age > limit * JOB_LATE_FAIL_FACTOR else WARN, job=job,
 				                    minutes=age))
 				since = min(since, row["last_execution"]) if since else row["last_execution"]
+		waited = (waiting or {}).get(method)
+		if waited is not None and waited > limit:
+			issues.append(issue("job_waiting", FAIL if waited > limit * JOB_LATE_FAIL_FACTOR else WARN, job=job,
+			                    minutes=waited))
+			queued_at = now - timedelta(minutes=waited)
+			since = min(since, queued_at) if since else queued_at
 	return make("scheduler.jobs", issues, scope="platform", since=since, count=len(issues))
 
 
@@ -290,13 +300,17 @@ def job_errors_check(count: int, since=None) -> dict:
 	return make("scheduler.errors", issues, scope="platform", since=since)
 
 
-def workers_check(*, reachable: bool, workers: int, backlog: int, live: bool) -> dict:
+def workers_check(*, reachable: bool, workers: int, backlog: int, live: bool, unserved: Iterable[str] = ()) -> dict:
+	"""``unserved``: the queues TEX queues jobs on that no running worker listens on (LO-08: the PMS outbox runs on
+	``long``); named only while some worker runs (none at all is ``no_workers``)."""
 	issues = []
 	if not reachable:
 		issues.append(issue("redis_unreachable", FAIL))
 	else:
 		if workers <= 0:
 			issues.append(issue("no_workers", FAIL if live else WARN))
+		else:
+			issues += [issue("queue_unserved", FAIL if live else WARN, queue=q) for q in unserved]
 		if backlog >= QUEUE_BACKLOG_WARN:
 			issues.append(issue("backlog", FAIL if backlog >= QUEUE_BACKLOG_FAIL else WARN, count=backlog))
 	return make("workers", issues, scope="platform", count=backlog if reachable else 0)

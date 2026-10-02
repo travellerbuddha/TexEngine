@@ -62,8 +62,8 @@ spot-checked) — re-verify each card before you change code (§3).
 | 2 | **K-B payments** → "2K-1" — **merged (PR #19)** | LO-04, LO-05, LO-07, LO-16, LO-17, LO-19, LO-21, LO-18 | MED | — |
 | 3 | **K-A points always come back as points** → "2K-2" — **merged (PR #20)** | LO-01 (O-19b), LO-02, LO-06, LO-23, LO-24, LO-25, LO-26 (verify first), LO-47 (decide first) | MED | D-12 (default: loyalty is live) |
 | 4 | **K-C channels and disabled room types** → "2K-3" — **merged (PR #21)** | LO-03, LO-13, LO-11, LO-09, LO-15 | MED | — |
-| 5 | **3B guest payloads and codes** → "2G-3" — **done (2G-3 PR, §6G3)** | G-71 → G-70b (+ LO-12; LO-30 optional: left to batch 7) | MED | — |
-| 6 | **K-D operations** → "2K-4" | LO-08, LO-10, LO-28, LO-39, LO-37, LO-22, LO-20, LO-48 | LOW | LO-37 ties to D-13 |
+| 5 | **3B guest payloads and codes** → "2G-3" — **merged (PR #24)** | G-71 → G-70b (+ LO-12; LO-30 optional: left to batch 7) | MED | — |
+| 6 | **K-D operations** → "2K-4" — **done (2K-4 PR, §6K4)** | LO-08, LO-10, LO-28, LO-39, LO-22, LO-20, LO-48; LO-37 deferred (D-13 = no) | LOW | D-13 answered: no |
 | 7 | **K-E guest booking frontend** → "2K-5" | LO-35, LO-14, LO-32, LO-33, LO-31, LO-49 (+ LO-30 if 3B left it) | LOW | after 3B |
 | 8 | **K-F staff frontend + K-G tests and tooling** → "2K-6" (or two PRs) | LO-34, LO-38, LO-40, LO-45, LO-42a, LO-27; LO-46, LO-36, LO-44, LO-29, LO-41, LO-42b, LO-43 | LOW | — |
 | 9 | **2Z release hygiene** → "2Z" | §2.3 | MED | **last** |
@@ -253,8 +253,9 @@ Open (ask the owner when the batch needs it; never guess):
   the CRS with a reason, audited.
 - **The CRS override capability** (O-8): default `reservation.create` + a reason (every call-centre agent, audited);
   the stricter option is `price.override` (revenue managers and admins only).
-- **D-13**: do the UTC+7 hotels (Cam Ranh, Phuket) go live on this site in wave 1?
-  If yes, O-6 (deadlines in hotel-local time; today they close 4 h late there) becomes a batch.
+- **D-13** — answered **no** (2026-10-02): the UTC+7 hotels (Cam Ranh, Phuket) do not go live on this site in
+  wave 1. O-6 (deadlines in hotel-local time; they would close 4 h late there) stays a documented limitation (C-05),
+  and LO-37 (the `fx_bridged` WARN of a MANUAL-mode pair) is deferred with it. Ask again when those hotels are planned.
 - **D-14**: will an existing Kamra or pilot database be upgraded? If yes, the pre-upgrade migration package (O-34,
   O-35, O-36, O-39, P1-12) becomes a batch.
 - **D-15**: which PMS runs each go-live hotel (G-69r adapters).

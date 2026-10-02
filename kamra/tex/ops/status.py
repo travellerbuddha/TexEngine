@@ -18,10 +18,16 @@ from datetime import timedelta
 import frappe
 from frappe.utils import cint, get_datetime, getdate, now_datetime
 
+from kamra.tex import scheduler
 from kamra.tex.ops import checks as C
 from kamra.tex.security.audit import log_exception
 
 TEX_JOBS = tuple(C.JOB_MAX_AGE_MINUTES)
+# the RQ queues TEX's jobs run on: guest changes and refusal audits on short, the cron entries on default (Frappe),
+# the PMS outbox on its own (LO-08)
+TEX_QUEUES = ("short", "default", scheduler.OUTBOX_QUEUE)
+# the work a cron entry only queues, by the RQ job id it is queued under: watched while it waits for a worker
+QUEUED_WORK = {"kamra.tex.scheduler.outbox_every_5_minutes": scheduler.OUTBOX_JOB_ID}
 FX_LOOKBACK_DAYS = 60
 
 
@@ -77,8 +83,36 @@ def last_runs() -> dict[str, dict]:
 	return jobs
 
 
+def waiting_jobs() -> dict[str, int]:
+	"""{cron entry: minutes} of the work it queued that still waits in its queue (``QUEUED_WORK``; LO-08): no
+	worker for that queue, or one busy with a long job. A job that started, finished or failed is not waiting.
+	Never raises: an unreachable Redis is the workers check's finding."""
+	from datetime import UTC, datetime
+
+	out = {}
+	try:
+		from frappe.utils.background_jobs import create_job_id
+		from rq.exceptions import NoSuchJobError
+		from rq.job import Job, JobStatus
+
+		conn = _redis_once()
+		conn.ping()
+		for method, job_id in QUEUED_WORK.items():
+			try:
+				job = Job.fetch(create_job_id(job_id), connection=conn)
+			except NoSuchJobError:
+				continue
+			if job.get_status(refresh=False) != JobStatus.QUEUED or not job.enqueued_at:
+				continue
+			at = job.enqueued_at if job.enqueued_at.tzinfo else job.enqueued_at.replace(tzinfo=UTC)
+			out[method] = int((datetime.now(UTC) - at).total_seconds() // 60)
+	except Exception:
+		return {}
+	return out
+
+
 def _jobs(now) -> dict:
-	return C.jobs_check(last_runs(), now, live=live())
+	return C.jobs_check(last_runs(), now, live=live(), waiting=waiting_jobs())
 
 
 def _job_errors(now) -> dict:
@@ -90,27 +124,37 @@ def _job_errors(now) -> dict:
 	return C.job_errors_check(int(row.n or 0), since=row.since)
 
 
+def _redis_once():
+	"""This bench's Redis queue connection, one attempt (Frappe's own retries five times, a second apart): a probe
+	of an unreachable Redis never holds the status page."""
+	from frappe.utils.background_jobs import get_redis_conn
+
+	connect = getattr(get_redis_conn, "retry_with", None)
+	if connect:
+		from tenacity import stop_after_attempt
+
+		return connect(stop=stop_after_attempt(1))()
+	return get_redis_conn()
+
+
 def queue_probe() -> dict:
-	"""{reachable, workers, backlog} of this bench's RQ queues. Never raises: an unreachable
-	Redis is a finding, not an error. One connection attempt (Frappe retries five times)."""
+	"""{reachable, workers, backlog, unserved} of this bench's RQ queues (``unserved``: the TEX queues no worker
+	listens on). Never raises: an unreachable Redis is a finding, not an error. One connection attempt (Frappe
+	retries five times)."""
 	try:
-		from frappe.utils.background_jobs import generate_qname, get_queue_list, get_redis_conn
+		from frappe.utils.background_jobs import generate_qname, get_queue_list
 		from rq import Queue, Worker
 
-		connect = getattr(get_redis_conn, "retry_with", None)
-		if connect:
-			from tenacity import stop_after_attempt
-
-			conn = connect(stop=stop_after_attempt(1))()
-		else:
-			conn = get_redis_conn()
+		conn = _redis_once()
 		conn.ping()
 		names = {generate_qname(q) for q in get_queue_list()}
 		backlog = sum(Queue(n, connection=conn).count for n in names)
 		workers = [w for w in Worker.all(connection=conn) if set(w.queue_names()) & names]
-		return {"reachable": True, "workers": len(workers), "backlog": int(backlog)}
+		served = {n for w in workers for n in w.queue_names()}
+		return {"reachable": True, "workers": len(workers), "backlog": int(backlog),
+		        "unserved": [q for q in TEX_QUEUES if generate_qname(q) not in served]}
 	except Exception:
-		return {"reachable": False, "workers": 0, "backlog": 0}
+		return {"reachable": False, "workers": 0, "backlog": 0, "unserved": []}
 
 
 def _workers(now) -> dict:

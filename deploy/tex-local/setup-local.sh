@@ -739,7 +739,9 @@ if [ "$OS" = mac ]; then WORKER_ENV='OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES NO_
 	echo "web: cd sites && TEX_BIND=$BIND exec ../env/bin/python ../tex-local/serve.py frappe serve --port $PORT"
 	echo "socketio: TEX_BIND=$BIND exec node --require ./tex-local/bind.js apps/frappe/socketio.js"
 	echo "schedule: bench schedule"
-	echo "worker: ${WORKER_ENV}bench worker 1>> logs/worker.log 2>> logs/worker.error.log"
+	# two workers: the PMS outbox runs on the long queue, never ahead of the holds and payments (LO-08)
+	echo "worker: ${WORKER_ENV}bench worker --queue short,default 1>> logs/worker.log 2>> logs/worker.error.log"
+	echo "worker_long: ${WORKER_ENV}bench worker --queue long 1>> logs/worker_long.log 2>> logs/worker_long.error.log"
 } >"$DIR/Procfile"
 {
 	echo "# Written by setup-local.sh: the choices of the last run, reused when an option is not given."

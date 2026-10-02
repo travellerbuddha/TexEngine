@@ -125,6 +125,8 @@ BEHAVIOUR = {
 	"p71_market_integrity": "test_patches.TestSmallPatches.test_p71_makes_the_domestic_market_residents_only_once",
 	"p72_market_refused_funnel_event": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p73_ledger_booking_index": "test_patches.TestP03Indexes.test_p73_creates_the_ledger_booking_index",
+	"p74_outbox_order_index": "test_patches.TestP03Indexes.test_p74_creates_the_outbox_order_index",
+	"p75_payment_last_reverified": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
 
@@ -905,6 +907,23 @@ class TestP03Indexes(PatchCase):
 		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
 		self.assertRerunChangesNothing("p73_ledger_booking_index")
 
+	def test_p74_creates_the_outbox_order_index(self):
+		"""LO-10 (2K-4): a claim asks whether a due PMS message has an earlier undelivered one of its reservation
+		through this index, never reading every message in back-off. DDL only, stubbed in the sandbox (M3)."""
+		from kamra.tex import setup
+
+		new = {"tex_outbox_ref_order": ("TEX Integration Outbox", ("connection", "reference_name", "status", "creation"))}
+		have = {name: (dt, tuple(fields)) for dt, fields, name in setup.TEX_INDEXES}
+		self.assertEqual({k: have.get(k) for k in new}, new)
+		self.assertTrue(frappe.db.has_index("tabTEX Integration Outbox", "tex_outbox_ref_order"))   # the migration made it
+		self.assertEqual(self.first_run("p74_outbox_order_index")["add_index"], [])        # nothing missing: no DDL
+		real = frappe.local.db.has_index
+		with mock.patch.object(frappe.local.db, "has_index",
+		                       side_effect=lambda table, index: index not in new and real(table, index)):
+			seen = migrate("p74_outbox_order_index")
+		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
+		self.assertRerunChangesNothing("p74_outbox_order_index")
+
 class TestP04LegacyPriceLock(PatchCase):
 	def test_standing_legacy_stays_are_locked_at_their_amount(self):
 		hotel = kamra_hotel("G76 Legacy Hotel")
@@ -1232,6 +1251,8 @@ class TestSmallPatches(PatchCase):
 				 ("TEX Payment Transaction", "captured_at")),
 				("p68_payment_checkout_lease", [("tex_payments", "doctype", "tex_payment_transaction")],
 				 ("TEX Payment Transaction", "checkout_started_at")),
+				("p75_payment_last_reverified", [("tex_payments", "doctype", "tex_payment_transaction")],
+				 ("TEX Payment Transaction", "last_reverified_at")),
 				("p72_market_refused_funnel_event", [("tex_booking", "doctype", "tex_funnel_event")],
 				 ("TEX Funnel Event", "event"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)

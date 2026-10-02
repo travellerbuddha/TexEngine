@@ -75,7 +75,7 @@ bölümüne bakın (BT biriminizden şirketin kök sertifikasını isteyin).
 | --- | --- | --- |
 | `db` | `mariadb:11.8` (utf8mb4) | database, named volume `tex-local_db-data` |
 | `redis` | `redis:7-alpine` | cache and background-job queue (no persistence) |
-| `tex` | built from this repository (`Dockerfile`) | Frappe v16.25.0 + `payments` (develop, pinned to commit `86fefa9`) + `kamra` (TEX Engine): web server, scheduler and a background worker |
+| `tex` | built from this repository (`Dockerfile`) | Frappe v16.25.0 + `payments` (develop, pinned to commit `86fefa9`) + `kamra` (TEX Engine): web server, scheduler and two background workers (`short,default` and `long`, where the PMS outbox runs) |
 
 The `tex` image is Python 3.14 (Debian bookworm) with Node 24 + Yarn 1, a non-root user
 `frappe`, a bench made with `bench init --frappe-branch v16.25.0`, the `payments` app from
@@ -268,8 +268,9 @@ second site (set it back, or reset). Put values containing `#` or `$` in single 
   takes the passwords from the container's environment, and the demo seed reads
   `DEMO_PASSWORD` from the environment itself.
 * Then `honcho` runs the Frappe web server (`bench serve`, port 8000 in the container), the
-  scheduler and one background worker in the foreground; `docker compose stop` shuts them
-  down cleanly.
+  scheduler and two background workers (one for the `short` and `default` queues, one for
+  `long`: the PMS outbox runs there, never ahead of holds and payments) in the foreground;
+  `docker compose stop` shuts them down cleanly.
 
 The site's `encryption_key` lives in `sites/tex.localhost/site_config.json` in the `sites`
 volume. Losing the volume loses the key; that is fine for demo data.
@@ -367,7 +368,7 @@ To run TEX Engine directly on macOS, Linux or Windows (WSL 2) with a native benc
 | `Dockerfile.dockerignore` | keeps the build context small and secret-free (`.git`, `node_modules`, test output, `.env`, keys) |
 | `entrypoint.sh` | first-start setup / later-start migrate, then the processes |
 | `frappe_cli.py` | runs a Frappe command with passwords from the environment, so they never reach `logs/bench.log` (also used by `setup-local.sh`) |
-| `Procfile` | web, scheduler, worker (run by honcho) |
+| `Procfile` | web, scheduler, worker (`short,default`), worker_long (`long`) (run by honcho) |
 | `with-extra-ca.sh` | build-time helper for the optional `extra_ca` secret |
 | `docker-compose.extra-ca.yml` | optional override that passes a network root CA to the build |
 | `.env.example` | settings template |

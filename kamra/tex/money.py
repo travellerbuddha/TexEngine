@@ -74,6 +74,23 @@ def D_or_none(value) -> Decimal | None:
 	return D(value)
 
 
+COUNT_DIGITS = 18
+
+
+def whole_number(value) -> int | None:
+	"""A count stored as a decimal string ("2.000000", ``to_str6``) → its int, read as Decimal, never through
+	``float`` (LO-48, as ``loyalty.extra_units``). None when it is not a whole number (a fraction, not a number,
+	not finite, or beyond 18 digits: no count is near that, and ``int()`` of a huge exponent would run for minutes):
+	the caller says what that means. ``None`` and ``""`` are zero, as in ``D``."""
+	try:
+		q = D(value)
+	except (TypeError, ValueError):
+		return None
+	if not q.is_finite() or (q and q.adjusted() >= COUNT_DIGITS) or q != q.to_integral_value():
+		return None
+	return int(q)
+
+
 def minor_units(currency: str) -> int:
 	return MINOR_UNITS.get((currency or "").upper(), 2)
 

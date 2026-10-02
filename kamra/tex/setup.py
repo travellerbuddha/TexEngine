@@ -197,6 +197,8 @@ TEX_INDEXES = (
 	("TEX Channel Inbound", ["connection", "provider_ref"], "tex_inbound_ref"),
 	("TEX Channel Inbound", ["status", "next_attempt_at"], "tex_inbound_due"),
 	("TEX Integration Outbox", ["kind", "status", "next_attempt_at"], "tex_outbox_due"),
+	# a claim asks whether a due message has an earlier undelivered one of its reservation through this (LO-10, p74)
+	("TEX Integration Outbox", ["connection", "reference_name", "status", "creation"], "tex_outbox_ref_order"),
 	("TEX Booking", ["channel_connection", "external_ref"], "tex_booking_channel_ref"),
 	("TEX Audit Event", ["action", "event_time"], "tex_audit_action_time"),            # ADR-047
 	("TEX Communication", ["status", "creation"], "tex_comm_status_created"),

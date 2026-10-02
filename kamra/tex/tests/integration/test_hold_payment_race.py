@@ -2107,6 +2107,47 @@ class TestPaymentsVerifiedByTheJob(HoldCase):
 		self.assertEqual(asked, [txns[n] for n in ("soon_hold", "late_hold", "old_free", "new_free",
 		                                          "gone_short", "gone_long")])
 
+	def test_more_candidates_than_a_tick_asks_are_each_asked_within_two_ticks(self):
+		"""LO-22 (2K-4): by urgency alone a tick asked the same most urgent charges again and again while the others
+		waited. Within its urgency a charge asked least recently goes first, one never asked before any
+		(``last_reverified_at``, written for each charge the job asks): with more candidates than a tick asks, each is
+		asked within two ticks."""
+		from kamra.tex.payments.providers.base import Outcome
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		made = [self.book(guest=dict(GUEST, email=f"lo22-{n}@example.com")) for n in range(4)]
+		txns = [self.start_payment(b)["transaction"] for b in made]
+		for n, txn in enumerate(txns):
+			self.aged(txn, created_ago=5, expires_in=10 + n)          # all hold rooms; the first the nearest deadline
+		still = mock.patch.object(MockProvider, "handle_callback", lambda *a, **kw: Outcome(status="Pending"))
+		ticks = []
+		with self.askable() as asked, still, mock.patch.object(pay, "REVERIFY_BATCH", 2):
+			for _ in range(2):
+				del asked[:]
+				pay.reverify_pending()
+				ticks.append(list(asked))
+		self.assertEqual(ticks, [txns[:2], txns[2:]])
+		self.assertEqual({txn_state(t).status for t in txns}, {"Pending"})
+
+	def test_a_charge_whose_deadline_comes_before_the_next_tick_is_asked_first_however_recently_asked(self):
+		"""2K-4 review round 1 (LO-22): a charge asked last tick whose deadline comes before the next one is asked
+		now, before charges asked less recently: the expiry runs right after this job and would give its rooms back
+		with the money taken."""
+		from kamra.tex.payments.providers.base import Outcome
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		made = [self.book(guest=dict(GUEST, email=f"lo22-last-{n}@example.com")) for n in range(3)]
+		last, *others = [self.start_payment(b)["transaction"] for b in made]
+		self.aged(last, created_ago=20, expires_in=3)
+		for n, txn in enumerate(others):
+			self.aged(txn, created_ago=5, expires_in=10 + n)
+		frappe.db.set_value("TEX Payment Transaction", last, "last_reverified_at", add_to_date(now_datetime(), minutes=-5),
+		                    update_modified=False)                     # asked by the last tick
+		still = mock.patch.object(MockProvider, "handle_callback", lambda *a, **kw: Outcome(status="Pending"))
+		with self.askable() as asked, still, mock.patch.object(pay, "REVERIFY_BATCH", 2):
+			pay.reverify_pending()
+		self.assertEqual(asked, [last, others[0]])
+
 	def test_a_charge_with_nothing_to_ask_takes_no_place_in_the_tick(self):
 		"""LO-21 (audit 2K-1): a charge of a gateway asked by the reference TEX stored (iyzico's checkout token)
 		that stores none has nothing to ask: however urgent, it never takes one of the tick's places."""

@@ -1,3 +1,4 @@
 web: bench serve --port 8000 --noreload
 schedule: bench schedule
-worker: bench worker
+worker: bench worker --queue short,default
+worker_long: bench worker --queue long

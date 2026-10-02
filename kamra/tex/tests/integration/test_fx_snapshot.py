@@ -345,6 +345,30 @@ class TestManualBridge(TexTestCase):
 
 		self.assertNotIn(OTHER, {r.property for r in policies.fx_rates("MANUAL")})   # a hotel never sees another's rates
 
+	def test_who_entered_a_manual_rate_is_shown_only_to_who_manages_rates(self):
+		"""LO-39 (2K-4): the rate list named who entered a manual rate (a user's e-mail) to anyone who may read prices
+		at the hotel. Only holders of ``fx.manual_rate`` or ``settings.admin`` there see it (for a rate of every
+		hotel: at one of their hotels); the audit trail keeps it either way."""
+		from kamra.tex.api import policies
+		from kamra.tex.tests.integration.test_channel_binding import profile
+
+		mine = self.enter()                                                  # the platform administrator, this hotel
+		every = self.enter(rate="50.6", property=None)                       # … and every hotel
+		reader = self.hotel_user("lo39-reader@example.com", fx.PROPERTY, profile("LO-39 prices only", ["price.view"]))
+		admin = self.hotel_user("lo39-admin@example.com", fx.PROPERTY,
+		                        profile("LO-39 hotel settings", ["price.view", "settings.admin"]))
+
+		def who(user: str) -> dict:
+			self.as_user(user)
+			try:
+				return {r["name"]: r["source_ref"] for r in policies.fx_rates("MANUAL") if r["name"] in (mine, every)}
+			finally:
+				self.as_user("Administrator")
+
+		self.assertEqual(who(reader), {mine: None, every: None})
+		for user in (self.rm, admin):                                        # fx.manual_rate; settings.admin
+			self.assertEqual(who(user), {mine: "Administrator", every: "Administrator"}, user)
+
 	def test_a_platform_administrator_enters_a_rate_for_every_hotel(self):
 		from kamra.tex.commercial import context
 

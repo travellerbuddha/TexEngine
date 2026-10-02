@@ -444,7 +444,10 @@ def adapters():
 TRAIL_COST = perm.CONTRACT_COST_DOCTYPES     # one list with Desk / REST's cost (G-97)
 TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link": "payment.view",
                     "TEX Payment Allocation": "payment.view", "Reservation": "reservation.view",
-                    "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view"}
+                    "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view",
+                    # a guest's profile (personal data, consent, merges), points and abandoned bookings: the CRM's
+                    # (2K-4 review round 1, LO-28)
+                    "Guest": "crm.view", "TEX Loyalty Ledger": "crm.view", "TEX Abandoned Booking": "crm.view"}
 VERSION_TABLES = TRAIL_COST - {"TEX Contract", "TEX Contract Version"}
 
 
@@ -465,34 +468,49 @@ def _trail_property(doctype: str, name: str) -> str | None:
 	return frappe.db.get_value(doctype, name, "property") if meta.has_field("property") and not meta.istable else None
 
 
-def _require_trail(doctype: str, prop: str) -> None:
-	"""Contract cost: ``price.view_cost`` or ``contract.edit`` (G-11); payments ``payment.view``; a
-	stay ``reservation.view``; a commercial policy what the policies API reads it with (markups and
-	pricing policies: ``price.view_cost``); anything else ``settings.admin``."""
+def _trail_caps(doctype: str) -> tuple[str, ...]:
+	"""What reads a record's trail, any one of these capabilities: contract cost ``price.view_cost`` or
+	``contract.edit`` (G-11); payments ``payment.view``; a stay ``reservation.view``; a guest's profile, points and
+	abandoned bookings ``crm.view``; a commercial policy what the policies API reads it with (markups and pricing
+	policies: ``price.view_cost``); anything else ``settings.admin``."""
 	from kamra.tex.api import policies
 
 	if doctype in TRAIL_COST:
-		if not (scope.has_capability("price.view_cost", prop) or scope.has_capability("contract.edit", prop)):
-			frappe.throw(_("Not permitted."), frappe.PermissionError)
-		return
+		return ("price.view_cost", "contract.edit")
 	cap = TRAIL_CAPABILITY.get(doctype)
 	if not cap:
 		cap = policies.READ_CAP.get(doctype, "price.view") if doctype in policies.POLICY else "settings.admin"
-	scope.require(cap, prop)
+	return (cap,)
 
 
-def _cost_hidden(prop: str) -> list[str]:
-	"""The cost records whose events a hotel's trail leaves out for this viewer, by each record's own trail
-	rule (``_require_trail``): markups and pricing policies without ``price.view_cost``; contracts and their
-	rate tables without ``price.view_cost`` or ``contract.edit``. None for platform administrators."""
+def _require_trail(doctype: str, prop: str) -> None:
+	caps = _trail_caps(doctype)
+	if len(caps) > 1:
+		if not any(scope.has_capability(c, prop) for c in caps):
+			frappe.throw(_("Not permitted."), frappe.PermissionError)
+		return
+	scope.require(caps[0], prop)
+
+
+def _trail_hidden(prop: str) -> list[str]:
+	"""The records whose events a hotel's trail leaves out for this viewer, by each record's own trail rule
+	(``_trail_caps``): cost without ``price.view_cost`` (contracts: or ``contract.edit``), payments without
+	``payment.view``, stays and bookings without ``reservation.view``, guest records without ``crm.view``, a policy
+	without what its own API reads it with (LO-28). Anything else needs ``settings.admin``, which the hotel view needs itself. None for platform
+	administrators."""
 	from kamra.tex.api import policies
 
-	if scope.is_platform_admin() or scope.has_capability("price.view_cost", prop):
+	if scope.is_platform_admin():
 		return []
-	hidden = {d for d, cap in policies.READ_CAP.items() if cap == "price.view_cost"}
-	if not scope.has_capability("contract.edit", prop):
-		hidden |= TRAIL_COST
-	return sorted(hidden)
+	held: dict[str, bool] = {}
+
+	def has(cap: str) -> bool:
+		if cap not in held:
+			held[cap] = scope.has_capability(cap, prop)
+		return held[cap]
+
+	known = TRAIL_COST | set(TRAIL_CAPABILITY) | set(policies.POLICY)
+	return sorted(d for d in known if not any(has(c) for c in _trail_caps(d)))
 
 
 @frappe.whitelist()
@@ -501,8 +519,8 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
               date_from: str | None = None, date_to: str | None = None, start=0, limit=100):
 	"""The audit trail, newest first. A hotel's trail holds its own events and the events of its
 	hotel group or enterprise that reached it (a group grant, ADR-053); such an event names only
-	the hotels the viewer may see, the others as a count. Cost events are left out of it as their
-	record's own trail would refuse them (``_cost_hidden``)."""
+	the hotels the viewer may see, the others as a count. The events of a record whose own trail would refuse
+	the viewer (cost, payments, stays, policies) are left out of it (``_trail_hidden``)."""
 	from frappe.query_builder import Order
 	from frappe.query_builder.functions import IfNull
 
@@ -514,7 +532,7 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 		scope.require("settings.admin", property)
 		q = q.where((E.property == property)
 		            | E.name.isin(frappe.qb.from_(S).select(S.event).where(S.property == property)))
-		if hidden := _cost_hidden(property):
+		if hidden := _trail_hidden(property):
 			# in the query, so a page is filled with what the viewer may read (G-97, audit Part 2I)
 			q = q.where(IfNull(E.reference_doctype, "").notin(hidden))
 	elif reference_doctype and reference_name:

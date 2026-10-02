@@ -19,7 +19,9 @@ clock frozen (``freeze_time``: a Wednesday in June, before the fixtures' season)
   cover them); the stub only guarantees no real provider is called;
 * the domain check's DNS-over-HTTPS lookup (``services.sites.txt_records``) answers the token;
 * e-mail is only queued: ``EmailQueue.send`` records and delivers nothing;
-* any other connection to a host that is not this machine is refused and recorded (``socket``).
+* any other connection to a host that is not this machine is refused and recorded (``socket``);
+* the worker of the outbox's own RQ queue (LO-08): ``outbox_every_5_minutes`` only queues
+  ``deliver_outbox`` there, so the stub runs what it queued in this tick, and records the queue.
 
 The test fails when a job logs a new "TEX …" Error Log (``scheduler._run`` turns a job's exception
 into "TEX job <path>"; a job's isolated steps log "TEX …" too; the alerts job's own "TEX status alert:
@@ -82,7 +84,7 @@ class _Response:
 def outside_world(day: date):
 	"""The stubs named in the module docstring. → what each was asked."""
 	calls: dict[str, list] = {"network": [], "fx": [], "pms": [], "channel": [], "provider": [], "dns": [],
-	                          "mail": []}
+	                          "mail": [], "queued": []}
 	tcmb = (f'<Tarih_Date Tarih="{day:%d.%m.%Y}" Date="{day:%m/%d/%Y}"><Currency CurrencyCode="EUR" Kod="EUR">'
 	        "<Unit>1</Unit><ForexBuying>34.10</ForexBuying><ForexSelling>34.20</ForexSelling></Currency>"
 	        "</Tarih_Date>")
@@ -157,6 +159,14 @@ def outside_world(day: date):
 			raise OSError(f"smoke test: no network ({address[0]})")
 		return real_connect(sock, address)
 
+	real_enqueue = frappe.enqueue
+
+	def enqueue(method, *a, **kw):
+		if method == "kamra.tex.scheduler.deliver_outbox":
+			calls["queued"].append((method, kw.get("queue")))
+			return frappe.get_attr(method)()
+		return real_enqueue(method, *a, **kw)
+
 	from frappe.email.doctype.email_queue.email_queue import EmailQueue
 
 	with ExitStack() as st:
@@ -168,6 +178,7 @@ def outside_world(day: date):
 		st.enter_context(mock.patch.object(EmailQueue, "send", lambda self, *a, **kw: calls["mail"].append(self.name)))
 		st.enter_context(mock.patch.object(socket, "getaddrinfo", getaddrinfo))
 		st.enter_context(mock.patch.object(socket.socket, "connect", connect))
+		st.enter_context(mock.patch.object(frappe, "enqueue", enqueue))
 		st.enter_context(mock.patch.object(frappe.db, "commit"))    # the job boundary: the test rolls back
 		yield calls
 
@@ -346,6 +357,8 @@ class TestSchedulerTick(TexTestCase):
 			                                              "quote_currency": quote, "rate_date": getdate(now)},
 			                              "fetched_at")
 			self.assertEqual(get_datetime(fetched), now, provider)
+		# the cron entry queued the delivery on the outbox's own queue (LO-08); the stub worker ran it
+		self.assertEqual(calls["queued"], [("kamra.tex.scheduler.deliver_outbox", "long")])
 		self.assertEqual({r for _c, _e, r in calls["pms"]}, {s["reservation"]})
 		self.assertEqual({frappe.db.get_value("TEX Integration Outbox", n, "status") for n in s["pms_events"]},
 		                 {"Sent"})
