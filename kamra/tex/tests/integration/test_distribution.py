@@ -505,6 +505,34 @@ class TestChannelBookings(DistributionCase):
 		self.assertEqual([(D(r.amount), r.raw_status) for r in back], [(D("30.00"), "POINTS RETURNED")])
 		self.assertEqual(frappe.db.count("TEX Loyalty Ledger", {"guest": guest, "entry_type": "Adjust"}), 1)
 
+	def test_a_room_the_channel_removes_gives_the_points_over_back(self):
+		"""LO-02 (D-16, review round 1): the channel takes one of two rooms off: what the booking now holds over its
+		price comes back as points first (20.00 of the 30.00 points), the cash paid stays, the stay kept."""
+		from kamra.tex.crm import loyalty
+		from kamra.tex.money import from_db
+		from kamra.tex.payments import service as pay
+
+		program = self.club()
+		booking, rooms = self.booked("L1", "L2")                                       # 900.00
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		self.holding(guest, program)
+		conn = frappe.db.get_value("TEX Booking", booking, "channel_connection")
+		frappe.db.set_value("TEX Booking", booking, "channel_connection", None, update_modified=False)
+		spent = loyalty.redeem(guest, booking, 300, idempotency_key="lo02-two")      # 30.00, spent before the guard
+		frappe.db.set_value("TEX Booking", booking, "channel_connection", conn, update_modified=False)
+		pay.record_manual(booking=booking, amount="440.00", method="Cash", reference="desk",
+		                  idempotency_key="lo02-two-cash")                            # 470.00 paid
+		self.send(message(status="modified", rooms=[self.line("L1")]))                  # the channel removes L2: 450.00
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		self.assertEqual((frappe.db.get_value("Reservation", rooms["L1"], "status"),
+		                  frappe.db.get_value("Reservation", rooms["L2"], "status")), ("Confirmed", "Cancelled"))
+		self.assertEqual(loyalty.balances(guest, program)["available"], 900)
+		back = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": spent["transaction"]},
+		                      fields=["amount", "raw_status"])
+		self.assertEqual([(D(r.amount), r.raw_status) for r in back], [(D("20.00"), "POINTS RETURNED")])
+		total, paid = frappe.db.get_value("TEX Booking", booking, ["total_amount", "paid_amount"])
+		self.assertEqual((from_db(total, "EUR"), from_db(paid, "EUR")), (D("450.00"), D("450.00")))
+
 
 class TestReconcileAndTenancy(DistributionCase):
 	def test_reconciliation_finds_drift_and_differences(self):
