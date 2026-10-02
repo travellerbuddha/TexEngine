@@ -721,6 +721,7 @@ REVERIFY_AFTER_MINUTES = 3        # a checkout this young is still in the guest'
 REVERIFY_WINDOW_HOURS = 2         # asked until then past its deadline (a fraud review's included, O-18)
 REVERIFY_BATCH = 20
 REVERIFY_BUDGET_SECONDS = 60      # one tick is a single RQ job with 300 s for the whole 5-minute group
+REVERIFY_LAST_CHANCE_MINUTES = 5  # a deadline before the next tick: the expiry after this job gives its rooms back
 REVERIFY_SAVEPOINT = "tex_reverify"
 
 
@@ -736,11 +737,12 @@ def reverify_pending(now=None) -> dict:
 	20 per tick, none started after 60 s, by urgency: those still holding rooms first (the nearest deadline
 	first: money found in time confirms the booking), then those holding none, oldest first, then those whose
 	deadline has gone by, the latest first — an abandoned iyzico checkout stays Pending for 2 hours and must
-	not starve the payments that can still be saved. Within an urgency the charge asked least recently goes
-	first, one never asked before any (``last_reverified_at``, written for each charge asked, LO-22): with more
-	candidates than a tick asks, each is asked within a few ticks, never the same ones every time. Each is
-	asked under a savepoint; an error is logged ("TEX payment re-verify <charge>") and undone; each is on record
-	before the next question (ADR-066)."""
+	not starve the payments that can still be saved. A charge whose deadline comes before the next tick is on
+	its last chance and goes first, the nearest first, however recently it was asked; within each other urgency the
+	charge asked least recently goes first, one never asked before any (``last_reverified_at``, written for each
+	charge asked, LO-22): with more candidates than a tick asks, each is asked within a few ticks, never the same
+	ones every time. Each is asked under a savepoint; an error is logged ("TEX payment re-verify <charge>") and
+	undone; each is on record before the next question (ADR-066)."""
 	now = get_datetime(now or now_datetime())
 	askable = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query)) or ("",)
 	# a gateway asked by a reference TEX stored (iyzico's token): a charge with none has nothing to ask and takes
@@ -748,9 +750,10 @@ def reverify_pending(now=None) -> dict:
 	by_ref = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query and cls.status_by_ref)) or ("",)
 	# NULL checkout_started_at: no start is asking the gateway; NULL expires_at: a charge that holds no rooms
 	# (a link's without a waiting booking, a change's, a balance's), judged by when it started (ADR-064).
-	# Urgency: 0 = its deadline is ahead (holds rooms), nearest first; 1 = no deadline, oldest first; 2 = its
-	# deadline has gone by, latest first. A CASE without ELSE is NULL outside its group: constant inside it.
-	# Within a group, the least recently asked first, a charge never asked before any (LO-22)
+	# Urgency: 0 = its deadline comes before the next tick (its last chance), nearest first, however recently asked;
+	# 1 = its deadline is later (holds rooms), nearest first; 2 = no deadline, oldest first; 3 = its deadline has
+	# gone by, latest first. A CASE without ELSE is NULL outside its group: constant inside it. Within groups 1 to 3,
+	# the least recently asked first, a charge never asked before any (LO-22)
 	names = frappe.db.sql("""SELECT t.name FROM `tabTEX Payment Transaction` t
 	                         JOIN `tabTEX Payment Provider Account` a ON a.name = t.provider_account
 	                         WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND t.provider IN %(askable)s
@@ -758,13 +761,16 @@ def reverify_pending(now=None) -> dict:
 	                           AND (t.provider NOT IN %(by_ref)s OR IFNULL(t.provider_ref, '') != '')
 	                           AND (t.checkout_started_at IS NULL OR t.checkout_started_at < %(lease)s)
 	                           AND IFNULL(t.expires_at, t.creation) >= %(window)s
-	                         ORDER BY CASE WHEN t.expires_at > %(now)s THEN 0 WHEN t.expires_at IS NULL THEN 1 ELSE 2 END,
+	                         ORDER BY CASE WHEN t.expires_at > %(now)s AND t.expires_at <= %(last)s THEN 0
+	                                       WHEN t.expires_at > %(now)s THEN 1 WHEN t.expires_at IS NULL THEN 2 ELSE 3 END,
+	                                  CASE WHEN t.expires_at > %(now)s AND t.expires_at <= %(last)s THEN t.expires_at END,
 	                                  t.last_reverified_at IS NOT NULL, t.last_reverified_at,
 	                                  CASE WHEN t.expires_at > %(now)s THEN t.expires_at END,
 	                                  CASE WHEN t.expires_at IS NULL THEN t.creation END,
 	                                  CASE WHEN t.expires_at <= %(now)s THEN t.expires_at END DESC,
 	                                  t.name LIMIT %(limit)s""",
 	                      {"askable": askable, "by_ref": by_ref, "now": now,
+	                       "last": add_to_date(now, minutes=REVERIFY_LAST_CHANCE_MINUTES),
 	                       "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
 	                       "lease": add_to_date(now, seconds=-CHECKOUT_LEASE_SECONDS),
 	                       "window": add_to_date(now, hours=-REVERIFY_WINDOW_HOURS), "limit": REVERIFY_BATCH},
@@ -790,8 +796,13 @@ def reverify_pending(now=None) -> dict:
 			log_exception(f"TEX payment re-verify {name}")
 			done["errors"] += 1
 		# asked, whatever the answer: the next tick asks the ones that waited first (LO-22). The charge's row only,
-		# after its question: no other lock is taken after it
-		frappe.db.set_value("TEX Payment Transaction", name, "last_reverified_at", now, update_modified=False)
+		# after its question: no other lock is taken after it. A lock wait here is logged and the tick goes on
+		try:
+			frappe.db.set_value("TEX Payment Transaction", name, "last_reverified_at", now, update_modified=False)
+		except Exception as e:
+			if transaction_lost(e):
+				frappe.db.rollback()         # its answer is asked again next tick
+			log_exception(f"TEX payment re-verify {name}")
 		if not frappe.flags.in_test:
 			# on record (its Error Log and audit included) before the next gateway question: no lock is held
 			# through it (ADR-066); tests keep one transaction
