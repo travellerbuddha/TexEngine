@@ -212,16 +212,19 @@ def check_account(acc, *, purpose: str = "new") -> None:
 	}[problem])
 
 
-def provider_for(account_name: str, *, purpose: str = "new", transaction: str | None = None):
+def provider_for(account_name: str, *, purpose: str = "new", transaction: str | None = None,
+                 question: bool = False):
 	"""The provider of an account, checked for ``purpose`` (see ``account_rule``). A disabled
 	account runs nothing, settling included: disabling is the hotel's stop switch (a leaked
-	gateway key must not confirm bookings)."""
+	gateway key must not confirm bookings). ``question``: the gateway is asked about ``transaction`` (a callback, a
+	re-verification), so a gated account's audit of it is written once a day (LO-20); a refund is written every
+	time."""
 	acc = frappe.get_doc("TEX Payment Provider Account", account_name)
 	if not acc.enabled:
 		_refuse(acc, _("Payment provider {0} is disabled.").format(acc.label))
 	check_account(acc, purpose=purpose)
-	if purpose == "settle" and (gated := account_rule(acc, "new")) and not _gated_settle_on_record(acc.name,
-	                                                                                               transaction):
+	if purpose == "settle" and (gated := account_rule(acc, "new")) and not (
+			question and _gated_settle_on_record(acc.name, transaction)):
 		# an account that could not take this money today still settles it, on the record (ADR-041)
 		audit("payment_account.settled_while_gated", reference_doctype="TEX Payment Provider Account",
 		      reference_name=acc.name, property=acc.property,
@@ -233,8 +236,8 @@ def provider_for(account_name: str, *, purpose: str = "new", transaction: str | 
 
 def _gated_settle_on_record(account: str, transaction: str | None) -> bool:
 	"""A ``settled_while_gated`` audit of this charge is on record today (LO-20): the re-verification job asks a
-	Pending charge every 5 minutes, and each question used to write one. Once per charge and day (the site's);
-	a call without a charge is audited every time."""
+	Pending charge every 5 minutes, and each question used to write one. A question is written once per charge and
+	day (the site's); a call without a charge is audited every time."""
 	if not transaction:
 		return False
 	return bool(frappe.db.sql("""SELECT 1 FROM `tabTEX Audit Event`
@@ -551,7 +554,7 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 		frappe.throw(_("Unknown payment."), refusal("PAYMENT_UNKNOWN", frappe.DoesNotExistError))
 	if row.status not in SETTLEABLE:
 		return {"transaction": row.name, "status": row.status, "replay": True}
-	provider = provider_for(row.provider_account, purpose="settle", transaction=row.name)
+	provider = provider_for(row.provider_account, purpose="settle", transaction=row.name, question=True)
 	outcome = provider.handle_callback(row.name, params, headers or {}, body, provider_ref=row.provider_ref)
 	if outcome.status == "Pending":
 		if outcome.raw_status in FRAUD_REVIEW:

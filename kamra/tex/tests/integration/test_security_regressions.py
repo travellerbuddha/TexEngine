@@ -1334,6 +1334,21 @@ class TestGoLivePaymentsReview(TexTestCase):
 		self.assertEqual({frappe.db.get_value("TEX Payment Transaction", t, "status") for t in (first, second)},
 		                 {"Pending"})
 
+	def test_a_refund_on_a_gated_account_is_on_record_however_often_its_charge_was_asked(self):
+		"""2K-4 review round 1 (LO-20): only the questions about a charge (a callback, a re-verification) are on
+		record once a day; money a gated account gives back is on record every time."""
+		gw = FakeIyzico()
+		acc = self.iyzico()
+		with gw.patch():
+			txn = self.charge(acc.name, "lo20-refund")["transaction"]
+			acc.db_set("environment", "Production")
+			gw.answers["tok-1"] = lambda t: gw.paid(t, "P1")
+			self.assertEqual(pay.complete(txn, params={"token": "tok-1"})["status"], "Succeeded")
+			for n in range(2):
+				pay.refund(txn, amount="10", reason="goodwill", idempotency_key=f"lo20-refund-{n}")
+		audited = [a["transaction"] for a in self.audits("payment_account.settled_while_gated", acc.name)]
+		self.assertEqual(audited, [txn] * 3)
+
 	def test_g67_a_capture_tex_refused_is_on_record_and_refundable(self):
 		gw = FakeIyzico()
 		acc = self.iyzico()
