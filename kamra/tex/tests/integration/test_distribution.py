@@ -263,6 +263,30 @@ class TestInbound(DistributionCase):
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
 		                                                     "reference_name": out[0]["booking"]}))
 
+	def test_a_booking_for_a_disabled_room_type_is_accepted_with_a_warning(self):
+		"""LO-03 (review round 1): a channel that sold a room type TEX no longer sells (before the closed ARI reached
+		it, or while its connection is off) is accepted like an overbooking, with a warning and an audit event; so is a
+		change moving a room into it (before: accepted silently)."""
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		self.send(message(ref="OTA-320"))
+		out = self.apply_all()
+		self.assertTrue(out[0]["booking"])
+		self.assertIn("room type is no longer sold", out[0]["warning"] or "")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
+		                                                     "reference_name": out[0]["booking"]}))
+		frappe.db.set_value("Room Type", self.std, "disabled", 0)
+		dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})
+		frappe.get_doc({"doctype": "TEX Channel Mapping", "connection": self.conn.name, "room_type": dlx,
+		                "external_room_code": "DLXC", "external_rate_code": "BAR", "board": "AI", "market": "DE",
+		                "sales_channel": "OTA", "sell_currency": "EUR", "rate_plan": self.flex, "occupancies": "1,2",
+		                "horizon_days": 365}).insert(ignore_permissions=True)
+		self.send(message(ref="OTA-321"))
+		self.assertTrue(self.apply_all()[0]["booking"])
+		frappe.db.set_value("Room Type", dlx, "disabled", 1)
+		self.send(message(ref="OTA-321", status="modified", room="DLXC"))   # the channel moves the room into it
+		moved = self.apply_all()
+		self.assertIn("room type is no longer sold", moved[0]["warning"] or "")
+
 	def test_a_channel_change_locks_the_booking_first_and_voids_a_waiting_guest_change(self):
 		"""G-45 re-review F8: the channel's modification and cancellation take the booking, then the
 		reservation, then the nights (the order every change to a TEX booking takes), and a guest
