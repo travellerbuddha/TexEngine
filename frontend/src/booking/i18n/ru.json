@@ -159,6 +159,8 @@
   "policy.payInFull": "Полная оплата при бронировании",
   "policy.depositPercent": "Предоплата {percent}% при бронировании",
   "policy.depositFixed": "Предоплата {amount} при бронировании",
+  "policy.depositFixedBooking": "Предоплата {amount} за всё бронирование, при бронировании",
+  "policy.depositWithRoom": "Предоплата: один раз за бронирование, с номером {n}",
   "policy.depositNights": { "one": "Стоимость первой ночи в качестве предоплаты", "few": "Стоимость {count} ночей в качестве предоплаты", "many": "Стоимость {count} ночей в качестве предоплаты", "other": "Стоимость {count} ночи в качестве предоплаты" },
   "policy.payNothingNow": "Сейчас ничего платить не нужно",
   "policy.payAtHotelPossible": "Возможна оплата в отеле",

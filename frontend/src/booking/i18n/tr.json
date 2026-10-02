@@ -159,6 +159,8 @@
   "policy.payInFull": "Rezervasyon sırasında tamamını ödeyin",
   "policy.depositPercent": "Rezervasyonda %{percent} ön ödeme",
   "policy.depositFixed": "Rezervasyonda {amount} ön ödeme",
+  "policy.depositFixedBooking": "Rezervasyonun tamamı için rezervasyonda {amount} ön ödeme",
+  "policy.depositWithRoom": "Ön ödeme: rezervasyon için bir kez, {n}. odayla alınır",
   "policy.depositNights": { "one": "Ön ödeme olarak ilk gecenin ücreti", "other": "Ön ödeme olarak {count} gecenin ücreti" },
   "policy.payNothingNow": "Şimdi ödeme yok",
   "policy.payAtHotelPossible": "Otelde ödeme yapılabilir",

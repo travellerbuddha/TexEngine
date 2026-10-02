@@ -159,6 +159,8 @@
   "policy.payInFull": "Plata integrală la rezervare",
   "policy.depositPercent": "Avans de {percent}% la rezervare",
   "policy.depositFixed": "Avans de {amount} la rezervare",
+  "policy.depositFixedBooking": "Avans de {amount} pentru întreaga rezervare, la rezervare",
+  "policy.depositWithRoom": "Avans: o singură dată pentru rezervare, cu camera {n}",
   "policy.depositNights": { "one": "Prețul primei nopți ca avans", "few": "Prețul a {count} nopți ca avans", "other": "Prețul a {count} de nopți ca avans" },
   "policy.payNothingNow": "Nu plătiți nimic acum",
   "policy.payAtHotelPossible": "Se poate plăti la hotel",

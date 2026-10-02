@@ -94,6 +94,8 @@ export interface RatePlanInfo {
     currency?: string | null
   } | null
   payment_policy?: {
+    /** the policy's id: a fixed deposit is taken once per booking and policy (LO-35) */
+    id?: string | null
     allow_pay_at_hotel?: boolean
     deposit_type?: string | null
     deposit_value?: string | null

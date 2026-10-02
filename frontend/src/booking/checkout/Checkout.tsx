@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { useI18n, type MessageKey } from "../i18n"
 import { pub } from "../lib/api"
 import { extraAnchor, extraStock, refusalText, stayDays, type DayAvailability, type ExtrasAvailability } from "../lib/extras"
-import { boardLabel, cancellation, paymentTerms } from "../lib/policy"
+import { boardLabel, bookingPaymentTerms, cancellation } from "../lib/policy"
 import { refusalMessage } from "../lib/refusals"
 import { useBooking, type Step } from "../flow/BookingContext"
 import { continuePayment } from "../flow/payment"
@@ -567,6 +567,8 @@ function PaymentStep() {
     choices.find((c) => c.method === flow.method && (!c.account || !flow.providerAccount || c.account === flow.providerAccount)) ?? choices[0] ?? null
   const method: PaymentMethod = current?.method ?? "Card"
   const currency = basket?.currency ?? flow.selections[0]?.currency ?? ""
+  // a fixed deposit is named once per booking and policy, as the server takes it (LO-35)
+  const payLines = bookingPaymentTerms(i18n, flow.selections.map((s) => (s ? { info: s.rateInfo, currency: s.currency } : null)))
   const payingNow = current?.dueNow ? !isZero(current.dueNow) : method !== "Pay at Hotel"
   const bookLabel = payingNow
     ? current?.dueNow
@@ -783,7 +785,7 @@ function PaymentStep() {
                     {s.ratePlanName ? ` · ${s.ratePlanName}` : ""}
                   </p>
                   <p className="text-soft">{cancellation(i18n, s.rateInfo, criteria.checkIn!).text}</p>
-                  {method !== "Pay at Hotel" && <p className="text-soft">{paymentTerms(i18n, s.rateInfo, s.currency).text}</p>}
+                  {method !== "Pay at Hotel" && <p className="text-soft">{payLines[i]?.text}</p>}
                   {s.rateInfo?.cancellation_policy?.description && <p className="text-xs text-muted">{s.rateInfo.cancellation_policy.description}</p>}
                 </li>
               ) : null,
