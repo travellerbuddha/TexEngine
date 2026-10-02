@@ -546,8 +546,12 @@ PENDING_REFUNDS_OF = """SELECT amount, currency FROM `tabTEX Payment Transaction
 # the booking and by the charge each was redeemed as. A NULL booking or reason matches nothing: a burn that names no
 # booking or charge is not one of these. Locked, after the guests and the charges (ADR-071 §4)
 BURNS_OF = """SELECT name, guest, program, points, property, reason FROM `tabTEX Loyalty Ledger`
-              WHERE guest IN %(guests)s AND entry_type='Burn' AND booking=%(b)s AND reason IN %(reasons)s
+              WHERE guest IN %(guests)s AND entry_type='Burn' AND booking IN %(bookings)s AND reason IN %(reasons)s
               FOR UPDATE"""
+# who spent the points of these charges, wherever they are now (LO-06): a plain read by the bookings they were
+# redeemed for (indexed), so their profiles are locked before the charges
+BURNERS_OF = """SELECT DISTINCT guest FROM `tabTEX Loyalty Ledger`
+                WHERE booking IN %(bookings)s AND entry_type='Burn' AND reason IN %(reasons)s"""
 
 
 def return_points(booking: str, *, reason: str) -> int:
@@ -582,8 +586,13 @@ def give_back(booking: str, *, reason: str, limit=None) -> list[dict]:
 	charges = loyalty_charges_on(booking) if over > 0 else []
 	if not charges:
 		return []
-	guests = sorted({b.booker_guest, *frappe.get_all("Reservation", filters={"tex_booking": booking},
-	                                                  pluck="guest")} - {None})
+	# a charge's burn row is on the booking it was redeemed for (this one, or one staff moved it from) and is the
+	# burner's, on the booking or not any more (LO-06)
+	homes = tuple(sorted({booking, *(h for h in frappe.get_all("TEX Payment Transaction", filters={
+		"name": ("in", charges)}, pluck="booking") if h)}))
+	reasons = tuple(f"redeemed as {c}" for c in charges)
+	guests = sorted({b.booker_guest, *frappe.get_all("Reservation", filters={"tex_booking": booking}, pluck="guest"),
+	                 *frappe.db.sql_list(BURNERS_OF, {"bookings": homes, "reasons": reasons})} - {None})
 	for g in guests:
 		lock_guest(g)                                  # a profile merged away holds no points here
 	rows = []
@@ -595,7 +604,7 @@ def give_back(booking: str, *, reason: str, limit=None) -> list[dict]:
 			rows.append((t, held))
 	burns = {}
 	if rows and guests:
-		for r in frappe.db.sql(BURNS_OF, {"guests": tuple(guests), "b": booking,
+		for r in frappe.db.sql(BURNS_OF, {"guests": tuple(guests), "bookings": homes,
 		                                  "reasons": tuple(f"redeemed as {t.name}" for t, _h in rows)}, as_dict=True):
 			burns[r.reason] = r
 	left, points, shares, settle_for = over, 0, [], {}

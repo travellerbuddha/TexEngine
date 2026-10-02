@@ -213,6 +213,8 @@ TEX_INDEXES = (
 	("TEX Funnel Event", ["occurred_at", "session_id"], "tex_funnel_time_session"),
 	# a redemption reads a guest's balance with a lock through this
 	("TEX Loyalty Ledger", ["guest", "program"], "tex_ledger_guest_program"),
+	# a points return finds who spent a booking's points through this, wherever they are now (LO-06, p73)
+	("TEX Loyalty Ledger", ["booking", "entry_type"], "tex_ledger_booking_type"),
 	# a merge reads and moves a profile's records with locking reads: every Link to Guest has an index
 	# that starts with it, so those reads lock the profile's rows only (third review of ADR-056)
 	("TEX Booking", ["booker_guest", "property"], "tex_booking_guest_prop"),

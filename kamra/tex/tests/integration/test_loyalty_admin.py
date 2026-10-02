@@ -835,8 +835,9 @@ class TestPointsBack(LoyaltyCase):
 		self.assertEqual(self.available(guest), 550)
 
 	def test_the_points_of_a_return_are_read_by_their_indexes(self):
-		params = {"guests": ("G-O20-1", "G-O20-2"), "b": "BK-O20", "reasons": ("redeemed as TXN-O20-1",)}
-		for sql in (loyalty.BURNS_OF, loyalty.PENDING_REFUNDS_OF):
+		params = {"guests": ("G-O20-1", "G-O20-2"), "b": "BK-O20", "bookings": ("BK-O20", "BK-O20-2"),
+		          "reasons": ("redeemed as TXN-O20-1",)}
+		for sql in (loyalty.BURNS_OF, loyalty.BURNERS_OF, loyalty.PENDING_REFUNDS_OF):
 			for row in frappe.db.sql("EXPLAIN " + sql, params, as_dict=True):
 				self.assertNotIn(row.type, ("ALL", "index"), (sql, row))
 				self.assertTrue(row.key, (sql, row))
@@ -916,3 +917,34 @@ class TestPointsBack(LoyaltyCase):
 		                      pluck="name")
 		self.assertEqual(cash, [])
 		self.assertIn("was not recorded", frappe.db.get_value("TEX Guest Change Request", case["request"], "error"))
+
+	# LO-06 (audit 2K-2): the burn row of a Loyalty charge is found by the charge, wherever the charge or its burner
+	# is now. Before: only among the booking's current guests and on this booking, so a charge staff moved to
+	# another booking, or a burner no longer on the room, gave no points back (an Error Log, the money left to staff).
+
+	def test_points_moved_to_another_booking_come_back_when_it_is_cancelled(self):
+		hotel, guest, red = self.spend("lo06-moved", 300)
+		other = guest_books(session="lo06-other", method="Pay at Hotel",
+		                    guest={"first_name": "Otto", "last_name": "Other", "email": "otto.lo06@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff move the points' money
+		pay.transfer(red["transaction"], from_booking=hotel["booking"], to_booking=other["booking"], amount="30.00",
+		             reason="the guest asked to pay the other stay")
+		self.assertEqual(self.available(guest), 700)
+		since = now_datetime()
+		booking_svc.cancel_reservation(other["rooms"][0]["reservation"], reason="lo06", waive_penalty=True)
+		self.assertEqual(self.available(guest), 1000)
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", other["booking"])])
+		self.assertFalse(frappe.db.exists("Error Log", {"method": f"Loyalty points not returned: {red['transaction']}",
+		                                                "creation": (">=", since)}))
+
+	def test_points_come_back_to_their_burner_after_the_guest_changed(self):
+		hotel, guest, red = self.spend("lo06-burner", 300)
+		newcomer = frappe.get_doc({"doctype": "Guest", "first_name": "Nina", "last_name": "New",
+		                           "email": "nina.lo06@example.com"}).insert(ignore_permissions=True).name
+		res = hotel["rooms"][0]["reservation"]
+		frappe.db.set_value("Reservation", res, "guest", newcomer, update_modified=False)
+		frappe.db.set_value("TEX Booking", hotel["booking"], "booker_guest", newcomer, update_modified=False)
+		booking_svc.cancel_reservation(res, reason="lo06", waive_penalty=True)
+		self.assertEqual(self.available(guest), 1000)
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", hotel["booking"])])
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
