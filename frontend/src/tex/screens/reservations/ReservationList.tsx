@@ -31,6 +31,12 @@ export default function ReservationList() {
   const from = params.get("from") ?? ""
   const to = params.get("to") ?? ""
   const pending = params.get("guest_changes") === "1"
+  // a day's arrivals or departures, as the dashboard counts them (opened from its "Today" card)
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(params.get("arriving") ?? "")
+    ? { kind: "arriving" as const, date: params.get("arriving")! }
+    : /^\d{4}-\d{2}-\d{2}$/.test(params.get("departing") ?? "")
+      ? { kind: "departing" as const, date: params.get("departing")! }
+      : null
   const page = Math.max(0, Number(params.get("page") ?? 0) || 0)
   const [draft, setDraft] = useState(q)
   useEffect(() => setDraft(q), [q])
@@ -70,15 +76,17 @@ export default function ReservationList() {
       arrival_from: from || undefined,
       arrival_to: to || undefined,
       pending_only: pending ? (1 as const) : undefined,
+      arriving: day?.kind === "arriving" ? day.date : undefined,
+      departing: day?.kind === "departing" ? day.date : undefined,
       limit: PAGE + 1,
       start: page * PAGE,
     }),
-    [property, q, status, from, to, pending, page],
+    [property, q, status, from, to, pending, page, day?.kind, day?.date],
   )
   const list = useTexQuery<ReservationRow[]>("crs", "reservations", args, [JSON.stringify(args)], canAnywhere("reservation.view"))
   const rows = list.data?.slice(0, PAGE)
   const hasNext = (list.data?.length ?? 0) > PAGE
-  const filtered = Boolean(q || status || (wanted && wanted !== "all" && wanted !== current?.name) || from || to || pending)
+  const filtered = Boolean(q || status || (wanted && wanted !== "all" && wanted !== current?.name) || from || to || pending || day)
   // nothing found in one hotel for a number or a name: the other hotels are one click away
   const elsewhere = Boolean(q && !all && hotels.length > 1 && rows && rows.length === 0 && !list.loading)
   const open = (name: string) => navigate(`/tex/reservations/${encodeURIComponent(name)}`, { state: { back: location.search } })
@@ -159,6 +167,19 @@ export default function ReservationList() {
             checked={pending}
             onChange={(e) => update({ guest_changes: e.target.checked ? "1" : null })}
           />
+          {day && (
+            <span className="inline-flex h-9 items-center gap-1 rounded-lg bg-tex-50 pr-1 pl-3 text-sm font-medium text-tex-800 ring-1 ring-tex-200">
+              {t(day.kind === "arriving" ? "res.list.arriving_on" : "res.list.departing_on", { date: date(day.date) })}
+              <button
+                type="button"
+                className="grid size-7 place-items-center rounded-md hover:bg-tex-100 focus-visible:outline-2 focus-visible:outline-tex-600"
+                aria-label={t("res.list.day_clear")}
+                onClick={() => update({ arriving: null, departing: null })}
+              >
+                <X className="size-4" aria-hidden />
+              </button>
+            </span>
+          )}
           {filtered && (
             <Button
               variant="ghost"

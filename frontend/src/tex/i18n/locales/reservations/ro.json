@@ -356,5 +356,8 @@
  "res.list.none_here": "Nimic nu se potrivește la {hotel}. Poate fi o rezervare a altui hotel.",
  "res.list.search_all": "Caută în toate hotelurile mele",
  "res.list.channel_ref": "Numărul de rezervare al canalului",
- "res.list.channel_ref_short": "Ref. canal {ref}"
+ "res.list.channel_ref_short": "Ref. canal {ref}",
+ "res.list.arriving_on": "Sosiri pe {date}",
+ "res.list.departing_on": "Plecări pe {date}",
+ "res.list.day_clear": "Arată toate datele"
 }

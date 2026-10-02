@@ -175,5 +175,7 @@
  "dash.today": "Dziś",
  "dash.view": "Widok pulpitu",
  "dash.view.hotel": "Ten hotel",
- "dash.view.portfolio": "Portfel"
+ "dash.view.portfolio": "Portfel",
+ "dash.arrivals_open": "Przyjazdy dziś: {count} — otwórz listę",
+ "dash.departures_open": "Wyjazdy dziś: {count} — otwórz listę"
 }

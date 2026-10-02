@@ -419,5 +419,20 @@
  "inventory.legend.select": "seç (tıklama, Shift+tıklama, sürükleme, oda adı veya gün başlığı da olur)",
  "inventory.legend.type": "fiyat hücresine yazın: fiyat veya değişim",
  "inventory.legend.clipboard": "fiyatları Excel ile kopyala / yapıştır",
- "inventory.legend.details": "hücrenin tüm ayarları"
+ "inventory.legend.details": "hücrenin tüm ayarları",
+ "inventory.metric.sell": "Satış fiyatı",
+ "inventory.sell.ref_short": {
+  "one": "{count} yetişkin · 1 gece",
+  "other": "{count} yetişkin · 1 gece"
+ },
+ "inventory.sell.ref": "Misafirin ödediği: pansiyon {board} · pazar {market} · {channel} ·",
+ "inventory.sell.ref_note": "şu an geçerli markup, kampanya ve vergilerle; kupon kodu varsayılmaz",
+ "inventory.sell.plan": "Satış fiyatının fiyat planı",
+ "inventory.sell.adults": "Satış fiyatının kişi sayısı",
+ "inventory.sell.none_on_sale": "Bu kontratın satışta bir sürümü yok: henüz bu kontratla satış yapılmıyor.",
+ "inventory.sell.not_sold_short": "satılmaz",
+ "inventory.sell.not_sold": "satılmaz: {reason}",
+ "inventory.sell.with_promos": "{amount}, {names} dahil",
+ "inventory.sell.loading": "satış fiyatı hesaplanıyor…",
+ "inventory.sell.out_of_range": "bu görünümde fiyatlanmadı: görmek için daha az gün gösterin"
 }

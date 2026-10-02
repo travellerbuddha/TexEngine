@@ -367,5 +367,8 @@
  "res.list.none_here": "W {hotel} nic nie pasuje. Może to rezerwacja innego obiektu.",
  "res.list.search_all": "Szukaj we wszystkich moich obiektach",
  "res.list.channel_ref": "Numer rezerwacji kanału",
- "res.list.channel_ref_short": "Nr kanału {ref}"
+ "res.list.channel_ref_short": "Nr kanału {ref}",
+ "res.list.arriving_on": "Przyjazdy {date}",
+ "res.list.departing_on": "Wyjazdy {date}",
+ "res.list.day_clear": "Pokaż wszystkie daty"
 }

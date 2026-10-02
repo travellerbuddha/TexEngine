@@ -11,6 +11,7 @@ from frappe.utils import getdate
 from kamra.tex.api._util import as_int, parse, text
 from kamra.tex.commercial import grid as grid_svc
 from kamra.tex.money import from_db, to_str
+from kamra.tex.reports import service as reports_svc
 from kamra.tex.security import scope
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import modification, quoting
@@ -143,7 +144,7 @@ def extras_for(property: str):
 @frappe.whitelist()
 def reservations(property: str | None = None, q: str | None = None, status: str | None = None,
                  arrival_from: str | None = None, arrival_to: str | None = None, pending_only: int = 0,
-                 limit: int = 50, start: int = 0):
+                 limit: int = 50, start: int = 0, arriving: str | None = None, departing: str | None = None):
 	props = [property] if property else sorted(scope.permitted_properties())
 	props = [p for p in props if scope.has_capability("reservation.view", p)]
 	if not props:
@@ -161,6 +162,13 @@ def reservations(property: str | None = None, q: str | None = None, status: str 
 		vals["at"] = getdate(arrival_to)
 	if int(pending_only or 0):
 		cond.append("r.tex_guest_change_pending = 1")
+	# the day's arrivals or departures exactly as the dashboard counts them (UX revision 2026-10)
+	if arriving:
+		cond.append("r.check_in_date = %(arr)s AND r.status IN %(arr_st)s")
+		vals.update(arr=getdate(arriving), arr_st=reports_svc.ARRIVING_STATUSES)
+	if departing:
+		cond.append("r.check_out_date = %(dep)s AND r.status IN %(dep_st)s")
+		vals.update(dep=getdate(departing), dep_st=reports_svc.DEPARTING_STATUSES)
 	if q:
 		# the channel's own reference too (an OTA's booking number, UX revision 2026-10): staff are
 		# often given only that one
@@ -410,6 +418,18 @@ def ari_rate_changes(property: str, contract: str, changes, apply: int = 0):
 	draft in one transaction, all or nothing, and audited. Needs ``contract.edit`` at the hotel."""
 	scope.assert_property(property)
 	return grid_svc.rate_changes(property, contract, parse(changes, None), apply=bool(as_int(apply, 0)))
+
+
+@frappe.whitelist()
+def ari_sell_prices(property: str, contract: str, start: str, days: int = 14, rate_plan: str | None = None,
+                    adults: int = 2, market: str | None = None, channel: str | None = None):
+	"""The sell price of one night, room by room, beside the grid's contract price (UX revision
+	2026-10): a reference stay priced by the engine with the markups and promotions in force now.
+	Read-only; ``price.view`` at the hotel."""
+	scope.assert_property(property)
+	return grid_svc.sell_prices(property, contract, start, as_int(days, 14, lo=1, hi=62), rate_plan=rate_plan or None,
+	                            adults=as_int(adults, 2, lo=1, hi=6), market=market or None,
+	                            channel=channel or None)
 
 
 # ─── limited extras (G-19) ───────────────────────────────────────────────
