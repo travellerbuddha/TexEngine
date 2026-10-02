@@ -227,8 +227,10 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
         await login(desk, AGENT)
         await desk.goto(detail)
         await expect(desk.getByRole("heading", { level: 1, name: new RegExp(esc(reservation)) })).toBeVisible()
-        await expect(desk.getByRole("button", { name: "Re-send confirmation" })).toBeVisible() // the page has loaded
+        await expect(desk.getByRole("link", { name: /^Booking / })).toBeVisible() // the page has loaded
         await expect(desk.getByRole("button", { name: "Cancel reservation", exact: true })).toHaveCount(0)
+        // the channel confirms its booking: TEX never sends its e-mail again (LO-11)
+        await expect(desk.getByRole("button", { name: "Re-send confirmation" })).toHaveCount(0)
       } finally {
         await context.close()
       }
