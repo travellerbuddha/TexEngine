@@ -26,6 +26,10 @@ from kamra.tex.refusal_codes import CODES
 
 # what an uncoded refusal of these kinds tells the guest: a 429, a 404, a 403 (checked in this order: the rate
 # limit error is a ValidationError, a missing record is not a permission error)
+# what a guest's error body never carries, whatever a refusal's own params say (staff keep them on the exception): the
+# market and the channel a sale was priced on (G-71; 2G-3 review round 1)
+GUEST_HIDDEN = frozenset({"market", "channel"})
+
 FALLBACK: tuple[tuple[type[Exception], str], ...] = (
 	(frappe.RateLimitExceededError, "RATE_LIMITED"),
 	(frappe.DoesNotExistError, "NOT_FOUND"),
@@ -127,8 +131,8 @@ def coded(fn):
 			code = guest_code(e)
 			if code and resp is not None:
 				resp["tex_code"] = code
-				params = _safe(getattr(e, "params", None)) if code_of(e) and isinstance(getattr(e, "params", None), dict) \
-					else None
+				params = {k: v for k, v in _safe(e.params).items() if k not in GUEST_HIDDEN} \
+					if code_of(e) and isinstance(getattr(e, "params", None), dict) else None
 				if params:
 					resp["tex_params"] = params
 			raise

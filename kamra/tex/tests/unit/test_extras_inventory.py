@@ -94,6 +94,19 @@ class TestEngineCapacity(unittest.TestCase):
 
 
 class TestGuestReason(unittest.TestCase):
+	def test_guests_never_see_the_market_channel_or_room_an_extra_is_limited_to(self):
+		"""2G-3 review round 1 (S2): an extra not sold with the stay's market, channel or room type says only that it
+		is not available (G-71), in a quote, a change's warnings and an extra added after booking alike."""
+		for reason in ("not available for market DE", "not available on channel OTA",
+		               "not available with room Standard Sea View-Aurora"):
+			self.assertEqual(extras.guest_reason(reason), "not available")
+		self.assertEqual(extras.guest_reason("Spa: not available for market DE; Gala: only 2 left on 2027-06-02"),
+		                 "Spa: not available; Gala: not enough left on 2027-06-02")
+		self.assertEqual(extras.guest_safe({"reasons": [{"message": "Spa: not available on channel OTA"}]}),
+		                 {"reasons": [{"message": "Spa: not available"}]})
+		for same in ("Spa: charged once per booking, on room 1", "not available on 2027-06-02"):
+			self.assertEqual(extras.guest_reason(same), same)
+
 	def test_guests_never_see_how_many_are_left(self):
 		self.assertEqual(extras.guest_reason("Spa: only 3 left on 2027-06-02"), "Spa: not enough left on 2027-06-02")
 		for same in ("sold out on 2027-06-02", "closed on 2027-06-02", "Pay only 3 nights"):

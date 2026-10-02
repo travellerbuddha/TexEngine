@@ -177,12 +177,14 @@ def capacity_refusal(use: tuple[tuple[date, int], ...], days: dict[date, ExtraDa
 
 
 _ONLY_LEFT = re.compile(r"\bonly \d+ left on\b")
+# an extra limited to other markets, channels or room types (``eligibility``): up to the next reason ("; ")
+_SCOPE = re.compile(r"\bnot available (?:for market|on channel|with room) [^;]*")
 
 
 def guest_reason(text):
-	"""A capacity reason as a guest may read it: "not enough left on D", never how many are
-	left (staff see the count; ADR-033)."""
-	return _ONLY_LEFT.sub("not enough left on", text) if isinstance(text, str) else text
+	"""A reason as a guest may read it: "not enough left on D", never how many are left (staff see the count;
+	ADR-033); "not available", never the market, channel or room type an extra is limited to (G-71)."""
+	return _SCOPE.sub("not available", _ONLY_LEFT.sub("not enough left on", text)) if isinstance(text, str) else text
 
 
 def guest_safe(value):

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 
 import frappe
 from frappe import _
@@ -21,7 +20,7 @@ from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
 from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.pricing import versions
-from kamra.tex.pricing.extras import guest_safe
+from kamra.tex.pricing.extras import guest_reason, guest_safe
 from kamra.tex.refusal_codes import MARKET_REFUSALS
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
@@ -210,7 +209,10 @@ def _market(site, market: str | None, country: str | None) -> versions.MarketDef
 		                                     default=site.default_market)
 	except versions.MarketResolutionError as e:
 		params = {"market": market.strip().upper()} if e.code == "MARKET_NOT_ALLOWED" and market else {}
-		frappe.throw(str(e), MarketRefused(code=e.code, params=params), title=_("Market"))
+		# the markets a link country belongs to are never named to a guest (G-71); the other texts name only the link's
+		frappe.throw(_("The country in your link belongs to more than one offer: choose one.")
+		             if e.code == "MARKET_AMBIGUOUS" else str(e), MarketRefused(code=e.code, params=params),
+		             title=_("Market"))
 	m = next(m for m in markets if m.code == code)
 	# the link's own market (named, or its country's) for a country outside it; a site's residents-only default is
 	# priced (searching again without the link would only come back to it) and the booking decides
@@ -234,8 +236,6 @@ def residency(market: versions.MarketDef | str | None) -> dict | None:
 _REASON_LIMITS = ("max_adults", "max_children", "max_occupants")
 # what the booking app shows of a promotion
 _PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added")
-# an extra's reason that names the market, the channel or the room type's record (``pricing.extras.eligibility``)
-_NAMES_SCOPE = re.compile(r"^not available (?:for market|on channel|with room) ")
 
 
 def _guest_reasons(reasons) -> list[dict]:
@@ -262,8 +262,8 @@ def _guest_quote(q: dict | None) -> dict | None:
 		q["reasons"] = _guest_reasons(q["reasons"])
 	for e in q.get("extras") or []:
 		# "not available for market DE / on channel … / with room …": only that it is not available
-		if isinstance(e, dict) and isinstance(e.get("reason"), str) and _NAMES_SCOPE.match(e["reason"]):
-			e["reason"] = "not available"
+		if isinstance(e, dict):
+			e["reason"] = guest_reason(e.get("reason"))
 	return q
 
 

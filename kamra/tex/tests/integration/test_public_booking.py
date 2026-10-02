@@ -802,6 +802,25 @@ class TestMarketIntegrity(TexTestCase):
 		self.assertTrue(totals(res))
 		self.assertEqual(totals(res), totals(self.search("o8-1c", market="DE")))
 
+	def test_a_guest_error_body_names_no_market(self):
+		"""2G-3 review round 1 (S2): a guest's error body names no market (G-71): a residents-only refusal carries the
+		countries only, and a link country two markets share is refused without naming them. The exception keeps the
+		market for staff (the Call Center)."""
+		saved, frappe.local.response = frappe.local.response, frappe._dict({"docs": []})
+		try:
+			e = self.assertRefused("MARKET_RESIDENCY", self.search, "r1-mk", market="TR", country="DE")
+			self.assertEqual(e.params, {"market": "TR", "countries": ["TR"]})
+			self.assertEqual(frappe.local.response["tex_params"], {"countries": ["TR"]})
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- two markets share a country
+			for code in ("RAT1", "RAT2"):
+				fx.ensure("TEX Market", {"market_code": code}, {"market_code": code, "market_name": code, "countries": "AT"})
+			e = self.assertRefused("MARKET_AMBIGUOUS", self.search, "r1-mk2", country="AT")
+			self.assertNotIn("RAT1", str(e))
+			self.assertNotIn("tex_params", frappe.local.response)
+		finally:
+			frappe.local.response = saved
+			frappe.clear_messages()
+
 	def test_a_residents_only_market_is_refused_for_another_link_country(self):
 		e = self.assertRefused("MARKET_RESIDENCY", self.search, "o8-2", market="TR", country="DE")
 		self.assertEqual(e.params, {"market": "TR", "countries": ["TR"]})
