@@ -39,6 +39,8 @@ export interface ContextHeaderProps {
   onShowIssue?: (index: number) => void
   /** a version edit through the workspace history (the Base room and Base occupancy chips) */
   edit?: HeaderEdit
+  /** the contract's version on sale now (its label), when there is one */
+  liveVersion?: string | null
 }
 
 /**
@@ -74,7 +76,16 @@ export function ContextHeader(p: ContextHeaderProps) {
               {t("rates.version.read_only")}
             </Badge>
           )}
-          {dirty && <Badge tone="warning">{t("rates.version.unsaved")}</Badge>}
+          {/* where the edits stand, in words (never colour alone): not saved / saved to the draft, not
+              on sale until published / which version guests are booking now */}
+          {dirty ? (
+            <Badge tone="warning">{t("rates.version.unsaved")}</Badge>
+          ) : (
+            editable && doc.status === "Draft" && <Badge tone="info">{t("rates.version.saved_not_live")}</Badge>
+          )}
+          {p.liveVersion !== undefined && (
+            <span className="text-xs text-zinc-600">{p.liveVersion ? t("rates.version.on_sale", { v: p.liveVersion }) : t("rates.version.none_on_sale")}</span>
+          )}
           <LiveCheck preview={preview} issueText={p.issueText} onShowIssue={p.onShowIssue} />
         </div>
         <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-2">

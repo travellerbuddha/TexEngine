@@ -517,7 +517,7 @@
  "rates.nav.extras": "Доп. услуги",
  "rates.nav.fx": "Валютные политики",
  "rates.nav.fx_rates": "Курсы валют",
- "rates.nav.label": "Разделы «Тарифы и контракты»",
+ "rates.nav.label": "Разделы правил продаж",
  "rates.nav.markup": "Наценки",
  "rates.nav.payment": "Оплата",
  "rates.nav.pricing": "Ценовые политики",
@@ -2053,5 +2053,11 @@
   "few": "{section}: {count} проблемы",
   "many": "{section}: {count} проблем",
   "other": "{section}: {count} проблемы"
- }
+ },
+ "rates.version.saved_not_live": "Сохранено в черновике · в продаже только после публикации",
+ "rates.version.on_sale": "Сейчас в продаже: {v}",
+ "rates.version.none_on_sale": "Ни одна версия этого контракта ещё не продаётся",
+ "rates.version.discard_title": "Отменить несохранённые изменения?",
+ "rates.version.discard_body": "Черновик вернётся к последнему сохранённому состоянию. Все изменения после последнего сохранения будут потеряны без возможности отмены.",
+ "rates.version.discard_confirm": "Отменить изменения"
 }

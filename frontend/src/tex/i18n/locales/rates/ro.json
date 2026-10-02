@@ -514,7 +514,7 @@
  "rates.nav.extras": "Servicii extra",
  "rates.nav.fx": "Politici valutare",
  "rates.nav.fx_rates": "Cursuri valutare",
- "rates.nav.label": "Secțiuni Tarife și contracte",
+ "rates.nav.label": "Secțiuni reguli de vânzare",
  "rates.nav.markup": "Adaosuri",
  "rates.nav.payment": "Plată",
  "rates.nav.pricing": "Politici de preț",
@@ -1988,5 +1988,11 @@
   "one": "{section}: {count} problemă",
   "few": "{section}: {count} probleme",
   "other": "{section}: {count} de probleme"
- }
+ },
+ "rates.version.saved_not_live": "Salvat în ciornă · nu se vinde până la publicare",
+ "rates.version.on_sale": "În vânzare acum: {v}",
+ "rates.version.none_on_sale": "Nicio versiune a acestui contract nu este încă în vânzare",
+ "rates.version.discard_title": "Renunțați la modificările nesalvate?",
+ "rates.version.discard_body": "Ciorna revine la ultima stare salvată. Toate modificările de la ultima salvare se pierd și nu pot fi anulate.",
+ "rates.version.discard_confirm": "Renunțați la modificări"
 }

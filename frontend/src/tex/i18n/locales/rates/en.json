@@ -513,7 +513,7 @@
  "rates.nav.extras": "Extras",
  "rates.nav.fx": "FX policies",
  "rates.nav.fx_rates": "FX rates",
- "rates.nav.label": "Rates & Contracts sections",
+ "rates.nav.label": "Selling rules sections",
  "rates.nav.markup": "Markup",
  "rates.nav.payment": "Payment",
  "rates.nav.pricing": "Pricing policies",
@@ -1926,5 +1926,11 @@
  "rates.ws.issue.group": {
   "one": "{section}: {count} issue",
   "other": "{section}: {count} issues"
- }
+ },
+ "rates.version.saved_not_live": "Saved to the draft · not on sale until published",
+ "rates.version.on_sale": "On sale now: {v}",
+ "rates.version.none_on_sale": "No version of this contract is on sale yet",
+ "rates.version.discard_title": "Discard the unsaved changes?",
+ "rates.version.discard_body": "The draft goes back to its last saved state. Every change since the last save is lost and cannot be undone.",
+ "rates.version.discard_confirm": "Discard changes"
 }

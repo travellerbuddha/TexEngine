@@ -513,7 +513,7 @@
  "rates.nav.extras": "Ekstralar",
  "rates.nav.fx": "Kur politikaları",
  "rates.nav.fx_rates": "Döviz kurları",
- "rates.nav.label": "Fiyatlar ve Kontratlar bölümleri",
+ "rates.nav.label": "Satış kuralları bölümleri",
  "rates.nav.markup": "Kâr payı (markup)",
  "rates.nav.payment": "Ödeme",
  "rates.nav.pricing": "Fiyatlandırma politikaları",
@@ -878,7 +878,7 @@
  "rates.version.check_ok": "Hata veya uyarı yok. Versiyon yayınlanabilir.",
  "rates.version.checking": "Versiyon kontrol ediliyor…",
  "rates.version.create_draft": "Taslak oluştur",
- "rates.version.discard": "Vazgeç",
+ "rates.version.discard": "Değişiklikleri at",
  "rates.version.draft_created": "Taslak oluşturuldu",
  "rates.version.draft_exists": "Bu kontratın zaten bir taslağı var. Önce onu yayınlayın veya düzenleyin.",
  "rates.version.draft_from": "Bundan yeni taslak",
@@ -1917,5 +1917,11 @@
  "rates.ws.issue.group": {
   "one": "{section}: {count} sorun",
   "other": "{section}: {count} sorun"
- }
+ },
+ "rates.version.saved_not_live": "Taslağa kaydedildi · yayımlanana kadar satışta değil",
+ "rates.version.on_sale": "Şu an satışta: {v}",
+ "rates.version.none_on_sale": "Bu kontratın satışta olan bir versiyonu henüz yok",
+ "rates.version.discard_title": "Kaydedilmemiş değişiklikler atılsın mı?",
+ "rates.version.discard_body": "Taslak son kaydedilen haline döner. Son kayıttan sonraki tüm değişiklikler kaybolur ve geri alınamaz.",
+ "rates.version.discard_confirm": "Değişiklikleri at"
 }

@@ -517,7 +517,7 @@
  "rates.nav.extras": "Dodatki",
  "rates.nav.fx": "Polityki kursowe",
  "rates.nav.fx_rates": "Kursy walut",
- "rates.nav.label": "Sekcje Cenniki i umowy",
+ "rates.nav.label": "Sekcje zasad sprzedaży",
  "rates.nav.markup": "Marże",
  "rates.nav.payment": "Płatność",
  "rates.nav.pricing": "Polityki cenowe",
@@ -2053,5 +2053,11 @@
   "few": "{section}: {count} problemy",
   "many": "{section}: {count} problemów",
   "other": "{section}: {count} problemu"
- }
+ },
+ "rates.version.saved_not_live": "Zapisano w wersji roboczej · w sprzedaży dopiero po publikacji",
+ "rates.version.on_sale": "Obecnie w sprzedaży: {v}",
+ "rates.version.none_on_sale": "Żadna wersja tej umowy nie jest jeszcze w sprzedaży",
+ "rates.version.discard_title": "Odrzucić niezapisane zmiany?",
+ "rates.version.discard_body": "Wersja robocza wróci do ostatnio zapisanego stanu. Wszystkie zmiany od ostatniego zapisu zostaną utracone bez możliwości cofnięcia.",
+ "rates.version.discard_confirm": "Odrzuć zmiany"
 }

@@ -3,9 +3,10 @@ import { useNavigate, useParams } from "react-router-dom"
 import { FilePlus2 } from "lucide-react"
 import { useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
+import { useUnsavedChanges } from "../../../lib/unsaved"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Button, Card, CardBody, Drawer, ErrorState, isSaveShortcut, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
+import { Button, Card, CardBody, ConfirmDialog, Drawer, ErrorState, isSaveShortcut, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
 import { IssueCount } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
 import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm, type Settings } from "../lib/tables"
@@ -74,6 +75,8 @@ export default function VersionEditor() {
   const [ruleTable, setRuleTable] = useState<RuleTableId>(() => initialPlace().table ?? DEFAULT_RULE_TABLE)
   const [region, setRegion] = useState<PricingRegion | undefined>(() => initialPlace().region)
   const [publishing, setPublishing] = useState(false)
+  // Discard drops every unsaved edit and the undo history: asked first (UX revision 2026-10)
+  const [discarding, setDiscarding] = useState(false)
   const [drafting, setDrafting] = useState(false)
   // the Price test drawer (S14): open with where it starts (a matrix cell's "Test this price", or
   // the header's Price test from the matrix cell that last had the focus)
@@ -185,10 +188,7 @@ export default function VersionEditor() {
     }
   }, [doc, state, editable, dirty, base, tablesNow, save, settle, toast, t])
 
-  // Ctrl/Cmd+S saves (a cell editor commits its entry first, see onSave); warn before leaving with
-  // unsaved edits, and with input that is not in the version yet: an error draft, an open
-  // combination builder, a changed cell editor (S16 review), a changed child-age band field or new
-  // period date, a base-room entry waiting for the server's adjustment (S16 re-review)
+  // Ctrl/Cmd+S saves (a cell editor commits its entry first, see onSave)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // by letter on every layout (Russian: Ctrl + the key marked S types "ы"; ui/keys.ts)
@@ -197,16 +197,15 @@ export default function VersionEditor() {
         void onSave()
       }
     }
-    const onUnload = (e: BeforeUnloadEvent) => {
-      if (dirty || keptInput(kept) || document.querySelector(UNCOMMITTED_INPUT)) e.preventDefault()
-    }
     window.addEventListener("keydown", onKey)
-    window.addEventListener("beforeunload", onUnload)
-    return () => {
-      window.removeEventListener("keydown", onKey)
-      window.removeEventListener("beforeunload", onUnload)
-    }
-  }, [onSave, dirty, kept])
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onSave])
+  // the shell asks before anything takes the user away (an in-app link, the hotel switcher, the
+  // command palette, a reload: lib/unsaved) with unsaved edits, and with input that is not in the
+  // version yet: an error draft, an open combination builder, a changed cell editor (S16 review), a
+  // changed child-age band field or new period date, a base-room entry waiting for the server's
+  // adjustment (S16 re-review)
+  useUnsavedChanges(() => dirty || keptInput(kept) || Boolean(document.querySelector(UNCOMMITTED_INPUT)))
 
   // settings and selling terms go through the history like the tables (one entry per field while
   // the user types), so Ctrl/Cmd+Z undoes them in order with the rest
@@ -296,6 +295,10 @@ export default function VersionEditor() {
   )
 
   const draft = contract.data?.versions.find((v) => v.status === "Draft")
+  // the version guests are booking now (the header says it beside the draft's state)
+  const activeName = contract.data?.contract.active_version
+  const active = activeName ? contract.data?.versions.find((v) => v.name === activeName) : undefined
+  const liveVersion = contract.data ? (active ? versionLabel(active.name, active.version_no) : null) : undefined
   const cd = doc?.contract_doc
   const vlabel = doc ? versionLabel(doc.name, doc.version_no) : versionLabel(version)
   const canPublish = Boolean(doc?.can_publish ?? contract.data?.can_publish)
@@ -417,7 +420,8 @@ export default function VersionEditor() {
           saving={save.pending}
           canPublish={canPublish}
           onSave={() => void onSave()}
-          onDiscard={() => load(doc)}
+          onDiscard={() => setDiscarding(true)}
+          liveVersion={liveVersion}
           onPublish={() => setPublishing(true)}
           onPriceTest={() => openTest(activeCell.current)}
           setSelling={setSelling}
@@ -474,6 +478,17 @@ export default function VersionEditor() {
           <PriceTestPanel {...props} layout="drawer" prefill={testing} />
         </Drawer>
       )}
+      <ConfirmDialog
+        open={discarding}
+        onClose={() => setDiscarding(false)}
+        onConfirm={() => {
+          if (doc) load(doc)
+        }}
+        title={t("rates.version.discard_title")}
+        body={t("rates.version.discard_body")}
+        confirmLabel={t("rates.version.discard_confirm")}
+        tone="danger"
+      />
       {doc && cd && publishing && (
         <PublishDialog
           open

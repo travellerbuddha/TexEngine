@@ -513,7 +513,7 @@
  "rates.nav.extras": "Extras",
  "rates.nav.fx": "Wechselkursregeln",
  "rates.nav.fx_rates": "Wechselkurse",
- "rates.nav.label": "Bereiche von Preise & Verträge",
+ "rates.nav.label": "Bereiche der Verkaufsregeln",
  "rates.nav.markup": "Aufschläge",
  "rates.nav.payment": "Zahlung",
  "rates.nav.pricing": "Preisrichtlinien",
@@ -1917,5 +1917,11 @@
  "rates.ws.issue.group": {
   "one": "{section}: {count} Problem",
   "other": "{section}: {count} Probleme"
- }
+ },
+ "rates.version.saved_not_live": "Im Entwurf gespeichert · erst nach Veröffentlichung im Verkauf",
+ "rates.version.on_sale": "Jetzt im Verkauf: {v}",
+ "rates.version.none_on_sale": "Noch keine Version dieses Vertrags im Verkauf",
+ "rates.version.discard_title": "Nicht gespeicherte Änderungen verwerfen?",
+ "rates.version.discard_body": "Der Entwurf kehrt zum zuletzt gespeicherten Stand zurück. Alle Änderungen seit dem letzten Speichern gehen verloren und lassen sich nicht rückgängig machen.",
+ "rates.version.discard_confirm": "Änderungen verwerfen"
 }
