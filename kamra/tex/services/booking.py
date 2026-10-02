@@ -1191,10 +1191,14 @@ def _policy_penalty(reservation, today=None) -> tuple[D, dict]:
 
 def channel_of(booking: str | None) -> dict | None:
 	"""A booking a channel manager sold (``channel_connection`` and ``external_ref`` are written when it is
-	created and never change): → {"connection", "ref"}; None for any other. A plain read."""
+	created and never change): → {"connection", "label", "ref"}; None for any other. A plain read. ``label`` is what
+	people are told (the connection's label, else its name: LO-13); ``connection`` is for the audit."""
 	row = frappe.db.get_value("TEX Booking", booking, ["channel_connection", "external_ref"], as_dict=True) \
 		if booking else None
-	return {"connection": row.channel_connection, "ref": row.external_ref} if row and row.channel_connection else None
+	if not (row and row.channel_connection):
+		return None
+	label = frappe.db.get_value("TEX Integration Connection", row.channel_connection, "label")
+	return {"connection": row.channel_connection, "label": label or row.channel_connection, "ref": row.external_ref}
 
 
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
@@ -1221,7 +1225,7 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	sold_by = channel_of(res.tex_booking) if source != "Channel" else None
 	if sold_by:
 		if not channel_override:
-			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["connection"]))
+			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["label"]))
 		scope.require("channel.manage", res.property)
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status))

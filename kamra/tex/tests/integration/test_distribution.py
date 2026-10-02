@@ -436,13 +436,30 @@ class TestChannelBookings(DistributionCase):
 		admin = self.staff("y8-admin@example.com", "Hotel Admin", "Hotel Admin")
 		frappe.set_user(admin)  # nosemgrep: frappe-setuser -- the hotel's administrator
 		preview = crs_api.cancellation_preview(reservation=res)
-		self.assertEqual(preview["channel"], {"connection": self.conn.name, "ref": "OTA-100"})
+		self.assertEqual(preview["channel"], {"connection": self.conn.name, "label": "Sandbox CM", "ref": "OTA-100"})
 		crs_api.cancel(reservation=res, reason="the guest phoned the hotel", channel_override=1)
 		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
 		warned = frappe.get_all("TEX Audit Event", filters={"action": "reservation.channel_cancel_override",
 		                                                    "reference_name": res}, pluck="new_value")
 		self.assertEqual(len(warned), 1)
 		self.assertIn("OTA-100", warned[0])
+
+	def test_the_channel_is_named_by_its_label_never_its_id(self):
+		"""LO-13 (audit 2K-3): a refusal, the cancel dialog and the reservation name the channel connection by its
+		label (before: "Sold by CON-0001", also on the guest's manage page); the audit keeps its id."""
+		from kamra.tex.api import crs as crs_api
+
+		_booking, rooms = self.booked("L1")
+		res = rooms["L1"]
+		with self.assertRaises(frappe.ValidationError) as caught:
+			crs_api.cancel(reservation=res, reason="the guest phoned")
+		self.assertIn("Sold by Sandbox CM", str(caught.exception))
+		self.assertNotIn(self.conn.name, str(caught.exception))
+		named = {"connection": self.conn.name, "label": "Sandbox CM", "ref": "OTA-100"}
+		self.assertEqual(crs_api.cancellation_preview(reservation=res)["channel"], named)
+		self.assertEqual(crs_api.reservation(res)["channel_booking"], named)
+		self.conn.db_set("label", "")                                                  # no label: its name
+		self.assertEqual(crs_api.cancellation_preview(reservation=res)["channel"]["label"], self.conn.name)
 
 	def test_a_guest_booking_has_no_channel(self):
 		"""Only an OTA booking is the channel's: the preview of a TEX booking names none."""

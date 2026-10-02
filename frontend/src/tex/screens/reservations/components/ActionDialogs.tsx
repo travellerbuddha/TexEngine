@@ -268,7 +268,7 @@ export function CancelDialog({
           )}
         </div>
         {preview?.channel && (
-          <Notice tone="warning">{t("res.cancel.channel", { connection: preview.channel.connection, ref: preview.channel.ref })}</Notice>
+          <Notice tone="warning">{t("res.cancel.channel", { connection: preview.channel.label, ref: preview.channel.ref })}</Notice>
         )}
         {canWaive && preview && !isZero(preview.penalty) && (
           <Checkbox
