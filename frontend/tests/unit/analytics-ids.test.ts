@@ -4,6 +4,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { trackers } from "../../src/booking/lib/analytics.ts"
+import { analyticsId } from "../../src/booking/lib/analyticsIds.ts"
 import type { Site as BookingSite } from "../../src/booking/types.ts"
 import { newSite, validateSite, type Site } from "../../src/tex/screens/booking-engine/site.ts"
 
@@ -53,4 +54,13 @@ test("an unchanged older id keeps the site savable, as on the server", () => {
   const saved = adminSite({ gtm_container_id: "GTM-old'bad" })
   assert.equal(validateSite(adminSite({ gtm_container_id: "GTM-old'bad" }), saved).gtm_container_id, undefined)
   assert.equal(validateSite(adminSite({ gtm_container_id: "GTM-new'bad" }), saved).gtm_container_id, "be.err.gtm")
+})
+
+test("an id is stripped of exactly what the server strips (LO-49: Python str.strip, not String.trim)", () => {
+  // the server (TEXBookingSite.validate) strips, then matches, and stores what it matched: the admin form and the
+  // engine read the same value only when they strip the same characters
+  assert.equal(analyticsId("ga4", " G-ABCD1234\n"), "G-ABCD1234")
+  assert.equal(analyticsId("ga4", "G-ABCD1234\x85"), "G-ABCD1234") // NEL: Python strips it, String.trim does not
+  assert.equal(analyticsId("ga4", "\x1fG-ABCD1234"), "G-ABCD1234") // unit separator: the same
+  assert.equal(analyticsId("ga4", "﻿G-ABCD1234"), null) // a byte-order mark: String.trim strips it, the server refuses it
 })
