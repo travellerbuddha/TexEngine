@@ -948,3 +948,23 @@ class TestPointsBack(LoyaltyCase):
 		self.assertEqual(self.available(guest), 1000)
 		self.assertEqual(self.reverse_rows(guest), [(300, "Available", hotel["booking"])])
 		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+
+	def test_a_revival_short_of_the_points_given_back_says_so_to_staff(self):
+		"""LO-23 (audit 2K-2): a hold paid partly with points expires (the points come back), then its card money,
+		paid in time, comes late: the card alone no longer pays what it owes, so it is not taken back (points are
+		never burned again, 2H-2). The note for staff says the points were given back (before: a generic note)."""
+		held = guest_books(session="lo23")                                   # a card hold waiting for its payment
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", held["booking"], "booker_guest")
+		self.give(guest, 1000)
+		loyalty.redeem(guest, held["booking"], 500, idempotency_key="lo23-pts")
+		rest = public.pay_booking(token=held["manage_token"])                # the rest of the deposit, by card
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
+		self.assertTrue(booking_svc.expire_booking(held["booking"], now=add_to_date(now_datetime(), hours=2)))
+		self.assertEqual(self.available(guest), 1000)
+		public.mock_pay(transaction=rest["transaction"], outcome="success", sig=rest["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what is on record
+		row = frappe.db.get_value("TEX Payment Transaction", rest["transaction"],
+		                          ["status", "reconciliation", "reconciliation_note"], as_dict=True)
+		self.assertEqual((row.status, row.reconciliation), ("Succeeded", "Action Required"))
+		self.assertIn("points that paid part of it were given back", row.reconciliation_note)
