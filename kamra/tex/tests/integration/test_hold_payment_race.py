@@ -857,7 +857,8 @@ class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
 		self.b, self.c = b["booking"], started["transaction"]
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection needs committed fixtures
 
-	def test_a_refunds_outcome_judges_the_booking_as_it_is_now(self):
+	def refund_while_it_expires(self, *, send_mail: bool = False) -> dict:
+		"""40 of C refunded (durable) while the expiry job, another connection, ends the booking. → the refund."""
 		import traceback
 
 		from kamra.tex.payments.providers.simple import MockProvider
@@ -872,7 +873,7 @@ class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
 			frappe.connect()
 			try:
 				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
-				booking.expire_booking(self.b, force=True, send_mail=False)
+				booking.expire_booking(self.b, force=True, send_mail=send_mail)
 				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the job's own transaction
 			except Exception:
 				frappe.db.rollback()
@@ -896,12 +897,34 @@ class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
 		finally:
 			frappe.flags.in_test = True
 		self.assertEqual(errors, [])
+		return out
+
+	def test_a_refunds_outcome_judges_the_booking_as_it_is_now(self):
+		out = self.refund_while_it_expires()
 		self.assertEqual(out["status"], "Succeeded")
 		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", out["refund"], "booking"))  # off no booking
 		now = frappe.db.get_value("TEX Booking", self.b, ["status", "paid_amount"], as_dict=True, for_update=True)
 		self.assertEqual((now.status, D(now.paid_amount)), ("Cancelled", D(0)))
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", self.c, "reconciliation", for_update=True),
 		                 "Action Required")
+
+	def test_a_charge_the_expiry_flagged_meanwhile_is_flagged_once_with_both_causes(self):
+		"""LO-16 (audit 2K-1): the expiry put C in reconciliation while the refund's request still read the older
+		view; the refund's outcome reads C as it is now (a locking read): one ``payment.reconciliation_required``,
+		one notice to the team, and its cause added to C's note."""
+		told = []
+		with mock.patch("kamra.tex.services.notify.team_notice", lambda txn, *a, **kw: told.append(txn.name)), \
+				mock.patch("kamra.tex.services.notify.payment_after_expiry"):
+			self.assertEqual(self.refund_while_it_expires(send_mail=True)["status"], "Succeeded")
+		self.assertEqual(told, [self.c])
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- read what both connections committed
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                     "reference_name": self.c}), 1)
+		row = frappe.db.get_value("TEX Payment Transaction", self.c, ["reconciliation", "reconciliation_note"],
+		                          as_dict=True)
+		self.assertEqual(row.reconciliation, "Action Required")
+		self.assertIn("whose hold ended", row.reconciliation_note)                       # the expiry's cause
+		self.assertIn("was on its way when the booking ended", row.reconciliation_note)  # and the refund's
 
 
 class TestHoldPolicy(HoldCase):
@@ -1998,6 +2021,23 @@ class TestPaymentsVerifiedByTheJob(HoldCase):
 		self.assertEqual(asked, [txns[n] for n in ("soon_hold", "late_hold", "old_free", "new_free",
 		                                          "gone_short", "gone_long")])
 
+	def test_a_charge_with_nothing_to_ask_takes_no_place_in_the_tick(self):
+		"""LO-21 (audit 2K-1): a charge of a gateway asked by the reference TEX stored (iyzico's checkout token)
+		that stores none has nothing to ask: however urgent, it never takes one of the tick's places."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		tokenless, waiting = (self.book(guest=dict(GUEST, email=f"lo21-{n}@example.com")) for n in range(2))
+		empty, askable = self.start_payment(tokenless)["transaction"], self.start_payment(waiting)["transaction"]
+		frappe.db.set_value("TEX Payment Transaction", empty, "provider_ref", None, update_modified=False)
+		self.aged(empty, created_ago=6, expires_in=2)                 # the more urgent
+		self.aged(askable, created_ago=5, expires_in=10)
+		with self.askable() as asked, mock.patch.object(pay, "REVERIFY_BATCH", 1), \
+				mock.patch.object(MockProvider, "status_by_ref", True, create=True):
+			pay.reverify_pending()
+		self.assertEqual(asked, [askable])
+		self.assertEqual(txn_state(askable).status, "Succeeded")
+		self.assertEqual(txn_state(empty).status, "Pending")
+
 	def test_a_charge_whose_only_question_failed_after_its_deadlock_does_not_end_the_tick(self):
 		"""P1-8 (2E-2 fix 2): ``complete_retrying`` rolls the whole transaction back on a deadlock, savepoints
 		included; the job's own rollback of the failed charge then finds none. The error is logged and the next
@@ -2090,6 +2130,58 @@ class TestAFailedTryLeavesNothing(HoldCase):
 		self.assertEqual(txn_state(txn).status, "Pending")
 		self.assertEqual(pay.allocated_of(txn), 0)
 
+	def sniffed_reverify(self, txn: str) -> list[str]:
+		"""Staff re-verify ``txn`` (tok-1 answers it failed, tok-2 paid), recording each gateway question, each
+		``FOR UPDATE`` and each step commit, in order."""
+		from kamra.tex.api import payments as payments_api
+
+		price = f"{D(frappe.db.get_value('TEX Payment Transaction', txn, 'amount')):.2f}"
+		events: list[str] = []
+
+		def asked(token, answer):
+			return lambda t: events.append(f"ask {token}") or answer(t)
+
+		self.gw.answers["tok-1"] = asked("tok-1", self.gw.failed)
+		self.gw.answers["tok-2"] = asked("tok-2", lambda t: self.gw.paid(t, "P2", price=price))
+		real_sql, real_step = frappe.db.sql, pay._commit_step
+
+		def sql(query, *args, **kw):
+			if "FOR UPDATE" in str(query).upper():
+				events.append("lock")
+			return real_sql(query, *args, **kw)
+
+		def step():
+			events.append("commit")
+			real_step()
+
+		with mock.patch.object(frappe.db, "sql", side_effect=sql), mock.patch.object(pay, "_commit_step", side_effect=step):
+			payments_api.reverify(transaction=txn)
+		self.assertEqual([e for e in events if e.startswith("ask")], ["ask tok-1", "ask tok-2"])
+		return events
+
+	def assert_no_lock_through_the_second_question(self, events: list[str]) -> None:
+		before = events[:events.index("ask tok-2")]
+		self.assertIn("lock", before[events.index("ask tok-1"):])                 # the first answer was handled
+		since_commit = before[len(before) - before[::-1].index("commit"):] if "commit" in before else before
+		self.assertNotIn("lock", since_commit)
+
+	def test_staff_reverify_holds_no_lock_through_the_next_tokens_question(self):
+		"""LO-19 (audit 2K-1): a token's answer failed the charge; before staff re-verify asks the gateway about its
+		next token, what that try wrote is on record and every row lock it took released (``step_commit``, as the
+		job does; ADR-066). Sniffed: no ``FOR UPDATE`` since the last step commit when the next token is asked."""
+		_b, txn = self.two_tokens()
+		self.assert_no_lock_through_the_second_question(self.sniffed_reverify(txn))
+		self.assertEqual(txn_state(txn).status, "Succeeded")
+
+	def test_staff_reverify_of_a_failed_charge_holds_no_lock_through_the_next_tokens_question(self):
+		"""LO-19, review round 1: staff re-verify a Failed charge (a lost callback of an old checkout): a token's
+		failed answer changes nothing, but ``complete`` locked the link and the charge for it; they are released
+		before the next token is asked all the same."""
+		_b, txn = self.two_tokens()
+		frappe.db.set_value("TEX Payment Transaction", txn, "status", "Failed", update_modified=False)
+		self.assert_no_lock_through_the_second_question(self.sniffed_reverify(txn))
+		self.assertEqual(txn_state(txn).status, "Succeeded")
+
 
 class TestIyzicoFraudReview(HoldCase):
 	"""O-18 (audit 2E-2, D-8): iyzico holds a payment in its fraud review (fraudStatus 0; absent or unknown is
@@ -2151,6 +2243,46 @@ class TestIyzicoFraudReview(HoldCase):
 		self.assertEqual(payments_api.reverify(transaction=txn)["status"], "Succeeded")
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 
+	def test_no_second_payment_starts_while_a_payment_is_in_review(self):
+		"""LO-05 (audit 2K-1): while iyzico reviews a payment, the guest cannot pay again: a new charge (a new key, a
+		payment link of the booking) is refused, and the reviewed charge is never superseded (an approved review and a
+		second capture would take the money twice)."""
+		from kamra.tex.services import refusals
+
+		b, txn, _attempt = self.reviewed()
+		with self.assertRaises(pay.PaymentBusy) as cm:
+			self.start_payment(b)                                       # pay_booking's next key: a new charge
+		self.assertEqual(refusals.code_of(cm.exception), "PAYMENT_UNDER_REVIEW")
+		row = frappe.db.get_value("TEX Payment Transaction", txn, ["amount", "currency", "provider_account", "return_url"],
+		                          as_dict=True)
+		with self.assertRaises(pay.PaymentBusy):                       # the same key: the reviewed charge itself
+			pay.start_payment(property=fx.PROPERTY, amount=row.amount, currency=row.currency,
+			                  provider_account=row.provider_account, booking=b["booking"], description="x", customer={},
+			                  return_url=row.return_url, idempotency_key=f"book:{b['booking']}:{b['due_now']}:1")
+		link = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                       expires_hours=72, booking=b["booking"])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens a payment link of the booking
+		with self.assertRaises(pay.PaymentBusy):
+			public.pay_link(token=link["token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		self.assertEqual(frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Charge", "booking": b["booking"]},
+		                                pluck="name"), [txn])
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"payment_link": link["link"]}))
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, ["status", "raw_status"]),
+		                 ("Pending", "FRAUD_REVIEW"))
+
+	def test_a_review_never_refuses_an_unrelated_payment(self):
+		"""LO-05, review round 1: only the booking's own charges and its links' (or the link's) count. A charge whose
+		booking is blank never matches a payment whose booking is blank too (a link sold without a booking)."""
+		_b, txn, _attempt = self.reviewed()
+		frappe.db.sql("UPDATE `tabTEX Payment Transaction` SET booking = '' WHERE name = %s", txn)
+		link = pay.create_link(property=fx.PROPERTY, amount="50", currency="EUR", description="Deposit", expires_hours=72)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens a link sold without a booking
+		started = public.pay_link(token=link["token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", started["transaction"], "payment_link"),
+		                 link["link"])
+
 	def test_a_payment_iyzico_rejects_after_its_review_lets_the_rooms_go_and_tells_the_team(self):
 		from kamra.tex.services import notify
 
@@ -2171,6 +2303,95 @@ class TestIyzicoFraudReview(HoldCase):
 		passes(b["booking"], 26)
 		run_expiry_jobs()
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+
+
+class TestAChargeSettledDuringItsCheckout(HoldCase):
+	"""LO-04 (audit 2K-1): a reused Pending charge that a callback settles while the gateway makes its new checkout
+	(the guest paid the first checkout meanwhile) hands out no new checkout: paid, it would be a second capture that
+	``complete`` answers as a replay and TEX never records. Refused as already processed, the lease ended."""
+
+	def test_a_charge_paid_meanwhile_gets_no_new_checkout(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import refusals
+
+		b = self.book()
+		first = self.start_payment(b)
+		row = frappe.db.get_value("TEX Payment Transaction", first["transaction"],
+		                          ["amount", "currency", "provider_account", "return_url"], as_dict=True)
+		real = MockProvider.create_checkout
+
+		def gateway(provider, intent):
+			out = real(provider, intent)
+			self.pays(first)                    # the first checkout's callback settles the charge meanwhile
+			return out
+
+		with mock.patch.object(MockProvider, "create_checkout", gateway), \
+				self.assertRaisesRegex(frappe.ValidationError, "already processed") as cm:
+			# the same start again (another tab): the Pending charge is reused and asked for a new checkout
+			pay.start_payment(property=fx.PROPERTY, amount=row.amount, currency=row.currency,
+			                  provider_account=row.provider_account, booking=b["booking"], description="x", customer={},
+			                  return_url=row.return_url, idempotency_key=f"book:{b['booking']}:{b['due_now']}:1")
+		self.assertEqual(refusals.code_of(cm.exception), "PAYMENT_ALREADY_PROCESSED")
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", first["transaction"],
+		                                     ["status", "checkout_started_at"]), ("Succeeded", None))
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def replayed(self, session: str, meanwhile) -> dict:
+		"""The engine repeats ``book`` (same session, same key: the guest's answer was lost) and restarts the open
+		payment; ``meanwhile(first)`` runs during that restart's checkout call. → the replay's answer."""
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		first = guest_books(session=session)
+		quote_id = frappe.db.get_value("TEX Quote", {"booking": first["booking"]}, "name")
+		real = MockProvider.create_checkout
+
+		def gateway(provider, intent):
+			out = real(provider, intent)
+			meanwhile(first["payment"])
+			return out
+
+		mark = len(frappe.local.message_log)
+		with mock.patch.object(MockProvider, "create_checkout", gateway):
+			again = public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Card", session_id=session,
+			                    idempotency_key=f"idem-{session}")
+		self.assertEqual(frappe.local.message_log[mark:], [])          # no refusal reaches the guest's answer
+		self.assertTrue(again["idempotent_replay"])
+		self.assertEqual(again["booking"], first["booking"])
+		return again
+
+	def test_a_booking_replayed_while_its_payment_is_paid_answers_without_a_checkout(self):
+		"""LO-04, review round 1: the replay answers the booking (its manage token included) with no payment, as it
+		does for an attempt that ended before it: the guest's page shows it paid."""
+		again = self.replayed("lo04-replay", self.pays)
+		self.assertIsNone(again["payment"])
+		self.assertTrue(again["manage_token"])
+		self.assertEqual(frappe.db.get_value("TEX Booking", again["booking"], "status"), "Confirmed")
+
+	def test_a_booking_replayed_while_its_payment_is_in_review_answers_without_a_checkout(self):
+		"""LO-05, review round 1: a charge the gateway is reviewing is neither restarted nor superseded by a replay."""
+		def reviewed(payment):
+			frappe.db.set_value("TEX Payment Transaction", payment["transaction"], "raw_status", "FRAUD_REVIEW",
+			                    update_modified=False)
+
+		def no_checkout(provider, intent):
+			raise AssertionError("no checkout is asked for a charge in review")
+
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		first = guest_books(session="lo05-replay")
+		reviewed(first["payment"])
+		quote_id = frappe.db.get_value("TEX Quote", {"booking": first["booking"]}, "name")
+		mark = len(frappe.local.message_log)
+		with mock.patch.object(MockProvider, "create_checkout", no_checkout):
+			again = public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Card",
+			                    session_id="lo05-replay", idempotency_key="idem-lo05-replay")
+		self.assertEqual(frappe.local.message_log[mark:], [])
+		self.assertTrue(again["idempotent_replay"])
+		self.assertIsNone(again["payment"])
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", first["payment"]["transaction"],
+		                                     ["status", "raw_status"]), ("Pending", "FRAUD_REVIEW"))
 
 
 class TestRefusedAfterTheHold(HoldCase):
@@ -2388,6 +2609,66 @@ class TestReconciliationStates(HoldCase):
 			ignore_permissions=True)
 		pay.correct_refund(refund, outcome="Failed", reason="the gateway never paid it back")
 		self.assertEqual(txn_state(txn).reconciliation, "Action Required")
+
+	def test_queued_refunds_are_made_oldest_first_within_a_limit_and_a_time_budget(self):
+		"""LO-07 (audit 2K-1): a gateway that answers slowly cannot hold the 5-minute jobs past their time limit:
+		a run makes at most ``limit`` queued refunds, oldest first, and starts none once its budget is used; the
+		next run goes on."""
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import late_payments
+
+		newest, middle, oldest = (self.parked()[1] for _ in range(3))
+		for minutes, txn in ((-10, newest), (-20, middle), (-30, oldest)):
+			frappe.db.set_value("TEX Payment Transaction", txn, {"reconciliation": "Refund Queued",
+			                    "creation": add_to_date(now_datetime(), minutes=minutes)}, update_modified=False)
+
+		class Clock:                                            # every refund takes 50 seconds
+			now = 1000.0
+
+			def monotonic(self):
+				return self.now
+
+		clock, real = Clock(), MockProvider.refund
+
+		def slow(provider, *args, **kw):
+			clock.now += 50
+			return real(provider, *args, **kw)
+
+		def states():
+			return [txn_state(t).reconciliation for t in (oldest, middle, newest)]
+
+		with mock.patch.object(late_payments, "time", clock), mock.patch.object(MockProvider, "refund", slow):
+			self.assertEqual(late_payments.refund_queued(limit=1)["refunded"], 1)
+			self.assertEqual(states(), ["Refunded", "Refund Queued", "Refund Queued"])
+			self.assertEqual(late_payments.refund_queued(budget_seconds=40)["refunded"], 1)
+			self.assertEqual(states(), ["Refunded", "Refunded", "Refund Queued"])
+			self.assertEqual(late_payments.refund_queued(budget_seconds=40)["refunded"], 1)     # a new run, a new budget
+		self.assertEqual(states(), ["Refunded", "Refunded", "Refunded"])
+		refunds = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": ("in", [oldest, middle, newest]),
+		                                                             "txn_type": "Refund"}, pluck="status")
+		self.assertEqual(refunds, ["Succeeded"] * 3)                                         # each once
+
+	def test_a_queued_charge_whose_refund_is_on_its_way_takes_no_place_in_the_limit(self):
+		"""LO-07, review round 1: a queued charge whose money is all on its way back (a refund the gateway never
+		answered) has nothing to refund and stays queued; it never takes one of a run's places, so the newer queued
+		refunds behind it are made."""
+		from kamra.tex.services import late_payments
+
+		_b, stuck = self.parked()
+		self.refund_unanswered(stuck)                       # its whole amount is on its way: nothing to refund now
+		_b, queued = self.parked()
+		for minutes, txn in ((-30, stuck), (-10, queued)):
+			frappe.db.set_value("TEX Payment Transaction", txn, {"reconciliation": "Refund Queued",
+			                    "creation": add_to_date(now_datetime(), minutes=minutes)}, update_modified=False)
+		self.assertEqual(late_payments.refund_queued(limit=1)["refunded"], 1)
+		self.assertEqual((txn_state(stuck).reconciliation, txn_state(queued).reconciliation),
+		                 ("Refund Queued", "Refunded"))
+
+	def test_queued_refunds_run_last_in_their_5_minute_jobs(self):
+		"""LO-07: the expiry of payment links and the mail status never wait behind the gateway's refunds."""
+		from kamra.tex import scheduler
+
+		self.assertEqual(scheduler.EVERY_5_MINUTES[-1], "kamra.tex.services.late_payments.refund_queued")
 
 
 class TestMoneyShownRight(HoldCase):

@@ -381,8 +381,10 @@ class TestGuestPayment(TexTestCase):
 
 	def test_the_answer_of_a_gateway_never_changes_a_charge_settled_meanwhile(self):
 		"""A reused charge's earlier checkout is paid while the gateway makes its new one: step (c) records
-		the new reference and leaves the charge Succeeded, its booking confirmed once."""
+		the new reference and leaves the charge Succeeded, its booking confirmed once; the new checkout is never
+		handed out (LO-04)."""
 		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import refusals
 
 		b, again = self.booked_with_its_start("new6-settled")
 		first = b["payment"]
@@ -392,9 +394,10 @@ class TestGuestPayment(TexTestCase):
 			public.mock_pay(transaction=first["transaction"], outcome="success", sig=first["fields"]["success_sig"])
 			return real(provider, intent)
 
-		with mock.patch.object(MockProvider, "create_checkout", paid_meanwhile):
-			out = pay.start_payment(**again)
-		self.assertEqual(out["transaction"], first["transaction"])
+		with mock.patch.object(MockProvider, "create_checkout", paid_meanwhile), \
+				self.assertRaisesRegex(frappe.ValidationError, "already processed") as cm:
+			pay.start_payment(**again)
+		self.assertEqual(refusals.code_of(cm.exception), "PAYMENT_ALREADY_PROCESSED")
 		row = frappe.db.get_value("TEX Payment Transaction", first["transaction"],
 		                          ["status", "provider_ref", "checkout_started_at"], as_dict=True)
 		self.assertEqual((row.status, row.checkout_started_at), ("Succeeded", None))

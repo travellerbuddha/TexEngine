@@ -27,10 +27,11 @@ EVERY_MINUTE = ("kamra.tex.distribution.repository.process_inbound",
 # that runs past its limit is killed with whatever follows it
 EVERY_5_MINUTES = ("kamra.tex.payments.service.reverify_pending",
                    "kamra.tex.services.booking.expire_pending_bookings",
-                   # late payments whose rooms are gone are refunded (K-2b)
-                   "kamra.tex.services.late_payments.refund_queued",
                    "kamra.tex.payments.service.expire_links",
-                   "kamra.tex.services.mail_status.sync")
+                   "kamra.tex.services.mail_status.sync",
+                   # late payments whose rooms are gone are refunded (K-2b): last, within a time budget, so a
+                   # slow gateway delays nothing above it (LO-07)
+                   "kamra.tex.services.late_payments.refund_queued")
 # the PMS outbox is its own job (its own RQ job and time limit): a stalled PMS delays only PMS messages, never
 # the holds, payments, links and mail status of the group above (ADR-015, NEW-7)
 OUTBOX_EVERY_5_MINUTES = ("kamra.tex.connect.outbox.deliver_pending",)

@@ -24,6 +24,7 @@ charge's lock (then the booking's): the order a payment callback takes."""
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from datetime import datetime
 
@@ -233,8 +234,8 @@ def money_off(booking: str, *, why: str, key: str, note: str | None = None, now:
 		            idempotency_key=f"{key}:{booking}:{name}", _system=True)
 		txn = frappe.get_doc(TXN, name)
 		text = _money_off_note(why, booking, held, txn.currency, now) + (f" {note}" if note else "")
-		_flag(txn, booking, why, "Action Required", text, held, send_mail=send_mail and guest_mail)
-		if send_mail and not guest_mail:
+		flagged = _flag(txn, booking, why, "Action Required", text, held, send_mail=send_mail and guest_mail)
+		if flagged and send_mail and not guest_mail:
 			notify.team_notice(txn, booking, "Action Required", text, held)
 		taken += held
 	return taken
@@ -271,8 +272,8 @@ def keep_off(txn, booking: str, why: str, amount, note: str) -> None:
 	booking, in reconciliation for staff (``Action Required``); the team is told, not the payer (ADR-065)."""
 	from kamra.tex.services import notify
 
-	_flag(txn, booking, why, "Action Required", note, amount, send_mail=False)
-	notify.team_notice(txn, booking, "Action Required", note, amount)
+	if _flag(txn, booking, why, "Action Required", note, amount, send_mail=False):
+		notify.team_notice(txn, booking, "Action Required", note, amount)
 
 
 def ended_unconfirmed(b) -> bool:
@@ -310,11 +311,17 @@ def after_refund(refund: str, booking: str | None, *, key: str | None = None) ->
 	                 note=f"Refund {refund} of it was on its way when the booking ended; its outcome is recorded now.")
 
 
-def _flag(txn, booking: str, why: str, state: str, note: str, amount, *, send_mail: bool = True, **extra) -> None:
+def _flag(txn, booking: str, why: str, state: str, note: str, amount, *, send_mail: bool = True, **extra) -> bool:
 	"""Put a charge's money in reconciliation (never twice), audited; the team and the payer are told
-	(``send_mail``)."""
-	if frappe.db.get_value(TXN, txn.name, "reconciliation") in OPEN:
-		return
+	(``send_mail``). The charge is read as it is now (a locking read; its callers hold it already, LO-16): one
+	another request put in reconciliation after this one's read view began is not flagged, audited or told
+	again; its note gains this cause. → whether it was flagged now."""
+	row = frappe.db.get_value(TXN, txn.name, ["reconciliation", "reconciliation_note"], as_dict=True, for_update=True)
+	if row.reconciliation in OPEN:
+		if note not in (row.reconciliation_note or ""):
+			frappe.db.set_value(TXN, txn.name, "reconciliation_note",
+			                    f"{row.reconciliation_note or ''} Also: {note}".strip()[:1000], update_modified=False)
+		return False
 	frappe.db.set_value(TXN, txn.name, {"reconciliation": state, "reconciliation_note": note[:1000]},
 	                    update_modified=False)
 	audit("payment.reconciliation_required", reference_doctype=TXN, reference_name=txn.name, property=txn.property,
@@ -324,6 +331,7 @@ def _flag(txn, booking: str, why: str, state: str, note: str, amount, *, send_ma
 		from kamra.tex.services import notify
 
 		notify.reconciliation(txn, booking, state, note, amount)      # the team and the guest are told (B5)
+	return True
 
 
 def guest_notice(booking: str | None) -> str | None:
@@ -430,14 +438,24 @@ def settled(transaction: str) -> None:
 	      reference_name=transaction, property=row.property, new={"state": state, "left": to_str(left)})
 
 
-def refund_queued() -> dict:
+def refund_queued(limit: int = 20, budget_seconds: int = 90) -> dict:
 	"""Scheduler: refund the charges queued for a refund, once each (idempotency key per charge),
 	each under its lock and on record before the gateway is asked (``durable``). A refund the
-	gateway refuses, or does not answer, goes to staff (``Action Required``)."""
+	gateway refuses, or does not answer, goes to staff (``Action Required``).
+
+	Oldest first, at most ``limit`` refunds asked of the gateway a run, and none started once
+	``budget_seconds`` (``time.monotonic``) are used (LO-07, as ``outbox.deliver_pending``): a gateway
+	that answers slowly waits its timeout for every refund, and must never hold the 5-minute jobs past
+	their time limit. A charge with nothing to refund now (its money on its way back) asks the gateway
+	nothing and takes no place. The charges not started are the next run's."""
 	from kamra.tex.payments import service as pay
 
-	done = 0
-	for name in frappe.get_all(TXN, filters={"reconciliation": "Refund Queued"}, pluck="name"):
+	deadline = time.monotonic() + budget_seconds
+	done = asked = 0
+	for name in frappe.get_all(TXN, filters={"reconciliation": "Refund Queued"}, order_by="creation asc, name asc",
+	                           pluck="name"):
+		if asked >= limit or time.monotonic() >= deadline:
+			break
 		txn = frappe.get_doc(TXN, name, for_update=True)
 		if txn.reconciliation != "Refund Queued":
 			continue
@@ -447,6 +465,7 @@ def refund_queued() -> dict:
 		if free <= ZERO:
 			settled(name)
 		else:
+			asked += 1
 			try:
 				out = pay.refund(name, amount=free, reason=REFUND_REASON, idempotency_key=f"late:{name}",
 				                 _system=True, _late=True, durable=True)

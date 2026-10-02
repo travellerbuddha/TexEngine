@@ -312,12 +312,22 @@ def _payments_reconciliation(props, now) -> dict:
 
 def _bookings_overpaid(props, now) -> dict:
 	"""P1-7: bookings (not drafts) holding more money than they cost, per hotel; the cancelled ones
-	counted apart; aged from the oldest one's last change."""
+	counted apart; aged from the oldest one's last change. Money a lower price left above the total that
+	was kept as credit on the booking on purpose (a guest change settled "Credit on booking") is not counted
+	(LO-17); money above that credit is. Each such change stores the whole excess kept at its time, so the
+	latest one's amount is the credit, never their sum."""
 	params: dict = {}
-	cond = _scope("property", props, params)
-	rows = frappe.db.sql(f"""SELECT property, COUNT(*) n, SUM(status = 'Cancelled') cancelled, MIN(modified) since
-	                         FROM `tabTEX Booking` WHERE paid_amount > total_amount AND status != 'Draft'{cond}
-	                         GROUP BY property""", params, as_dict=True)
+	cond = _scope("b.property", props, params)
+	rows = frappe.db.sql(f"""SELECT b.property, COUNT(*) n, SUM(b.status = 'Cancelled') cancelled, MIN(b.modified) since
+	                         FROM `tabTEX Booking` b
+	                         LEFT JOIN `tabTEX Guest Change Request` k ON k.name = (
+	                           SELECT g.name FROM `tabTEX Guest Change Request` g
+	                           WHERE g.booking = b.name AND g.settlement = 'Credit on booking'
+	                             AND g.status IN ('Applied', 'Approved')
+	                           ORDER BY g.creation DESC, g.name DESC LIMIT 1)
+	                         WHERE b.paid_amount > b.total_amount + COALESCE(k.settlement_amount, 0)
+	                           AND b.status != 'Draft'{cond}
+	                         GROUP BY b.property""", params, as_dict=True)
 	n, oldest, hotels = _sum(rows)
 	return C.overpaid_bookings_check(n, sum(int(r.cancelled or 0) for r in rows), oldest, hotels)
 

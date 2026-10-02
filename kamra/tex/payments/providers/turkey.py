@@ -80,6 +80,7 @@ class IyzicoProvider(PaymentProvider):
 	reports_amount = True
 	supports_refund = True
 	status_query = True               # checkout-form DETAIL by the token TEX stored
+	status_by_ref = True
 
 	@staticmethod
 	def status_params(provider_ref: str | None) -> list[dict]:

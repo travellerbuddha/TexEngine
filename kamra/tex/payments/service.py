@@ -26,6 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
+from kamra.tex.services.refusals import refusal
 from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost, undo_to
 
 
@@ -328,6 +329,30 @@ def _busy() -> None:
 	frappe.throw(_("A payment is being started. Please wait a moment and try again."), PaymentBusy)
 
 
+def _refuse_in_review(booking: str | None, payment_link: str | None) -> None:
+	"""LO-05 (O-18, D-8): while the gateway reviews a Pending charge of this booking (its own, or one of its links') or
+	of this link, no other payment of it starts and the reviewed charge is never superseded: an approved review and a
+	second capture would take the money twice. The candidates are read plainly, then each is read as it is now (a
+	locking read in name order: a review recorded after this request's snapshot counts); the link, when there is one,
+	is already held (lock order: link → charges → booking, ADR-066)."""
+	# only what is set is compared: a blank booking or link never matches another payment's blank one
+	of = ([] if not booking else ["t.booking = %(booking)s", "l.booking = %(booking)s"]) + \
+		([] if not payment_link else ["t.payment_link = %(link)s"])
+	if not of:
+		return
+	names = frappe.db.sql(
+		f"""SELECT t.name FROM `tabTEX Payment Transaction` t
+		LEFT JOIN `tabTEX Payment Link` l ON l.name = t.payment_link
+		WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND ({" OR ".join(of)})""",
+		{"booking": booking, "link": payment_link}, pluck=True)  # nosemgrep -- constant SQL, values bound
+	for name in sorted(names):
+		now = frappe.db.sql("SELECT status, raw_status FROM `tabTEX Payment Transaction` WHERE name=%s LOCK IN SHARE MODE",
+		                    name, as_dict=True)
+		if now and now[0].status == "Pending" and now[0].raw_status in FRAUD_REVIEW:
+			frappe.throw(_("Your bank is reviewing your payment. Please wait for its answer before paying again."),
+			             refusal("PAYMENT_UNDER_REVIEW", base=PaymentBusy))
+
+
 def _end_lease(txn, stamp) -> None:
 	"""Clear the checkout lease of ``txn`` (locked) if it is still this start's; a later start that took
 	over a lapsed one keeps its own."""
@@ -383,6 +408,8 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	# a booking waiting for its payment: the attempt is refused once its hold is over, else it
 	# keeps the rooms until its own deadline, never longer (K-2a)
 	held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
+	# a payment the gateway is reviewing: no second one starts, and it is never superseded below (LO-05)
+	_refuse_in_review(held, payment_link)
 	hold_method = holds.TRANSFER if provider.name == holds.TRANSFER else method
 	# ── (a) the charge on record, with its lease ──
 	# a second start of the same charge (another tab, a double click, a restart) reuses the
@@ -462,6 +489,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn.save(ignore_permissions=True)
 	_end_lease(txn, stamp)
 	_commit_step()
+	if txn.status != "Pending":
+		# a callback settled the reused charge while the gateway made this checkout (an earlier checkout was paid,
+		# LO-04): the new checkout is never handed out. Paid, it would be a second capture that ``complete`` answers
+		# as a replay of the settled charge, and TEX would never record its money
+		frappe.throw(_("This payment was already processed ({0}).").format(txn.status),
+		             refusal("PAYMENT_ALREADY_PROCESSED", status=txn.status))
 	return {"transaction": txn.name, "kind": checkout.kind, "url": checkout.url, "fields": checkout.fields,
 	        "instructions": checkout.instructions, "sandbox": provider.sandbox}
 
@@ -631,20 +664,18 @@ def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool 
 	"""Ask the gateway again for a charge by itself (its provider's ``status_query``): each of its questions
 	(``attempts``, default ``status_params`` of its reference, newest first) until one confirms it. A try
 	that failed leaves no message behind (P1-8); ``log``: a try the gateway did not answer is logged.
-	``step_commit`` (the job): a try that changed the charge is on record before the next question, so no
-	lock is held through it (ADR-066). A try that failed leaves nothing it wrote half way (money recorded, its
-	allocation refused): it is undone before the next question. → (the last answer, the last error)."""
+	``step_commit`` (the job, staff): each try is on record before the next question, its locks released — one
+	that changed nothing took the link's and the charge's locks all the same — so no lock is held through it
+	(ADR-066, LO-19). A try that failed leaves nothing it wrote half way (money recorded, its allocation
+	refused): it is undone before the next question. → (the last answer, the last error)."""
 	if attempts is None:
 		row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref"], as_dict=True)
 		cls = REGISTRY.get(row.provider) if row else None
 		attempts = cls.status_params(row.provider_ref) if cls and cls.status_query else []
-	out, error, state = None, None, None
+	out, error = None, None
 	for n, params in enumerate(attempts):
-		if step_commit:
-			now_state = frappe.db.get_value("TEX Payment Transaction", transaction, ["status", "modified"])
-			if n and now_state != state:
-				_commit_step()             # the last question changed the charge: on record before the next
-			state = now_state
+		if step_commit and n:
+			_commit_step()                 # the last question's answer on record, its locks released, before the next
 		mark = len(frappe.local.message_log)
 		frappe.db.savepoint(REVERIFY_TRY_SAVEPOINT)
 		try:
@@ -683,8 +714,9 @@ def reverify_pending(now=None) -> dict:
 	tick's expiry, so money taken in time confirms its booking. The same path as a callback (``complete``).
 
 	Candidates (a plain read, no lock): Pending charges of an enabled account (a disabled one settles
-	nothing), at least 3 minutes old, with no start asking the gateway for a checkout right now (a lapsed
-	lease is a dead start), their deadline — or, without one, their creation — within the last 2 hours;
+	nothing) with something to ask (``status_by_ref``: a reference stored, LO-21), at least 3 minutes old,
+	with no start asking the gateway for a checkout right now (a lapsed lease is a dead start), their
+	deadline — or, without one, their creation — within the last 2 hours;
 	20 per tick, none started after 60 s, by urgency: those still holding rooms first (the nearest deadline
 	first: money found in time confirms the booking), then those holding none, oldest first, then those whose
 	deadline has gone by, the latest first — an abandoned iyzico checkout stays Pending for 2 hours and must
@@ -692,6 +724,9 @@ def reverify_pending(now=None) -> dict:
 	("TEX payment re-verify <charge>") and undone; each is on record before the next question (ADR-066)."""
 	now = get_datetime(now or now_datetime())
 	askable = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query)) or ("",)
+	# a gateway asked by a reference TEX stored (iyzico's token): a charge with none has nothing to ask and takes
+	# no place in the tick (LO-21)
+	by_ref = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query and cls.status_by_ref)) or ("",)
 	# NULL checkout_started_at: no start is asking the gateway; NULL expires_at: a charge that holds no rooms
 	# (a link's without a waiting booking, a change's, a balance's), judged by when it started (ADR-064).
 	# Urgency: 0 = its deadline is ahead (holds rooms), nearest first; 1 = no deadline, oldest first; 2 = its
@@ -700,6 +735,7 @@ def reverify_pending(now=None) -> dict:
 	                         JOIN `tabTEX Payment Provider Account` a ON a.name = t.provider_account
 	                         WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND t.provider IN %(askable)s
 	                           AND a.enabled = 1 AND t.creation <= %(settled)s
+	                           AND (t.provider NOT IN %(by_ref)s OR IFNULL(t.provider_ref, '') != '')
 	                           AND (t.checkout_started_at IS NULL OR t.checkout_started_at < %(lease)s)
 	                           AND IFNULL(t.expires_at, t.creation) >= %(window)s
 	                         ORDER BY CASE WHEN t.expires_at > %(now)s THEN 0 WHEN t.expires_at IS NULL THEN 1 ELSE 2 END,
@@ -707,7 +743,8 @@ def reverify_pending(now=None) -> dict:
 	                                  CASE WHEN t.expires_at IS NULL THEN t.creation END,
 	                                  CASE WHEN t.expires_at <= %(now)s THEN t.expires_at END DESC,
 	                                  t.name LIMIT %(limit)s""",
-	                      {"askable": askable, "now": now, "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
+	                      {"askable": askable, "by_ref": by_ref, "now": now,
+	                       "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
 	                       "lease": add_to_date(now, seconds=-CHECKOUT_LEASE_SECONDS),
 	                       "window": add_to_date(now, hours=-REVERIFY_WINDOW_HOURS), "limit": REVERIFY_BATCH},
 	                      pluck=True)
@@ -1626,6 +1663,49 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 	      property=r.property, new={"of": txn.name, "recorded": recorded, "outcome": outcome, "amount": to_str(amount),
 	                                "currency": r.currency, "booking": booking, "moved": to_str(moved)}, reason=reason)
 	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
+
+
+CLOSED_UNPAID = "CLOSED_UNPAID"
+
+
+def closable_unpaid(txn) -> bool:
+	"""LO-18: a Pending charge of a gateway TEX cannot ask for its outcome (``ops.status.unverifiable_providers``,
+	today the Virtual POS), which staff may close as not paid once they checked it with the bank."""
+	from kamra.tex.ops.status import unverifiable_providers
+
+	return txn.txn_type == "Charge" and txn.status == "Pending" and txn.provider in unverifiable_providers()
+
+
+def close_unpaid(transaction: str, *, reason: str) -> dict:
+	"""LO-18: staff checked a Pending charge of a gateway TEX cannot ask in the bank's panel, and it was never
+	charged: it is closed Failed (``CLOSED_UNPAID``, their reason), audited ``payment.closed_unpaid``, and the
+	pending-payments check stops counting it. Its booking is judged as for any failed payment (its hold runs
+	out, the expiry job ends it). Paid after all, the bank's own news of it is still recorded (a Failed charge
+	settles a verified success, G-68); paid at the desk, staff record a Manual payment. Locks: link → payment."""
+	reason = (reason or "").strip()
+	if not reason:
+		frappe.throw(_("A reason is required: say how the payment was checked with the bank."))
+	_lock_link_then_payment(transaction)
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)          # as it is now
+	if txn.txn_type == "Charge" and txn.status != "Pending":
+		frappe.throw(_("This payment was already processed ({0}).").format(txn.status))
+	if not closable_unpaid(txn):
+		frappe.throw(_("Only a pending payment of a bank TEX cannot ask can be marked not paid: re-verify the "
+		               "others."))
+	if txn.checkout_started_at and \
+			get_datetime(txn.checkout_started_at) > add_to_date(now_datetime(), seconds=-CHECKOUT_LEASE_SECONDS):
+		_busy()                                     # its checkout is being made right now
+	txn.flags.tex_system_update = True
+	txn.status = "Failed"
+	txn.error_code = CLOSED_UNPAID
+	txn.error_message = reason[:500]
+	txn.completed_at = now_datetime()
+	txn.save(ignore_permissions=True)
+	audit("payment.closed_unpaid", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, old={"status": "Pending"},
+	      new={"status": "Failed", "amount": to_str(from_db(txn.amount, txn.currency)), "currency": txn.currency,
+	           "provider": txn.provider, "booking": txn.booking, "link": txn.payment_link}, reason=reason[:500])
+	return {"transaction": txn.name, "status": txn.status}
 
 
 def mark_transfer_received(transaction: str, *, reference: str, value_date=None, amount=None) -> dict:

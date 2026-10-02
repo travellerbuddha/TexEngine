@@ -136,7 +136,8 @@ REASONS: dict[str, str] = {
 	"payment_pending_unverified": "{count} card payment(s) of a gateway TEX cannot ask are still pending after their "
 	                              "deadline; the oldest started {minutes} minutes ago. Check them in the bank's panel; "
 	                              "if one was charged, record it as a Manual payment with the bank's reference. The "
-	                              "alert clears 48 hours after the payment.",
+	                              "alert clears 48 hours after the payment. A payment the bank did not charge can be "
+	                              "marked not paid on its page (Payments).",
 	"callback_errors": "{count} payment callback(s) failed or were rejected in the last {hours} hours.",
 	"overpaid": "{count} payment link(s) were paid more than once in the last {days} days.",
 	"capture_mismatch": "{count} gateway capture(s) did not match their charge in the last {days} days.",
@@ -151,7 +152,8 @@ REASONS: dict[str, str] = {
 	"reconciliation_refund": "{count} payment(s) are queued for an automatic refund; the oldest has waited {hours} "
 	                         "hours.",
 	"bookings_overpaid": "{count} booking(s) hold more money than they cost ({cancelled} of them cancelled): refund "
-	                     "the excess, or move it to the booking it was meant for (Payments).",
+	                     "the excess, or move it to the booking it was meant for (Payments). A refund still on its "
+	                     "way counts as paid until the gateway answers it.",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",

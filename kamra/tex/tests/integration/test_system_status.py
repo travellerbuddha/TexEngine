@@ -282,6 +282,33 @@ class TestOverpaidBookings(TexTestCase):
 		self.assertEqual(mine["count"], here["count"])
 		self.assertNotIn(OTHER, mine["properties"])
 
+	def credit(self, booking: str, amount) -> None:
+		"""A lower price of ``booking`` whose excess was kept as credit on it (a guest's change, or staff approving
+		one)."""
+		frappe.get_doc({"doctype": "TEX Guest Change Request", "property": fx.PROPERTY, "booking": booking,
+		                "reservation": frappe.db.get_value("Reservation", {"tex_booking": booking}, "name"),
+		                "status": "Applied", "currency": frappe.db.get_value("TEX Booking", booking, "currency"),
+		                "settlement": "Credit on booking", "settlement_amount": amount}).insert(ignore_permissions=True)
+
+	def test_a_credit_kept_on_purpose_is_not_an_overpayment(self):
+		"""LO-17 (audit 2K-1): money above a booking's total that the guest kept as credit on it is not counted;
+		money above that credit still is."""
+		before = check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"]
+		kept = self.overpaid("p17-credit-1")                # 50 over, all of it kept as credit
+		self.credit(kept, 50)
+		more = self.overpaid("p17-credit-2")                # 50 over, 20 of it kept as credit
+		self.credit(more, 20)
+		# review round 1: each credit request stores the whole excess kept at its time (30, then 40 after a second
+		# lower price), never added up: 40 is kept, the other 10 is money above it
+		twice = self.overpaid("p17-credit-3")
+		self.credit(twice, 30)
+		self.credit(twice, 40)
+		# the latest one, not the largest: 60 was kept, then a change used 20 of it and 40 is kept now
+		down = self.overpaid("p17-credit-4")
+		self.credit(down, 60)
+		self.credit(down, 40)
+		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 3)
+
 
 class TestUnverifiedPayments(TexTestCase):
 	"""P1-8 (audit 2E-2): a card payment of a gateway TEX cannot ask for its outcome (the Virtual POS) still
@@ -313,6 +340,41 @@ class TestUnverifiedPayments(TexTestCase):
 		found = check(system_api().status(property=fx.PROPERTY), "payments.pending")
 		self.assertEqual(found["status"], "fail")
 		self.assertIn(fx.PROPERTY, found["properties"])
+
+	def test_staff_mark_a_payment_the_bank_never_took_as_not_paid(self):
+		"""LO-18 (audit 2K-1): staff checked a Virtual POS payment in the bank's panel and it was never charged:
+		"Not paid" closes it Failed with their reason, audited, and the check no longer counts it. Finance only
+		(``payment.refund``), a reason required; a gateway TEX can ask is re-verified instead."""
+		from kamra.tex.api import payments as payments_api
+
+		before = self.unverified()
+		txn = self.pending("Virtual POS", expires=add_to_date(now_datetime(), minutes=-15), created_ago=50)
+		asked = self.pending("iyzico", expires=add_to_date(now_datetime(), minutes=-15), created_ago=50)
+		self.assertEqual(self.unverified() - before, 1)
+		self.assertTrue(payments_api.transaction(name=txn)["can_close_unpaid"])
+		self.assertFalse(payments_api.transaction(name=asked)["can_close_unpaid"])
+		frappe.set_user(agent("lo18-agent@example.com", fx.PROPERTY))  # nosemgrep: frappe-setuser -- payment.view only
+		with self.assertRaises(frappe.PermissionError):
+			payments_api.close_unpaid(transaction=txn, reason="Not in the bank's panel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance
+		with self.assertRaisesRegex(frappe.ValidationError, "reason"):
+			payments_api.close_unpaid(transaction=txn, reason="  ")
+		with self.assertRaisesRegex(frappe.ValidationError, "re-verify"):
+			payments_api.close_unpaid(transaction=asked, reason="Not in the bank's panel")
+		self.assertEqual(payments_api.close_unpaid(transaction=txn, reason="Not in the bank's panel")["status"], "Failed")
+		row = frappe.db.get_value("TEX Payment Transaction", txn, ["status", "error_code", "error_message", "completed_at"],
+		                          as_dict=True)
+		self.assertEqual((row.status, row.error_code, row.error_message), ("Failed", "CLOSED_UNPAID",
+		                                                                  "Not in the bank's panel"))
+		self.assertIsNotNone(row.completed_at)
+		event = frappe.get_all("TEX Audit Event", filters={"action": "payment.closed_unpaid", "reference_name": txn},
+		                       fields=["reason", "property"])
+		self.assertEqual([(e.reason, e.property) for e in event], [("Not in the bank's panel", fx.PROPERTY)])
+		self.assertEqual(self.unverified(), before)
+		self.assertFalse(payments_api.transaction(name=txn)["can_close_unpaid"])
+		with self.assertRaisesRegex(frappe.ValidationError, "already processed"):
+			payments_api.close_unpaid(transaction=txn, reason="again")
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", asked, "status"), "Pending")
 
 
 class TestContractsLive(TexTestCase):

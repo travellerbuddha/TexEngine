@@ -496,6 +496,7 @@ def _start_booking_payment(s, result: dict, *, due, method: str, provider_accoun
 		                             {"idempotency_key": pay.ns_key(result["property"], key, "charge")}, "status")
 		if status and status != "Pending":
 			return None
+	mark = len(frappe.local.message_log)
 	try:
 		return pay.start_payment(
 			property=result["property"], amount=due, currency=result["currency"],
@@ -510,6 +511,14 @@ def _start_booking_payment(s, result: dict, *, due, method: str, provider_accoun
 			raise
 		# the open attempt could not take another checkout and was cancelled (G-68): the
 		# confirmation page offers pay_booking, which starts a new charge
+		return None
+	except frappe.ValidationError as e:
+		# the open attempt was paid while its checkout was being made again (LO-04), or the gateway is reviewing it
+		# (LO-05): the replay answers the booking with no payment, as for an attempt that ended before it, and the
+		# guest's page shows where its payment stands; the refusal's message is not the replay's answer
+		if not replay or refusals.code_of(e) not in ("PAYMENT_ALREADY_PROCESSED", "PAYMENT_UNDER_REVIEW"):
+			raise
+		del frappe.local.message_log[mark:]
 		return None
 	# ``PaymentBusy`` (the first request is asking the gateway for this charge's checkout right now) is
 	# raised to the retry, never answered with no payment: that would open a second checkout (NEW-6)

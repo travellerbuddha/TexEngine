@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeftRight, ClipboardCheck, Landmark, RefreshCw, RotateCcw, Scale, SquareArrowDownRight } from "lucide-react"
+import { ArrowLeftRight, Ban, ClipboardCheck, Landmark, RefreshCw, RotateCcw, Scale, SquareArrowDownRight } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { dateTime } from "../../lib/format"
@@ -26,12 +26,14 @@ import { bookingHref, CardLabel, PaymentsNav, TxnStatusBadge } from "./component
 import {
   AllocateDialog,
   canAllocate,
+  canCloseUnpaid,
   canConfirmTransfer,
   canFinishRefund,
   canRefund,
   isPendingRefund,
   canReverify,
   canTransfer,
+  CloseUnpaidDialog,
   ConfirmTransferDialog,
   FinishRefundDialog,
   hasConflict,
@@ -42,7 +44,7 @@ import {
 import { allocKey, methodKey, typeKey, useEvent } from "./lib"
 import type { Allocation, Reconciliation, Txn, TxnDetail } from "./types"
 
-type Action = "refund" | "allocate" | "transfer" | "bank" | "finish" | "conflict" | null
+type Action = "refund" | "allocate" | "transfer" | "bank" | "finish" | "conflict" | "unpaid" | null
 
 /** What staff are told about money its booking could not take (B5). */
 const RECON_KEY: Record<Reconciliation, string> = {
@@ -131,6 +133,11 @@ export default function TransactionDetail() {
                   {t("payments.bank.button")}
                 </Button>
               )}
+              {finance && canCloseUnpaid(d) && (
+                <Button variant="secondary" icon={<Ban className="size-4" aria-hidden />} onClick={() => setAction("unpaid")}>
+                  {t("payments.unpaid.button")}
+                </Button>
+              )}
               {finance && canAllocate(d) && (
                 <Button variant="secondary" icon={<SquareArrowDownRight className="size-4" aria-hidden />} onClick={() => setAction("allocate")}>
                   {t("payments.allocate.button")}
@@ -166,6 +173,7 @@ export default function TransactionDetail() {
           )}
           {d.status === "Pending" && d.provider === "Bank Transfer" && <Notice tone="warning">{t("payments.detail.pending_bank")}</Notice>}
           {d.status === "Pending" && (d.provider === "iyzico" || d.provider === "Sipay") && <Notice tone="warning">{t("payments.detail.pending_gateway")}</Notice>}
+          {canCloseUnpaid(d) && <Notice tone="warning">{t("payments.detail.pending_unverified")}</Notice>}
           {d.status === "Failed" && canReverify(d) && <Notice tone="info">{t("payments.detail.failed_gateway")}</Notice>}
           {hasConflict(d) && (
             <Notice tone="danger" title={t("payments.conflict.title")}>
@@ -332,6 +340,7 @@ export default function TransactionDetail() {
           <ConfirmTransferDialog open={action === "bank"} onClose={close} txn={d} onDone={q.reload} />
           <FinishRefundDialog open={action === "finish"} onClose={close} txn={d} onDone={q.reload} />
           <ResolveConflictDialog open={action === "conflict"} onClose={close} txn={d} onDone={q.reload} />
+          <CloseUnpaidDialog open={action === "unpaid"} onClose={close} txn={d} onDone={q.reload} />
         </div>
       )}
     </>

@@ -484,6 +484,52 @@ export function ResolveConflictDialog({ open, onClose, txn, onDone }: { open: bo
   )
 }
 
+/** A Pending charge of a bank TEX cannot ask for its outcome (the Virtual POS): staff checked it in the bank's
+ * panel and it was never charged, so it is closed as failed with their reason, audited (LO-18). */
+export function CloseUnpaidDialog({ open, onClose, txn, onDone }: { open: boolean; onClose: () => void; txn: TxnDetail; onDone: () => void }) {
+  const { t } = useTexT()
+  const toast = useToast()
+  const a = useAction(open)
+  const [reason, setReason] = useState("")
+  const close = useEvent(() => {
+    if (!a.pending) onClose()
+  })
+  useEffect(() => {
+    if (open) setReason("")
+  }, [open])
+  const valid = reason.trim().length > 2
+  const submit = async () => {
+    if (!valid) return
+    const r = await a.run(() =>
+      tex<{ transaction: string; status: string }>("payments", "close_unpaid", { transaction: txn.name, reason: reason.trim() }, { post: true }),
+    )
+    if (!r) return
+    toast.success(t("payments.unpaid.done", { name: r.transaction }))
+    onDone()
+    onClose()
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title={t("payments.unpaid.title")}
+      description={t("payments.unpaid.desc")}
+      footer={<Footer onCancel={close} onConfirm={submit} pending={a.pending} disabled={!valid} label={t("payments.unpaid.confirm")} danger />}
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-zinc-700">
+          {t("payments.unpaid.amount")} <Money amount={txn.amount} currency={txn.currency} className="font-semibold" />
+        </p>
+        <Notice tone="info">{t("payments.unpaid.effect")}</Notice>
+        <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} />
+        </Field>
+        <InlineError error={a.error} />
+      </div>
+    </Dialog>
+  )
+}
+
 /** A successful charge, or a Failed one whose capture TEX refused to count (the server reports it refundable).
  * A payment entered by hand is refunded outside TEX only, and recorded here (G-93). */
 export const canRefund = (txn: TxnDetail) =>
@@ -498,6 +544,8 @@ export const canConfirmTransfer = (txn: TxnDetail) => txn.provider === "Bank Tra
 export const canFinishRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending" && !!txn.can_finish
 /** A refund whose gateway answer contradicted the recorded outcome, not yet put right. */
 export const hasConflict = (txn: TxnDetail) => txn.txn_type === "Refund" && !!txn.conflict
+/** A Pending charge of a bank TEX cannot ask (the server decides). */
+export const canCloseUnpaid = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Pending" && !!txn.can_close_unpaid
 /** A refund still Pending, finished or not yet finishable. */
 export const isPendingRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending"
 /** Pending charges, and Failed or superseded (Cancelled) ones: a captured payment whose callback was lost can be recovered. */
