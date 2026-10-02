@@ -9509,6 +9509,21 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
    (half-up, cumulative) as a positive Reverse row, which only lowers the debits: they rejoin their lots with their dates. A lot
    closed meanwhile is never reopened: its share is `excess` and expires at once (D-16a). The return comes before the stay's
    own earning is reversed (§5 never tops up returned points); locks: booking → rooms → Guest → charge → ledger rows.
+   *Amendment (Part 2K-2).*
+   - *A lower price (LO-01, O-19b).* A guest change settled as a refund gives the points' share back as points first
+     (`loyalty.give_back(limit=…)`, the same Reverse rows and POINTS RETURNED refunds, named in the request's refunds),
+     then refunds the rest to cards; staff's "Refunded outside TEX" never records points as money.
+   - *Channels (LO-02, D-11, D-16).* Points never pay a channel's booking: `redeem` and `allocate` (so `transfer`)
+     refuse it. A channel's cancellation, or a room it removes, gives the points spent on the booking before that rule
+     back after the booking is refreshed, then reverses the stays' own earning, as at the desk.
+   - *Finding the burn (LO-06).* A charge's burn row is found by the charge: on the booking it was redeemed for or this
+     one, and the burner's profile wherever it is now (read by those bookings through `tex_ledger_booking_type`, p73,
+     and locked with the booking's guests before the charges).
+   - *A revival short of its returned points (LO-23).* Points given back at an expiry are never burned again: money paid
+     in time that alone no longer covers what the booking owes goes to staff, and the note says the points came back.
+   - *An earning never undoes its stay (LO-47, owner's choice).* The earning runs under its own savepoint in the
+     reservation's save: a failure is undone alone, logged and warned (`loyalty.earnings`); the return above is money
+     and stays unguarded.
 5. *Reversal.* A reversed earning takes its lot and that lot's Expire rows with it. A stay that did not happen (cancelled,
    no-show) never takes the balance below zero: the shortfall is topped up by an Adjust, as before.
 6. *Changed stays.* The new lot takes the old one's place in its state (a stay that had matured stays mature) with the dates

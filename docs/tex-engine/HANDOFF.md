@@ -59,8 +59,8 @@ spot-checked) — re-verify each card before you change code (§3).
 | # | Batch → PR name | Items, in order | Severity | Needs |
 |---|---|---|---|---|
 | 1 | **3A market integrity** → "2G-2" — **merged (PR #18)** | G-70a (the coded refusal transport) → O-8 (+ p71, ADR-070) → G-55b (+ p72) | HIGH | D-5 and the CRS override capability (§7) |
-| 2 | **K-B payments** → "2K-1" — **done (2K-1 PR, §6K1)** | LO-04, LO-05, LO-07, LO-16, LO-17, LO-19, LO-21, LO-18 | MED | — |
-| 3 | **K-A points always come back as points** → "2K-2" | LO-01 (O-19b), LO-02, LO-06, LO-23, LO-24, LO-25, LO-26 (verify first), LO-47 (decide first) | MED | D-12 (default: loyalty is live) |
+| 2 | **K-B payments** → "2K-1" — **merged (PR #19)** | LO-04, LO-05, LO-07, LO-16, LO-17, LO-19, LO-21, LO-18 | MED | — |
+| 3 | **K-A points always come back as points** → "2K-2" — **done (2K-2 PR, §6K2)** | LO-01 (O-19b), LO-02, LO-06, LO-23, LO-24, LO-25, LO-26 (verify first), LO-47 (decide first) | MED | D-12 (default: loyalty is live) |
 | 4 | **K-C channels and disabled room types** → "2K-3" | LO-03, LO-13, LO-11, LO-09, LO-15 | MED | — |
 | 5 | **3B guest payloads and codes** → "2G-3" | G-71 → G-70b (+ LO-12; LO-30 optional) | MED | — |
 | 6 | **K-D operations** → "2K-4" | LO-08, LO-10, LO-28, LO-39, LO-37, LO-22, LO-20, LO-48 | LOW | LO-37 ties to D-13 |

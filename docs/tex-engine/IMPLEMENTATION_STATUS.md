@@ -1592,3 +1592,17 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - LO-21 **COMPLETE**: a gateway asked by a stored reference (`status_by_ref`, iyzico) gives a charge with none no place in the re-verify tick · `TestPaymentsVerifiedByTheJob`.
 - LO-18 **COMPLETE**: "Not paid (checked with the bank)" closes a Pending charge of a gateway TEX cannot ask (the Virtual POS) Failed (`CLOSED_UNPAID`, `payment.refund`, a reason, audited `payment.closed_unpaid`); the pending-payments check stops counting it; payments screen action in six languages (ADR-062 addendum) · `TestUnverifiedPayments`.
 - **Not done:** a duplicate capture of a settled charge is not audited apart in `complete` (LO-04's optional part); a review recorded after LO-05's check while a new charge starts still pays twice (flagged OVERPAID); money staff kept on the booking when closing a guest change's money ("Kept on the booking", G-93) still counts as overpaid; no e2e for the not-paid dialog.
+
+## 6K2. Audit Part 2K-2 (2026-10-02)
+
+D-12: loyalty is live at go-live (the default). LO-47: the owner's choice (a).
+
+- LO-01 **COMPLETE** (O-19b): a lower price settled as a refund gives the points' share back as points first (`loyalty.give_back(limit=…)`, counted in the request's refunds), then cards; staff's "Refunded outside TEX" never records points as money; the approve dialog says so (ADR-071 §4 amendment) · `TestPointsBack` (three tests).
+- LO-02 **COMPLETE**: points never pay a channel's booking (`redeem`, `allocate`, so `transfer`, refuse it); a channel's cancellation or a room it removes gives the points spent before back, then reverses the stays' earning (D-11, D-16) · `TestChannelBookings` (two tests).
+- LO-06 **COMPLETE**: a charge's burn row is found by the charge (the booking it was redeemed for, the burner wherever they are now; `tex_ledger_booking_type`, p73) · `TestPointsBack` (two tests), `test_patches` p73.
+- LO-23 **COMPLETE**: a revival short of the points given back at its expiry says so in the staff note (the rule is kept) · `TestPointsBack`.
+- LO-24 **COMPLETE**: the profile's stays tab marks an expired hold ("Hold expired") · `TestProfileStays`.
+- LO-25 **COMPLETE**: a balance below zero is shown as points owed (`debt`), valued at zero · `TestPointsBack`.
+- LO-26 **COMPLETE** (reachable: a past stay still Confirmed can be changed): an earning whose points had expired passes its expiry on; the new lot is settled at once (ADR-071 §6 amendment) · `TestModification` (two tests).
+- LO-47 **COMPLETE** (option a): a failing earning is undone alone under its savepoint, logged, and `loyalty.earnings` warns; the reservation's save is kept · `TestAnEarningNeverUndoesTheStay`, unit `test_system_checks`.
+- **Not done:** the CRM "Redeem" button still shows on a channel's booking (the server refuses it); No Show still gives no points back (C-01); the points of a stay changed into the future stay Available (O-21's state rule).
