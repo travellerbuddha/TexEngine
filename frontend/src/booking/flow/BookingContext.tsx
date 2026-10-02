@@ -80,8 +80,10 @@ interface FlowState {
   quotes: (QuoteResponse | null)[]
   quotedAt: number | null
   priceChanges: PriceChange[]
-  /** per room, the last quote the guest was shown: what the next one is compared with (LO-32). Kept when the extras
-   * change (they clear the quotes), gone with the room chosen; absent in a flow saved before it was kept */
+  /** per room, the last quote the guest has seen the price of: what the next one is compared with (LO-32). A quote
+   * whose price is a change the guest has not accepted yet does not replace it ("OK, continue" does: on the extras
+   * step the notice is not shown, and the next quote must still announce it); kept when the extras change (they
+   * clear the quotes), gone with the room chosen; absent in a flow saved before it was kept */
   seen?: (RoomQuote | null)[]
   guest: Guest
   method: PaymentMethod | null
@@ -470,7 +472,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       if (change) changes.push(change)
       quotes.push(q)
     }
-    setFlow((f) => ({ ...f, quotes, seen: quotes.map((r) => r.quote ?? null), quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
+    const seen = (f: FlowState) => quotes.map((r, i) => (changes.some((c) => c.room === i) ? f.seen?.[i] ?? null : r.quote ?? null))
+    setFlow((f) => ({ ...f, quotes, seen: seen(f), quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
     return { error: null, rejected: findRejected(quotes, flow.extras), quotes, changes }
   }, [flow.selections, flow.extras, flow.seen, site.slug])
@@ -538,7 +541,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     [],
   )
   const setTerms = useCallback((v: boolean) => setFlow((f) => ({ ...f, terms: v })), [])
-  const clearPriceChanges = useCallback(() => setFlow((f) => ({ ...f, priceChanges: [] })), [])
+  // the guest accepts the new prices: the quotes they were told of are the ones seen now (LO-32)
+  const clearPriceChanges = useCallback(
+    () => setFlow((f) => ({ ...f, priceChanges: [], seen: f.selections.map((_, i) => (f.quotes[i]?.ok ? f.quotes[i]?.quote : null) ?? f.seen?.[i] ?? null) })),
+    [],
+  )
 
   // server total and amount due now per payment method, once every room is quoted
   const quotedIds = flow.quotes.map((q) => q?.quote_id).filter((x): x is string => !!x)

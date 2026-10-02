@@ -325,6 +325,67 @@ test("an extra the quotes made again cannot add is told as such, not as a price 
   noErrors()
 })
 
+test("a new price found on the extras step is announced on the next step, though the guest changed the extras (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the flow's steps, not the viewport, are under test")
+  const noErrors = trackErrors(page)
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const money = (c: bigint) => `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+  // the next quotes: the server's, the room 10.00 dearer than the search said; the transfer sold out (left out of the
+  // total), and marked as the server marks them (changed against the search's total only when no extras were asked)
+  const dearer = () =>
+    page.route(
+      (url) => isQuoteRooms(url.href),
+      async (route) => {
+        const asked = (route.request().postDataJSON() as { rooms: { extras?: unknown[] }[] }).rooms
+        const response = await route.fetch()
+        const body = (await response.json()) as {
+          message: { rooms: { price_changed?: boolean; previous_total?: string; quote?: { totals: Record<string, string>; extras: { name: string; ok: boolean; amount: string; reason?: string }[] } }[] }
+        }
+        body.message.rooms.forEach((q, i) => {
+          if (!q.quote) return
+          q.previous_total = q.quote.totals.total
+          q.price_changed = !asked[i]?.extras?.length
+          let total = cents(q.quote.totals.total) + 1000n
+          for (const e of q.quote.extras) {
+            if (!e.ok || e.name !== "Airport transfer") continue
+            total -= cents(e.amount)
+            Object.assign(e, { ok: false, amount: "0.00", reason: `sold out on ${checkIn}` })
+          }
+          q.quote.totals.accommodation = money(cents(q.quote.totals.accommodation) + 1000n)
+          q.quote.totals.total = money(total)
+        })
+        await route.fulfill({ response, json: body })
+      },
+      { times: 1 },
+    )
+  const { checkIn, checkOut } = stay(250, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await addExtra(page, { name: "Airport transfer", quantity: 1 })
+
+  // Continue: the transfer cannot be added and the room costs 10.00 more; the guest stays on the extras step, which
+  // tells only what could not be added
+  await dearer()
+  await page.getByRole("button", { name: "Continue", exact: true }).filter({ visible: true }).first().click()
+  const rejected = page.getByRole("status").filter({ hasText: "Could not be added to your stay" })
+  await expect(rejected).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Make your stay special")
+  // they take the transfer out and go on: the room still costs 10.00 more than they were shown, so the next step says so
+  await addExtra(page, { name: "Airport transfer", quantity: 0 })
+  await dearer()
+  const before = quoted
+  await page.getByRole("button", { name: "Continue", exact: true }).filter({ visible: true }).first().click()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your details")
+  expect(quoted).toBeGreaterThan(before)
+  await expect(page.getByRole("status").filter({ hasText: "The price has changed" })).toBeVisible()
+  noErrors()
+})
+
 test("on a phone the price-change notice is focused and scrolled into view (LO-33)", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "the phone's viewport is under test")
   const noErrors = trackErrors(page)
