@@ -93,6 +93,7 @@
  "crs.cc.results_hint": "Results appear here; use ↑ ↓ and Enter.",
  "crs.cc.shortcuts": "Shortcuts",
  "crs.cc.shortcuts_hint": "Everything on this page works from the keyboard.",
+ "crs.cc.voiceover_hint": "With VoiceOver on, ⌃⌥ is the VoiceOver key and VoiceOver may take these shortcuts: press ⌥ and the letter outside a text field instead, or use the page's buttons.",
  "crs.cc.subtitle": "Keyboard-first booking while the guest is on the line.",
  "crs.cc.summary": "Call summary",
  "crs.cc.summary_empty": "Steps of the call appear here.",

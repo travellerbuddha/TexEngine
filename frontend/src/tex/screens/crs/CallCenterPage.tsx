@@ -526,6 +526,8 @@ export default function CallCenterPage() {
             </div>
           ))}
         </dl>
+        {/* ⌃⌥ is VoiceOver's own key: VoiceOver may take ⌃⌥+letter, ⌥+letter still works outside a field (LO-49) */}
+        {IS_MAC && <p className="mt-4 text-sm text-zinc-600">{t("crs.cc.voiceover_hint")}</p>}
       </Dialog>
     </>
   )
