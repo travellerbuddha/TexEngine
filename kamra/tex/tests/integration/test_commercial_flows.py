@@ -462,6 +462,26 @@ class TestSelfService(TexTestCase):
 			penalty, basis = booking.cancellation_penalty(res, today=fx.d(6, 1))
 			self.assertEqual((to_str(penalty), basis["rule"]), ("0.00", rule))
 
+	def test_the_manage_view_of_a_channels_booking_offers_no_change_or_cancel(self):
+		"""LO-12 (PR #16 Kalanlar, audit 2K-3): a channel's booking is changed and cancelled on the channel (D-11, Y-8):
+		the guest's page offers neither (before: ``can_change`` and ``can_cancel`` were true and the server refused
+		both), and says who sold it by the connection's label, never its id."""
+		b = guest_books(session="lo12", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the channel manager's connection
+		conn = frappe.get_doc({"doctype": "TEX Integration Connection", "label": "Sandbox CM", "property": fx.PROPERTY,
+		                       "category": "Channel Manager", "adapter": "sandbox_channel", "environment": "Sandbox",
+		                       "enabled": 1, "secret": "lo12-secret"}).insert(ignore_permissions=True)
+		frappe.db.set_value("TEX Booking", b["booking"], {"channel_connection": conn.name, "external_ref": "OTA-LO12"})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's booking page
+		view = public.booking_status(token=b["manage_token"])
+		self.assertEqual([(r["can_change"], r["can_cancel"]) for r in view["rooms"]], [(False, False)])
+		self.assertEqual(view["sold_by"], {"label": "Sandbox CM"})
+		self.assertNotIn(conn.name, json.dumps(view))
+		# a TEX booking is the guest's to change: no channel named
+		own = public.booking_status(token=guest_books(session="lo12-own", method="Pay at Hotel")["manage_token"])
+		self.assertIsNone(own["sold_by"])
+		self.assertEqual([(r["can_change"], r["can_cancel"]) for r in own["rooms"]], [(True, True)])
+
 	def test_no_online_cancellation_from_the_arrival_day(self):
 		# O-16 (audit Part 2A, user decision): from the arrival day the stay may have started; giving its
 		# nights back would resell a room the guest is in. A change still starts on the arrival day

@@ -933,6 +933,8 @@ def _basket_view(claw: dict | None) -> dict | None:
 
 def _guest_booking(b) -> dict:
 	summary = _guest_summary(booking_svc.booking_summary(b.name))
+	# a channel's booking is changed and cancelled on the channel (D-11, Y-8; LO-12): its page offers neither
+	sold_by = booking_svc.channel_of(b.name)
 	loc = content.Localizer(content.guest_language() or content.guest_language(b.language))
 	rooms = []
 	for r in summary["rooms"]:
@@ -950,9 +952,9 @@ def _guest_booking(b) -> dict:
 		              # in the fee: the discount the other rooms keep once this one is gone (G-84 review H1)
 		              "cancellation_basket": _basket_view(claw),
 		              # the guest may change this room online (confirmed, not arrived yet)
-		              "can_change": guest_changes.room_changeable(res),
+		              "can_change": not sold_by and guest_changes.room_changeable(res),
 		              # ... and cancel it only before the arrival day (O-16)
-		              "can_cancel": _cancellable_online(res),
+		              "can_cancel": not sold_by and _cancellable_online(res),
 		              "last_change": guest_changes.guest_outcome(last) if (last := guest_changes.last_request(res))
 		              else None})
 	credit, refund_due = guest_changes.guest_credit(b.name)
@@ -969,7 +971,9 @@ def _guest_booking(b) -> dict:
 	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
 	        "can_pay_online": bool(guest_changes.card_account(b)),
 	        # money that came when the booking could no longer take it: "refund" / "contact" (B5)
-	        "late_payment": late_payments.guest_notice(b.name)}
+	        "late_payment": late_payments.guest_notice(b.name),
+	        # who sold a channel's booking, by the connection's label (LO-13), never its id: the page sends the guest there
+	        "sold_by": {"label": sold_by["label"]} if sold_by else None}
 
 
 def _cancellable_online(res) -> bool:

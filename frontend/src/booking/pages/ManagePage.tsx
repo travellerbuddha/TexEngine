@@ -768,6 +768,10 @@ function Manage({ token }: { token: string | null }) {
           <Totals b={data} />
         </div>
       </section>
+      {data.sold_by && (
+        // a channel's booking (LO-12): changed and cancelled where it was booked
+        <Alert tone="info">{t("refusal.CHANNEL_BOOKING", { sold_by: data.sold_by.label })}</Alert>
+      )}
       {!data.self_service && (
         <Alert tone="info" title={t("manage.contactTitle")}>
           <p>{t("manage.contactBody")}</p>

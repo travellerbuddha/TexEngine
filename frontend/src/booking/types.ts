@@ -394,6 +394,8 @@ export interface BookingSummary {
   can_pay_online?: boolean
   /** money that came when the booking could no longer take it: refunded, or the hotel will contact the guest (B5) */
   late_payment?: LatePayment | null
+  /** a channel's booking (LO-12): who sold it, by the channel's label; it is changed and cancelled there */
+  sold_by?: { label: string } | null
 }
 
 export type LatePayment = "refund" | "contact"
