@@ -387,8 +387,11 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 				mask_other_hotel(e)
 			e.pop("reservation", None)
 			e.pop("property", None)
+		# below zero: points spent before a stay changed and earned less (O-21); owed, paid off by the next ones
+		# earned, never money (LO-25)
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
-		            "value": to_str(quantize(db_dec(prog.point_value) * b["available"], prog.currency or "EUR")),
+		            "debt": max(0, -b["available"]),
+		            "value": to_str(quantize(db_dec(prog.point_value) * max(0, b["available"]), prog.currency or "EUR")),
 		            "tier": tier.tier_name if tier else None, "entries": entries})
 	return out
 

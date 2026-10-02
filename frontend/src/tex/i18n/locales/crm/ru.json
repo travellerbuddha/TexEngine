@@ -261,6 +261,7 @@
  "crm.loyalty.adjust_title": "Корректировка баллов лояльности",
  "crm.loyalty.adjusted": "Баллы скорректированы ({points})",
  "crm.loyalty.available": "Доступные баллы",
+ "crm.loyalty.debt": "Долг {points} баллов: они были потрачены до того, как проживание изменилось и принесло меньше. Следующие начисленные баллы сначала погасят этот долг.",
  "crm.loyalty.available_on": "Доступны с {date}",
  "crm.loyalty.booking": "Бронирование",
  "crm.loyalty.col.booking": "Бронирование",

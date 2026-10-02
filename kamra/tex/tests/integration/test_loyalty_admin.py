@@ -968,3 +968,18 @@ class TestPointsBack(LoyaltyCase):
 		                          ["status", "reconciliation", "reconciliation_note"], as_dict=True)
 		self.assertEqual((row.status, row.reconciliation), ("Succeeded", "Action Required"))
 		self.assertIn("points that paid part of it were given back", row.reconciliation_note)
+
+	def test_a_balance_below_zero_is_shown_as_points_owed(self):
+		"""LO-25 (audit 2K-2): points spent before a stay changed and earned less leave a balance below zero; the
+		profile's summary says how many points are owed (``debt``) and puts no negative money value on them."""
+		b = guest_books(session="lo25", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read the profile
+		guest = frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+		frappe.db.set_value("TEX Loyalty Ledger", {"guest": guest, "program": self.club}, "status", "Reversed")
+		self.give(guest, 100)
+		self.give(guest, -300, entry_type="Reverse")                  # a changed stay took back more than was left
+		[account] = loyalty.summary(guest, {self.club})
+		self.assertEqual((account["available"], account["debt"], account["value"]), (-200, 200, "0.00"))
+		self.give(guest, 500)
+		[account] = loyalty.summary(guest, {self.club})
+		self.assertEqual((account["available"], account["debt"], account["value"]), (300, 0, "30.00"))

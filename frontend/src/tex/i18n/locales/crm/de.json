@@ -252,6 +252,7 @@
  "crm.loyalty.adjust_title": "Treuepunkte anpassen",
  "crm.loyalty.adjusted": "Punkte angepasst ({points})",
  "crm.loyalty.available": "Verfügbare Punkte",
+ "crm.loyalty.debt": "{points} Punkte sind offen: Sie wurden ausgegeben, bevor ein Aufenthalt geändert wurde und weniger einbrachte. Die nächsten verdienten Punkte gleichen sie zuerst aus.",
  "crm.loyalty.available_on": "Verfügbar ab {date}",
  "crm.loyalty.booking": "Buchung",
  "crm.loyalty.col.booking": "Buchung",

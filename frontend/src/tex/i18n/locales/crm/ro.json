@@ -256,6 +256,7 @@
  "crm.loyalty.adjust_title": "Ajustare puncte de fidelitate",
  "crm.loyalty.adjusted": "Puncte ajustate ({points})",
  "crm.loyalty.available": "Puncte disponibile",
+ "crm.loyalty.debt": "Se datorează {points} puncte: au fost cheltuite înainte ca un sejur să se schimbe și să aducă mai puțin. Următoarele puncte câștigate le acoperă mai întâi.",
  "crm.loyalty.available_on": "Disponibile din {date}",
  "crm.loyalty.booking": "Rezervare",
  "crm.loyalty.col.booking": "Rezervare",

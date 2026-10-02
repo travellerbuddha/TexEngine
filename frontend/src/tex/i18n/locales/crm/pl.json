@@ -261,6 +261,7 @@
  "crm.loyalty.adjust_title": "Korekta punktów lojalnościowych",
  "crm.loyalty.adjusted": "Punkty skorygowane ({points})",
  "crm.loyalty.available": "Dostępne punkty",
+ "crm.loyalty.debt": "Zaległość {points} punktów: wydano je, zanim pobyt się zmienił i przyniósł mniej. Kolejne zdobyte punkty najpierw ją spłacą.",
  "crm.loyalty.available_on": "Dostępne od {date}",
  "crm.loyalty.booking": "Rezerwacja",
  "crm.loyalty.col.booking": "Rezerwacja",

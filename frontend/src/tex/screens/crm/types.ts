@@ -172,6 +172,8 @@ export interface LoyaltyAccount {
   available: number
   pending: number
   lifetime_earned: number
+  /** points owed when the balance is below zero (spent before a stay changed and earned less) */
+  debt?: number
   value: string
   tier: string | null
   entries: LoyaltyEntry[]

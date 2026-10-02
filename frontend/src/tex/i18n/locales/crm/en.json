@@ -252,6 +252,7 @@
  "crm.loyalty.adjust_title": "Adjust loyalty points",
  "crm.loyalty.adjusted": "Points adjusted ({points})",
  "crm.loyalty.available": "Available points",
+ "crm.loyalty.debt": "{points} points are owed: they were spent before a stay changed and earned less. The next points earned pay them off first.",
  "crm.loyalty.available_on": "Available from {date}",
  "crm.loyalty.booking": "Booking",
  "crm.loyalty.col.booking": "Booking",

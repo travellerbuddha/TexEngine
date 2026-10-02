@@ -252,6 +252,7 @@
  "crm.loyalty.adjust_title": "Sadakat puanını düzelt",
  "crm.loyalty.adjusted": "Puan düzeltildi ({points})",
  "crm.loyalty.available": "Kullanılabilir puan",
+ "crm.loyalty.debt": "{points} puan borçlu: bir konaklama değişip daha az kazandırmadan önce harcanmıştı. Sonraki kazanılan puanlar önce bu borcu kapatır.",
  "crm.loyalty.available_on": "{date} tarihinden itibaren kullanılabilir",
  "crm.loyalty.booking": "Rezervasyon",
  "crm.loyalty.col.booking": "Rezervasyon",
