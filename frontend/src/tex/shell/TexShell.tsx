@@ -5,7 +5,7 @@ import { cn } from "../../lib/utils"
 import { useAuth } from "../../lib/auth"
 import { getTheme, setTheme } from "../../lib/theme"
 import { toFullPath } from "../../lib/routing"
-import { areaHome, childActive, childPath, childVisible, inArea, NAV, NAV_GROUPS, type NavChild, type NavItem } from "./nav"
+import { areaEntry, areaHome, childActive, childPath, childVisible, inArea, NAV, NAV_GROUPS, type NavChild, type NavItem } from "./nav"
 import { SourceNotice } from "./SourceNotice"
 import { tex, type TexApiError } from "../lib/api"
 import { UnsavedChangesProvider, useConfirmLeave } from "../lib/unsaved"
@@ -23,10 +23,10 @@ function useVisibleNav(): VisibleNavItem[] {
   const { can } = useSession()
   return useMemo(
     () =>
-      NAV.filter((n) => n.anyOf.some((c) => can(c))).map((n) => ({
-        ...n,
-        sub: (n.children ?? []).filter((c) => childVisible(c, (cap) => can(cap))),
-      })),
+      NAV.filter((n) => n.anyOf.some((c) => can(c))).map((n) => {
+        const sub = (n.children ?? []).filter((c) => childVisible(c, (cap) => can(cap)))
+        return { ...n, to: areaEntry(n, sub), sub }
+      }),
     [can],
   )
 }

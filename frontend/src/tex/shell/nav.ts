@@ -73,6 +73,17 @@ const RULE_LABELS: Record<(typeof RULE_SLUGS)[number], string> = {
   allotments: "rates.nav.allotments",
   "fx-policies": "rates.nav.fx",
 }
+/** Rules read with more than price.view: markups and contract formulas are cost (G-11; the server's
+ * `policies.READ_CAP`), so neither the side navigation nor the rules' tabs offer them without it. */
+const RULE_READ: Partial<Record<(typeof RULE_SLUGS)[number], string[]>> = {
+  markup: ["price.view_cost"],
+  "pricing-policies": ["price.view_cost"],
+}
+
+/** Whether someone with `can` may open this selling rule's list. */
+export function ruleVisible(slug: (typeof RULE_SLUGS)[number], can: (cap: string) => boolean): boolean {
+  return PRICE.some(can) && (RULE_READ[slug] ?? []).every(can)
+}
 
 /** R-35's areas, grouped by the work staff come to do (UX revision 2026-10): daily selling and
  * price/availability work first; contract set-up and selling rules next; guests and money;
@@ -133,7 +144,7 @@ export const NAV: NavItem[] = [
     keywords: "policies markup cancellation payment taxes currency",
     // R-35: Markets, Currency and the selling policies
     children: [
-      ...RULE_SLUGS.map((s) => ({ id: `rules-${s}`, to: `/tex/rates/policies/${s}`, label: RULE_LABELS[s], anyOf: PRICE })),
+      ...RULE_SLUGS.map((s) => ({ id: `rules-${s}`, to: `/tex/rates/policies/${s}`, label: RULE_LABELS[s], anyOf: PRICE, allOf: RULE_READ[s] })),
       { id: "rates-currency", to: "/tex/rates/fx-rates", label: "core.nav.sub.currency", anyOf: PRICE, keywords: "fx exchange rates" },
       { id: "rates-markets", to: "/tex/settings/markets", label: "core.nav.sub.markets", anyOf: PRICE, keywords: "countries" },
     ],
@@ -195,6 +206,15 @@ export const NAV_GROUPS: { id: NavItem["group"]; label: string }[] = [
 /** Whether a sub-section is shown to someone with `can`. */
 export function childVisible(c: NavChild, can: (cap: string) => boolean): boolean {
   return c.anyOf.some(can) && (c.allOf ?? []).every(can)
+}
+
+/** Where an area's own link goes for someone shown `sub`: the area's page, or, when that page is a
+ * sub-section they may not open, their first one (a call-centre agent's Selling rules open on the
+ * cancellation rules, not on the markups they may not read). */
+export function areaEntry(n: NavItem, sub: NavChild[]): string {
+  const own = (n.children ?? []).find((c) => c.to === n.to)
+  if (!own || sub.includes(own)) return n.to
+  return sub.find((c) => !c.unavailable)?.to ?? n.to
 }
 
 /** The path part of a sub-section's route (a query only opens part of that screen). */
