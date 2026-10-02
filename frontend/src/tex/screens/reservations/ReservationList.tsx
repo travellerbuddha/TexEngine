@@ -48,10 +48,14 @@ export default function ReservationList() {
     setParams(next, { replace: true })
   }
 
-  // debounce the free-text search into the URL (nothing to do when Enter already put it there)
+  // debounce the free-text search into the URL (nothing to do when Enter already put it there). A row
+  // opened just before it fires has left the list already (the URL changes at once, the list unmounts
+  // after the detail renders): the search is no longer the page's, so it never pulls the list back
   useEffect(() => {
     if (draft === q) return
+    const path = window.location.pathname
     const h = window.setTimeout(() => {
+      if (window.location.pathname !== path) return
       if ((liveParams().get("q") ?? "") !== draft.trim()) update({ q: draft.trim() || null })
     }, 350)
     return () => window.clearTimeout(h)

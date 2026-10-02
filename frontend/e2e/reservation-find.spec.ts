@@ -84,6 +84,19 @@ test("a reservation of another hotel: found from the list in one click, and from
   await expect(page).toHaveURL(new RegExp(`[?&]q=${encodeURIComponent(email).replace(/\./g, "\\.")}(&|$)`))
   await expect(page.locator("main table tbody tr").filter({ hasText: surname })).toHaveCount(1)
 
+  // a row opened just before that debounce fires stays open: the list, left already, never pulls the
+  // page back (typed and clicked inside the page, so the click lands 5 ms before the 350 ms are up)
+  await page.evaluate(async (who) => {
+    const input = document.querySelector<HTMLInputElement>('main input[type="search"]')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, `${input.value} `)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 345))
+    Array.from(document.querySelectorAll<HTMLElement>("main table tbody tr")).find((tr) => tr.textContent?.includes(who))!.click()
+  }, surname)
+  await expect(page.getByRole("heading", { level: 1, name: new RegExp(name ?? "RES-") })).toBeVisible()
+  await page.waitForTimeout(700) // past the debounce: the detail must still be open
+  await expect(page).toHaveURL(new RegExp(`/tex/reservations/${name}$`))
+
   // the palette: an e-mail finds it in every hotel, first in the list
   await page.goto(texPath("/tex"))
   await page.getByRole("button", { name: /^Search or jump to/ }).click()
