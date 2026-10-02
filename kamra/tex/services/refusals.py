@@ -24,12 +24,12 @@ import frappe
 
 from kamra.tex.refusal_codes import CODES
 
-# what an uncoded refusal of these kinds tells the guest: a 429, a 404, a 403 (checked in this order: the rate
-# limit error is a ValidationError, a missing record is not a permission error)
 # what a guest's error body never carries, whatever a refusal's own params say (staff keep them on the exception): the
 # market and the channel a sale was priced on (G-71; 2G-3 review round 1)
 GUEST_HIDDEN = frozenset({"market", "channel"})
 
+# what an uncoded refusal of these kinds tells the guest: a 429, a 404, a 403 (checked in this order: the rate
+# limit error is a ValidationError, a missing record is not a permission error)
 FALLBACK: tuple[tuple[type[Exception], str], ...] = (
 	(frappe.RateLimitExceededError, "RATE_LIMITED"),
 	(frappe.DoesNotExistError, "NOT_FOUND"),
