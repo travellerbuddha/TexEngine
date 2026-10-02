@@ -74,6 +74,16 @@ test("a reservation of another hotel: found from the list in one click, and from
   await expect(page.getByRole("searchbox")).toHaveValue(surname)
   await expect(page.locator("main table tbody tr").filter({ hasText: surname })).toHaveCount(1)
 
+  // a hotel chosen right after Enter stays chosen: the search box's debounce (350 ms) never undoes it
+  const search = page.getByRole("searchbox")
+  await search.fill(email)
+  await search.press("Enter")
+  await page.locator("main").getByLabel("Hotel", { exact: true }).selectOption("Aurora City Hotel")
+  await page.waitForTimeout(700) // past the debounce: the URL must not fall back
+  await expect(page).toHaveURL(/[?&]property=Aurora\+City\+Hotel(&|$)/)
+  await expect(page).toHaveURL(new RegExp(`[?&]q=${encodeURIComponent(email).replace(/\./g, "\\.")}(&|$)`))
+  await expect(page.locator("main table tbody tr").filter({ hasText: surname })).toHaveCount(1)
+
   // the palette: an e-mail finds it in every hotel, first in the list
   await page.goto(texPath("/tex"))
   await page.getByRole("button", { name: /^Search or jump to/ }).click()

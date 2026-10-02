@@ -35,8 +35,11 @@ export default function ReservationList() {
   const [draft, setDraft] = useState(q)
   useEffect(() => setDraft(q), [q])
 
+  // built from the URL as it is now, not as this render saw it: a debounced search, or a change made
+  // right after Enter, never undoes the change before it (a hotel chosen within 350 ms was lost)
+  const liveParams = () => new URLSearchParams(window.location.search)
   const update = (patch: Record<string, string | null>, keepPage = false) => {
-    const next = new URLSearchParams(params)
+    const next = liveParams()
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v)
       else next.delete(k)
@@ -45,10 +48,12 @@ export default function ReservationList() {
     setParams(next, { replace: true })
   }
 
-  // debounce the free-text search into the URL
+  // debounce the free-text search into the URL (nothing to do when Enter already put it there)
   useEffect(() => {
     if (draft === q) return
-    const h = window.setTimeout(() => update({ q: draft.trim() || null }), 350)
+    const h = window.setTimeout(() => {
+      if ((liveParams().get("q") ?? "") !== draft.trim()) update({ q: draft.trim() || null })
+    }, 350)
     return () => window.clearTimeout(h)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft])
