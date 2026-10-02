@@ -58,19 +58,29 @@ export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, 
 }
 
 /** The payment line of each room of one booking, in room order (``null``: a room not chosen yet). A FIXED deposit
- * is taken once per booking and policy, room by room (the server's ``deposit_shares``, ADR-067): the first room
- * carrying the policy names it, for the whole booking; the others say it is taken with that room (LO-35). */
+ * is taken once per booking and policy, room by room (the server's ``deposit_shares``, ADR-067): where two rooms or
+ * more carry the policy, the first names it, for the whole booking, and the others say it is taken with that room
+ * (LO-35); a room alone with its policy reads as it would on its own. */
 export function bookingPaymentTerms(
   i18n: I18n,
   rooms: ({ info: RatePlanInfo | null | undefined; currency: string } | null)[],
 ) {
-  const several = rooms.filter(Boolean).length > 1
+  // the server's key of a FIXED policy (deposit_shares), or null for another kind of deposit
+  const fixedKey = (info: RatePlanInfo | null | undefined) => {
+    const p = info?.payment_policy
+    return (p?.deposit_type || "").toUpperCase() === "FIXED" ? String(p?.id || p?.name || "") : null
+  }
+  const carrying = new Map<string, number>()
+  for (const r of rooms) {
+    const key = r ? fixedKey(r.info) : null
+    if (key !== null) carrying.set(key, (carrying.get(key) ?? 0) + 1)
+  }
   const first = new Map<string, number>()
   return rooms.map((r, i) => {
     if (!r) return null
     const p = r.info?.payment_policy
-    if (!several || (p?.deposit_type || "").toUpperCase() !== "FIXED") return paymentTerms(i18n, r.info, r.currency)
-    const key = String(p?.id || p?.name || "")
+    const key = fixedKey(r.info)
+    if (key === null || (carrying.get(key) ?? 0) < 2) return paymentTerms(i18n, r.info, r.currency)
     const at = first.get(key)
     if (at === undefined) {
       first.set(key, i)

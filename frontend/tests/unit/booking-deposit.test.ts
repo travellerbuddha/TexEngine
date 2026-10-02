@@ -46,3 +46,19 @@ test("one room, or another kind of deposit, reads as before", () => {
   // a room not chosen yet stays empty
   assert.deepEqual(bookingPaymentTerms(i18n, [room(deposit100), null, room(deposit100)])[1], null)
 })
+
+// 2K-5 review: "for the whole booking" only where the booking has two rooms or more of that policy; a fixed deposit
+// one room alone carries is that room's (the other rooms pay their own policy's deposit as well)
+test("a fixed deposit only one room carries reads as that room's own, also in a booking of several rooms", () => {
+  const pct = plan({ id: "PP-30", deposit_type: "PERCENT", deposit_value: "30.00" })
+  const other = plan({ id: "PP-50", deposit_type: "FIXED", deposit_value: "50", currency: "EUR" })
+  const lines = bookingPaymentTerms(i18n, [room(deposit100), room(pct), room(other)])
+  assert.match(lines[0]!.text, /^policy\.depositFixed \{.*100 EUR/)
+  assert.match(lines[1]!.text, /policy\.depositPercent/)
+  assert.match(lines[2]!.text, /^policy\.depositFixed \{.*50 EUR/)
+  // a second room of the policy makes it the booking's again
+  const four = bookingPaymentTerms(i18n, [room(deposit100), room(pct), room(other), room(deposit100)])
+  assert.match(four[0]!.text, /policy\.depositFixedBooking.*100 EUR/)
+  assert.match(four[2]!.text, /^policy\.depositFixed \{.*50 EUR/)
+  assert.match(four[3]!.text, /policy\.depositWithRoom \{"n":1\}/)
+})
