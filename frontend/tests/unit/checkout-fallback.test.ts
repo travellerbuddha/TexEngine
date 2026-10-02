@@ -35,3 +35,13 @@ test("a basket read offers its available methods; one not read yet offers the ca
   assert.deepEqual(checkoutChoices({ status: "done", data }).failed, false)
   assert.deepEqual(checkoutChoices({ status: "idle", data: null }), { choices: fallbackChoices(), failed: false })
 })
+
+// 2K-5 review: a basket refused by a rate limit or a coded refusal says so; trying again would fail the same way
+test("a basket that could not be read says why: a rate limit, a refusal in its own words, else the connection", async () => {
+  const { basketFailureText } = await import("../../src/booking/lib/methods.ts")
+  const i18n = { t: (key: string) => (key === "refusal.QUOTE_INVALID" ? "Your selection is no longer valid." : key), locale: "en", day: (v: string) => v, money: (a: string | null | undefined) => a ?? "" } as unknown as Parameters<typeof basketFailureText>[0]
+  assert.deepEqual(basketFailureText(i18n, { kind: "rate_limit", code: "RATE_LIMITED" }), { title: "errors.rateLimitTitle", body: "errors.rateLimitBody" })
+  assert.deepEqual(basketFailureText(i18n, { kind: "expired", code: "QUOTE_INVALID" }), { title: "payment.optionsFailedTitle", body: "Your selection is no longer valid." })
+  assert.deepEqual(basketFailureText(i18n, { kind: "network", message: "" }), { title: "payment.optionsFailedTitle", body: "payment.optionsFailedBody" })
+  assert.deepEqual(basketFailureText(i18n, null), { title: "payment.optionsFailedTitle", body: "payment.optionsFailedBody" })
+})

@@ -17,7 +17,7 @@ import type { PaymentMethod, PaymentStart, QuoteResponse, SiteExtra } from "../t
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
-import { checkoutChoices } from "../lib/methods"
+import { basketFailureText, checkoutChoices } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
 import { countryNames, isoCountry, regionDisplay, residencyProblem } from "../../lib/residency"
@@ -709,10 +709,10 @@ function PaymentStep() {
             <Alert
               tone="warn"
               className="mt-3"
-              title={t("payment.optionsFailedTitle")}
+              title={basketFailureText(i18n, b.basket.error).title}
               actions={<Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>}
             >
-              {t("payment.optionsFailedBody")}
+              {basketFailureText(i18n, b.basket.error).body}
             </Alert>
           ) : !choices.length ? (
             <Alert tone="warn" className="mt-3" title={t("payment.noMethodsTitle")}>

@@ -371,6 +371,37 @@ test("on a phone the price-change notice is focused and scrolled into view (LO-3
   noErrors()
 })
 
+test("payment options that could not be loaded say why, and load on Try again (LO-14)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the checkout's wording, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  const isBasket = (url: URL) => url.pathname === "/api/method/kamra.tex.api.public.basket"
+  // the server's refusals as Frappe sends them: a rate limit (429), then a coded refusal (G-70b)
+  const refuse = (status: number, body: Record<string, unknown>) =>
+    page.route(isBasket, (route) => route.fulfill({ status, contentType: "application/json", json: { ...body, _server_messages: JSON.stringify([JSON.stringify({ message: "Refused" })]) } }), { times: 1 })
+  await refuse(429, { exc_type: "RateLimitExceededError" })
+  const { checkIn, checkOut } = stay(240, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+
+  const failed = page.getByRole("status").filter({ has: page.getByRole("button", { name: "Try again" }) })
+  await expect(failed).toContainText("Too many attempts")
+  await expect(failed).toContainText("Please wait a minute and try again.")
+  await expect(failed).not.toContainText("Check your connection")
+  // a coded refusal is told in its own words
+  await refuse(417, { exc_type: "ValidationError", tex_code: "QUOTE_INVALID" })
+  await failed.getByRole("button", { name: "Try again" }).click()
+  await expect(failed).toContainText("The payment options could not be loaded")
+  await expect(failed).toContainText("Your selection is no longer valid. Please search again.")
+  await expect(failed).not.toContainText("Check your connection")
+  // and the options load when the server answers
+  await failed.getByRole("button", { name: "Try again" }).click()
+  await expect(page.getByRole("radio", { name: /^Credit or debit card/ }).first()).toBeVisible()
+  await expect(failed).toHaveCount(0)
+  noErrors()
+})
+
 test("a declined card keeps the booking awaiting payment until the retry succeeds", async ({ page }, testInfo) => {
   const noErrors = trackErrors(page)
   const { checkIn, checkOut } = stay(160, 2, testInfo.project.name)

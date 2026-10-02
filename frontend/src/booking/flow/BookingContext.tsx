@@ -193,6 +193,8 @@ export interface BasketState {
   data: Basket | null
   /** quote ids the data belongs to */
   key: string | null
+  /** why it could not be read (status "error"): the checkout says so (LO-14) */
+  error?: FlowError | null
 }
 
 const BookingCtx = createContext<Ctx | null>(null)
@@ -550,7 +552,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     setBasket((b) => ({ status: "loading", data: b.key === basketKey ? b.data : null, key: basketKey }))
     pub<Basket>("basket", { site: site.slug, quote_ids: basketKey.split(","), session_id: sessionId() })
       .then((data) => alive && setBasket({ status: "done", data, key: basketKey }))
-      .catch(() => alive && setBasket({ status: "error", data: null, key: basketKey }))
+      .catch((e: unknown) => alive && setBasket({ status: "error", data: null, key: basketKey, error: toFlowError(e) }))
     return () => {
       alive = false
     }

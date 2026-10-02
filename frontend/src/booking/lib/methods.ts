@@ -1,3 +1,4 @@
+import { refusalMessage, type RefusalI18n, type Refused } from "./refusals.ts"
 import type { Basket, PaymentMethod } from "../types"
 
 /** The methods the checkout can offer (anything else the server lists is left out). */
@@ -47,4 +48,16 @@ export function checkoutChoices(basket: { status: string; data: Basket | null })
   }
   if (basket.status === "error") return { choices: [], failed: true }
   return { choices: fallbackChoices(), failed: false }
+}
+
+/**
+ * What the checkout says when the basket could not be read (LO-14): a rate limit asks the guest to wait, a coded
+ * refusal is told in its own words (G-70b); anything else is the connection's, as before. Trying again then does
+ * not fail the same way unexplained.
+ */
+export function basketFailureText(i18n: RefusalI18n, error: (Refused & { kind?: string }) | null | undefined): { title: string; body: string } {
+  const t = i18n.t as (key: string) => string
+  if (error?.kind === "rate_limit") return { title: t("errors.rateLimitTitle"), body: t("errors.rateLimitBody") }
+  if (error?.code) return { title: t("payment.optionsFailedTitle"), body: refusalMessage(i18n, error) }
+  return { title: t("payment.optionsFailedTitle"), body: t("payment.optionsFailedBody") }
 }
