@@ -355,7 +355,7 @@
  "settings.status.reason.reconciliation_action": "Zahlungen, die keiner Buchung zugeordnet sind und auf das Team warten: {count}, die älteste wartet seit {hours} Std. (Zahlungen → die Zahlung).",
  "settings.status.reason.reconciliation_refund": "Zahlungen in der Warteschlange für eine automatische Erstattung: {count}, die älteste wartet seit {hours} Std.",
  "settings.status.reason.bookings_overpaid": "Buchungen, die mehr Geld halten, als sie kosten: {count} (davon {cancelled} storniert). Erstatten Sie den Überschuss oder buchen Sie ihn auf die richtige Buchung um (Zahlungen). Eine Erstattung, die noch unterwegs ist, zählt als bezahlt, bis das Zahlungsgateway sie beantwortet.",
- "settings.status.reason.loyalty_earning_failed": "Aufenthalte, die in den letzten {days} Tagen keine Treuepunkte erhalten konnten: {count} (siehe Error Log). Der Aufenthalt blieb bestehen; tragen Sie die Punkte von Hand nach, sobald die Ursache behoben ist.",
+ "settings.status.reason.loyalty_earning_failed": "Aufenthalte, bei denen in den letzten {days} Tagen Treuepunkte weder gutgeschrieben noch zurückgenommen werden konnten: {count} (siehe Error Log). Der Aufenthalt blieb bestehen; korrigieren Sie die Punkte des Gastes von Hand, sobald die Ursache behoben ist.",
  "settings.status.reason.hold_overdue": "Buchungen, die nach Ablauf ihrer Reservierung noch Zimmer halten: {count}, die älteste lief vor {minutes} Min. ab. Ihr Ablauf schlägt wiederholt fehl (siehe Fehlerprotokoll).",
  "settings.status.reason.redis_unreachable": "Die Hintergrund-Warteschlange (Redis) ist nicht erreichbar.",
  "settings.status.reason.refund_unknown": "Vom Zahlungsanbieter nie bestätigte Erstattungen: {count}. Prüfen Sie sie dort, bevor Sie erneut erstatten.",

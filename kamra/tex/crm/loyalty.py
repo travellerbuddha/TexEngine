@@ -169,7 +169,7 @@ def on_reservation_change(doc) -> None:
 	rules, tiers or points never rewrites earnings already made (G-24).
 
 	It runs inside the reservation's save (a confirmation, a payment's callback, a cancellation): an earning
-	that fails never rolls that back (LO-47, owner's choice). It is undone alone to its savepoint, its message
+	or a reversal that fails never rolls that back (LO-47, owner's choice). It is undone alone to its savepoint, its message
 	dropped, logged ("TEX loyalty earning <reservation>"), and ``loyalty.earnings`` warns that a stay's points
 	are missing. A deadlock or a lost transaction is raised as it is (its savepoint is gone with it). The points
 	return of a cancellation (O-20) is never under this: it is money and fails its request."""

@@ -333,8 +333,8 @@ def _bookings_overpaid(props, now) -> dict:
 
 
 def _loyalty_earnings(props, now) -> dict:
-	"""LO-47: the stays whose loyalty earning failed in the last days (their Error Log, titled with the stay), per
-	hotel: the stay was kept, its points wait for staff."""
+	"""LO-47: the stays whose loyalty earning or reversal failed in the last days (their Error Log, titled with the
+	stay), per hotel: the stay was kept, its points wait for staff."""
 	titles = frappe.db.sql("""SELECT method FROM `tabError Log` WHERE creation >= %(t)s
 	                          AND method LIKE 'TEX loyalty earning %%'""",
 	                       {"t": now - timedelta(days=C.LOYALTY_EARNING_WINDOW_DAYS)}, pluck=True)

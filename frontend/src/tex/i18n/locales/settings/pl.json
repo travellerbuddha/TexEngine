@@ -429,7 +429,7 @@
  "settings.status.reason.reconciliation_action": "Płatności niezaliczone do rezerwacji, czekające na personel: {count}, najstarsza czeka {hours} godz. (Płatności → płatność).",
  "settings.status.reason.reconciliation_refund": "Płatności w kolejce do automatycznego zwrotu: {count}, najstarsza czeka {hours} godz.",
  "settings.status.reason.bookings_overpaid": "Rezerwacje z kwotą wyższą niż ich koszt: {count} (w tym anulowane: {cancelled}). Zwróć nadwyżkę lub przenieś ją na właściwą rezerwację (Płatności). Zwrot, który jest jeszcze w drodze, liczy się jako zapłacony, dopóki bramka płatności na niego nie odpowie.",
- "settings.status.reason.loyalty_earning_failed": "Pobyty, którym w ciągu ostatnich {days} dni nie udało się naliczyć punktów lojalnościowych: {count} (zob. Error Log). Pobyt zachowano; dodaj punkty ręcznie po usunięciu przyczyny.",
+ "settings.status.reason.loyalty_earning_failed": "Pobyty, którym w ciągu ostatnich {days} dni nie udało się naliczyć ani cofnąć punktów lojalnościowych: {count} (zob. Error Log). Pobyt zachowano; popraw ręcznie punkty gościa po usunięciu przyczyny.",
  "settings.status.reason.hold_overdue": "Rezerwacje wciąż blokujące pokoje po upływie blokady: {count}, najstarsza wygasła {minutes} min temu. Ich wygaszanie się nie udaje (zobacz dziennik błędów).",
  "settings.status.reason.callback_errors": "Nieudane lub odrzucone powiadomienia o płatnościach w ciągu {hours} godz.: {count}.",
  "settings.status.reason.overpaid": "Linki płatności opłacone dwukrotnie w ciągu {days} dni: {count}.",

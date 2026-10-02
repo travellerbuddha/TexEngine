@@ -168,6 +168,9 @@ class TestVerdicts(unittest.TestCase):
 		                 [("loyalty_earning_failed", {"count": 2, "days": c.LOYALTY_EARNING_WINDOW_DAYS})])
 		self.assertIn("loyalty.earnings", c.TITLES)
 		self.assertIn("2 stay(s)", c.describe(out["issues"][0]))
+		# a cancellation's reversal is guarded too: the text never says only "earn" (review round 1)
+		self.assertIn("earn or take back", c.describe(out["issues"][0]))
+		self.assertIn("correct the guest's points by hand", c.describe(out["issues"][0]))
 
 	def test_money_in_reconciliation_is_shown_with_its_age(self):
 		"""B5: payments kept off every booking wait for staff (or a queued refund): each kind with its

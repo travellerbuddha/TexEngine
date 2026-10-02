@@ -59,7 +59,7 @@ PAYMENT_PENDING_WINDOW_HOURS = 48
 PAYMENT_UNVERIFIED_FAIL_MINUTES = 10
 # rejected or failed gateway callbacks (Error Log) counted over this window
 CALLBACK_ERROR_WINDOW_HOURS = 24
-# a stay whose loyalty earning failed is shown this long: its points wait for staff (LO-47)
+# a stay whose loyalty earning (or its reversal) failed is shown this long: its points wait for staff (LO-47)
 LOYALTY_EARNING_WINDOW_DAYS = 7
 # captures TEX refused to count / links paid twice (audit trail) counted over this window
 PAYMENT_AUDIT_WINDOW_DAYS = 7
@@ -154,8 +154,9 @@ REASONS: dict[str, str] = {
 	                         "payment); the oldest has waited {hours} hours.",
 	"reconciliation_refund": "{count} payment(s) are queued for an automatic refund; the oldest has waited {hours} "
 	                         "hours.",
-	"loyalty_earning_failed": "{count} stay(s) could not earn their loyalty points in the last {days} days (see the "
-	                          "Error Log): the stay was kept; add the points by hand once the cause is fixed.",
+	"loyalty_earning_failed": "{count} stay(s) could not earn or take back their loyalty points in the last {days} "
+	                          "days (see the Error Log): the stay was kept; correct the guest's points by hand once "
+	                          "the cause is fixed.",
 	"bookings_overpaid": "{count} booking(s) hold more money than they cost ({cancelled} of them cancelled): refund "
 	                     "the excess, or move it to the booking it was meant for (Payments). A refund still on its "
 	                     "way counts as paid until the gateway answers it.",
@@ -393,7 +394,8 @@ def reconciliation_check(*, action: int, action_since: datetime | None, refund: 
 
 
 def loyalty_earnings_check(count: int, properties: Iterable[str] = ()) -> dict:
-	"""LO-47: stays whose loyalty earning failed (and was undone alone, the stay kept) in the last days."""
+	"""LO-47: stays whose loyalty earning or reversal failed (and was undone alone, the stay kept) in the last
+	days."""
 	issues = [issue("loyalty_earning_failed", WARN, count=count, days=LOYALTY_EARNING_WINDOW_DAYS)] if count else []
 	return make("loyalty.earnings", issues, scope="hotel", properties=properties)
 

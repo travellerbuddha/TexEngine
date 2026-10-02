@@ -1035,3 +1035,27 @@ class TestAnEarningNeverUndoesTheStay(LoyaltyCase):
 		self.assertEqual(check["status"], "warn")
 		self.assertEqual(check["issues"][0]["reason"], "loyalty_earning_failed")
 		self.assertIn(fx.PROPERTY, check["properties"])
+
+	def test_a_failing_reversal_leaves_the_cancellation_and_is_reported(self):
+		"""The cancellation's reversal of the stay's points runs under the same guard: the cancellation is kept,
+		the earned points stay for staff to correct, and the same check reports it (review round 1)."""
+		from kamra.tex.ops import status as ops_status
+
+		self.create()
+		b = guest_books(session="lo47-rev")
+		p = b["payment"]
+		public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff cancel
+		res = b["rooms"][0]["reservation"]
+		self.assertTrue(frappe.db.exists("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn",
+		                                                        "status": ("!=", "Reversed")}))
+		since = now_datetime()
+		with mock.patch.object(loyalty, "_reverse", side_effect=RuntimeError("a broken reversal")):
+			booking_svc.cancel_reservation(res, reason="lo47", waive_penalty=True)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
+		self.assertTrue(frappe.db.exists("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn",
+		                                                        "status": ("!=", "Reversed")}))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX loyalty earning {res}",
+		                                               "creation": (">=", since)}))
+		check = next(c for c in ops_status.collect(properties=[fx.PROPERTY]) if c["key"] == "loyalty.earnings")
+		self.assertEqual((check["status"], check["issues"][0]["reason"]), ("warn", "loyalty_earning_failed"))
