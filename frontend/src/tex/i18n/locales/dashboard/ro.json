@@ -161,5 +161,7 @@
  "dash.today": "Astăzi",
  "dash.view": "Vizualizare panou",
  "dash.view.hotel": "Acest hotel",
- "dash.view.portfolio": "Portofoliu"
+ "dash.view.portfolio": "Portofoliu",
+ "dash.arrivals_open": "Sosiri azi: {count} — deschide lista",
+ "dash.departures_open": "Plecări azi: {count} — deschide lista"
 }

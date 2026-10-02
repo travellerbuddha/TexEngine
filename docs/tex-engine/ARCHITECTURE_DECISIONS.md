@@ -9655,3 +9655,17 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   check it and save it through `save_version`. Nothing is re-dated on the server.
 - *Reservation search.* `crs.reservations` also matches the TEX Booking's `external_ref` (a channel's booking number) and
   returns it as `channel_ref`.
+- *Follow-up (2026-10-02).*
+  - *Sell price in the grid (`crs.ari_sell_prices`, read-only, `price.view`).* A reference stay (one night, the party
+    chosen, no children, the base board, the rate plan named or the contract's first, said back) is priced by
+    `engine.price_stay` on the version on sale now, with the context the search builds (markups, automatic promotions,
+    FX, taxes, mandatory extras; no coupon code). The context does not depend on the night, so it is built once a room
+    (`check_capacity=False`: limited extras are the inventory's concern); at most 400 cells a call. No version on sale:
+    `on_sale: false`. An unknown plan is refused, never replaced. The browser shows the server's amounts only.
+  - *Back and Forward (`lib/backGuard.ts`).* A popstate listener installed in `main.tsx` before the router runs
+    first; with unsaved edits it asks the shell's question. Staying stops the event (the router never sees it) and
+    sends the browser back to the entry it left (`history.go(at − next)`, React Router's `state.idx`), whose popstate
+    is stopped too. Leaving lets the event through. A hash-only step is never asked. A data router is not needed.
+  - *Dashboard → list.* `reports.service.ARRIVING_STATUSES` / `DEPARTING_STATUSES` are the one definition the
+    dashboard counts with and `crs.reservations(arriving=, departing=)` filters by; the dashboard returns the day it
+    counted (`today.date`) and links to that day.

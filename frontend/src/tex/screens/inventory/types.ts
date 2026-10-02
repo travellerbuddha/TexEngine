@@ -74,8 +74,8 @@ export interface BulkResult {
   rate?: { draft: string; periods: string[]; note: string }
 }
 
-export type Metric = "rate" | "avail" | "stop" | "los" | "arrdep" | "release" | "window"
-export const METRICS: Metric[] = ["rate", "avail", "stop", "los", "arrdep", "release", "window"]
+export type Metric = "rate" | "sell" | "avail" | "stop" | "los" | "arrdep" | "release" | "window"
+export const METRICS: Metric[] = ["rate", "sell", "avail", "stop", "los", "arrdep", "release", "window"]
 /** What the hotel-level row shows: restrictions only (no pool, no rate). */
 export const HOTEL_METRICS: Metric[] = ["stop", "los", "arrdep", "release", "window"]
 
@@ -145,4 +145,32 @@ export interface ExtraAllocation {
 
 export interface ExtrasDrift {
   drift: { extra_code: string; date: string; was: number; now: number }[]
+}
+
+/** What a guest pays for one night beside the contract price (UX revision 2026-10,
+ * crs.ari_sell_prices): a reference stay priced by the engine with the markups and promotions in force. */
+export interface SellCell {
+  room_type: string
+  date: string
+  /** the decimal string the guest pays, or null when the night is not sold at this reference */
+  total: string | null
+  reason?: string | null
+  message?: string | null
+  promotions?: string[]
+}
+
+export interface SellPrices {
+  contract: string
+  on_sale: boolean
+  start: string
+  days: number
+  adults: number
+  version?: string
+  currency?: string
+  market?: string
+  channel?: string
+  board?: string | null
+  rate_plan?: string | null
+  rate_plans?: { code: string; name: string }[]
+  cells: SellCell[]
 }

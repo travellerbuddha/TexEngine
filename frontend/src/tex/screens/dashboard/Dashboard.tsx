@@ -45,7 +45,8 @@ interface DashboardData {
   reservations_created: number
   cancellations: number
   cancellation_rate: string | null
-  today: { arrivals: number; departures: number }
+  /** the server's day these figures are for (the list they open asks for the same day) */
+  today: { date?: string; arrivals: number; departures: number }
   guest_changes_pending: number
   open_balance: Record<string, string>
   funnel: { search: number; quote: number; guest_details: number; payment_started: number; booked: number; conversion_pct: string | null }
@@ -243,15 +244,32 @@ function HotelDashboard({ viewSwitch }: { viewSwitch?: ReactNode }) {
             <div className="min-w-0 space-y-5">
               <Card>
                 <CardHeader title={t("dash.today")} />
+                {/* each figure opens the reservations behind it (UX revision 2026-10) */}
                 <CardBody className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-zinc-500">{t("dash.arrivals")}</p>
-                    <p className="text-xl font-semibold tabular-nums">{d ? num(d.today.arrivals) : "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-zinc-500">{t("dash.departures")}</p>
-                    <p className="text-xl font-semibold tabular-nums">{d ? num(d.today.departures) : "—"}</p>
-                  </div>
+                  {(["arrivals", "departures"] as const).map((k) => {
+                    const n = d?.today[k]
+                    const body = (
+                      <>
+                        <span className="block text-xs text-zinc-500">{t(`dash.${k}`)}</span>
+                        <span className="flex items-center gap-1 text-xl font-semibold tabular-nums">
+                          {n === undefined ? "—" : num(n)}
+                          {d && <ArrowRight className="size-4 text-zinc-400" aria-hidden />}
+                        </span>
+                      </>
+                    )
+                    return d ? (
+                      <Link
+                        key={k}
+                        to={`/tex/reservations?${k === "arrivals" ? "arriving" : "departing"}=${d.today.date ?? today}`}
+                        aria-label={t(`dash.${k}_open`, { count: n ?? 0 })}
+                        className="-m-1.5 rounded-lg p-1.5 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-tex-600"
+                      >
+                        {body}
+                      </Link>
+                    ) : (
+                      <div key={k}>{body}</div>
+                    )
+                  })}
                 </CardBody>
               </Card>
               <Card>

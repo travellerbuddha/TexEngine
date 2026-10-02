@@ -419,5 +419,20 @@
  "inventory.legend.select": "auswählen (auch Klick, Umschalt+Klick, Ziehen, Zimmername oder Tag)",
  "inventory.legend.type": "in eine Preiszelle tippen: Preis oder Änderung",
  "inventory.legend.clipboard": "Preise mit einer Tabelle kopieren und einfügen",
- "inventory.legend.details": "alle Einstellungen einer Zelle"
+ "inventory.legend.details": "alle Einstellungen einer Zelle",
+ "inventory.metric.sell": "Verkaufspreis",
+ "inventory.sell.ref_short": {
+  "one": "{count} Erwachsener · 1 Nacht",
+  "other": "{count} Erwachsene · 1 Nacht"
+ },
+ "inventory.sell.ref": "Was der Gast zahlt: Verpflegung {board} · Markt {market} · {channel} ·",
+ "inventory.sell.ref_note": "mit den jetzt geltenden Aufschlägen, Aktionen und Steuern; ein Code wird nie angenommen",
+ "inventory.sell.plan": "Ratenplan des Verkaufspreises",
+ "inventory.sell.adults": "Belegung des Verkaufspreises",
+ "inventory.sell.none_on_sale": "Keine Version dieses Vertrags ist im Verkauf: zu ihm wird noch nichts verkauft.",
+ "inventory.sell.not_sold_short": "nicht verkauft",
+ "inventory.sell.not_sold": "nicht verkauft: {reason}",
+ "inventory.sell.with_promos": "{amount}, mit {names}",
+ "inventory.sell.loading": "Verkaufspreis wird ermittelt…",
+ "inventory.sell.out_of_range": "in dieser Ansicht nicht berechnet: weniger Tage anzeigen"
 }

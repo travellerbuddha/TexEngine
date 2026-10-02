@@ -345,5 +345,8 @@
  "res.list.none_here": "Nothing matches at {hotel}. It may be a reservation of another hotel.",
  "res.list.search_all": "Search all my hotels",
  "res.list.channel_ref": "The channel's own booking number",
- "res.list.channel_ref_short": "Channel ref. {ref}"
+ "res.list.channel_ref_short": "Channel ref. {ref}",
+ "res.list.arriving_on": "Arrivals on {date}",
+ "res.list.departing_on": "Departures on {date}",
+ "res.list.day_clear": "Show every date"
 }

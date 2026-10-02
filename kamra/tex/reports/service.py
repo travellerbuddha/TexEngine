@@ -902,6 +902,12 @@ def _one_window(date_from, date_to) -> tuple[date, date]:
 	return w
 
 
+# who arrives and who leaves on a day: the dashboard's counts and the reservation list it opens
+# (``crs.reservations(arriving=…, departing=…)``) read the same statuses (UX revision 2026-10)
+ARRIVING_STATUSES = ("Confirmed", "Pending Payment")
+DEPARTING_STATUSES = ("Confirmed", "Checked In")
+
+
 def dashboard(property: str, date_from=None, date_to=None) -> dict:
 	scope.require("report.view", property)
 	today = getdate(nowdate())
@@ -918,9 +924,9 @@ def dashboard(property: str, date_from=None, date_to=None) -> dict:
 	created = frappe.db.count("Reservation", {"property": property, "tex_hold_expired": 0,
 	                                          "creation": ("between", [str(a), f"{b} 23:59:59"])})
 	arrivals = frappe.db.count("Reservation", {"property": property, "check_in_date": today,
-	                                           "status": ("in", ["Confirmed", "Pending Payment"])})
+	                                           "status": ("in", list(ARRIVING_STATUSES))})
 	departures = frappe.db.count("Reservation", {"property": property, "check_out_date": today,
-	                                             "status": ("in", ["Confirmed", "Checked In"])})
+	                                             "status": ("in", list(DEPARTING_STATUSES))})
 	pending_changes = frappe.db.count("Reservation", {"property": property, "tex_guest_change_pending": 1})
 	unpaid = frappe.get_all("TEX Booking", filters={"property": property, "payment_status": ("in", ["Unpaid",
 	                                                                                               "Partially Paid"]),
@@ -942,7 +948,8 @@ def dashboard(property: str, date_from=None, date_to=None) -> dict:
 		"stay": stay["totals"], "by_channel": stay["rows"], "pickup_by_day": booked["rows"],
 		"reservations_created": created, "cancellations": cancelled, "expired_holds": expired,
 		"cancellation_rate": to_str(quantize(D(cancelled) / D(created) * 100, "EUR")) if created else None,
-		"today": {"arrivals": arrivals, "departures": departures}, "guest_changes_pending": pending_changes,
+		"today": {"date": str(today), "arrivals": arrivals, "departures": departures},
+		"guest_changes_pending": pending_changes,
 		"open_balance": {c: to_str(v) for c, v in balance.items()},
 		"funnel": {"search": searches, "quote": f.get("quote", 0), "guest_details": f.get("guest_details", 0),
 		           "payment_started": f.get("payment_started", 0), "booked": f.get("booked", 0),

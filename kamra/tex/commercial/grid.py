@@ -541,3 +541,80 @@ def rate_changes(property: str, contract: str, changes, *, apply: bool = False) 
 	return {**answer, "periods": edited, "errors": [], "applied": True}
 
 
+
+
+# ─── the sell price beside the contract price (UX revision 2026-10) ──────────
+
+MAX_SELL_CELLS = 400        # rooms × nights priced in one call (a 31-day month of 12 rooms)
+
+
+def sell_prices(property: str, contract: str, start, days: int = 14, *, rate_plan: str | None = None,
+                adults: int = 2, market: str | None = None, channel: str | None = None) -> dict:
+	"""What a guest pays for one night, room by room and night by night: a reference stay (one night,
+	``adults`` adults, no children, the base board, ``rate_plan``) priced by the engine on the version
+	of ``contract`` on sale now, with the markups, promotions (automatic ones; a code is never
+	assumed), FX and taxes in force now, for ``market`` (default the contract's) and ``channel``
+	(default the booking engine). The contract price the grid shows is where it starts; this is
+	where it ends. A contract with rate plans prices the one named, else its first, and says which.
+	The hotel's mandatory extras are in it, as the search prices every offer (Y-5). Restrictions and
+	inventory are the grid's other rows: a night closed to sale, or a mandatory limited extra sold
+	out, still has a price here. Read-only: nothing is written, quoted or audited."""
+	from frappe.utils import add_days, now_datetime
+
+	from kamra.tex.commercial import context as ctxmod
+	from kamra.tex.pricing import engine
+	from kamra.tex.pricing.model import PricingError, StayRequest
+
+	scope.require("price.view", property)
+	c = frappe.db.get_value("TEX Contract", contract, ["name", "property", "sell_currency"], as_dict=True)
+	if not c or c.property != property:
+		frappe.throw(_("This contract is not one of this hotel's."))
+	start = getdate(start)
+	days = max(1, min(int(days or 14), 62))
+	now = now_datetime()
+	live = contracts.active_version_header(contract, now)
+	head = {"contract": contract, "start": str(start), "adults": adults}
+	if not live:
+		return {**head, "on_sale": False, "days": days, "cells": []}
+	terms = contracts.load_terms(live.version_id)
+	plans = list(terms.rate_plans)
+	if rate_plan and rate_plan not in terms.rate_plans:
+		frappe.throw(_("Rate plan {0} is not in this contract.").format(rate_plan))
+	plan = rate_plan or (plans[0] if plans else None)
+	board = next((b.board for b in terms.boards if b.is_base), None)
+	rooms = list(terms.rooms)
+	if rooms and len(rooms) * days > MAX_SELL_CELLS:
+		days = max(1, MAX_SELL_CELLS // len(rooms))
+	sell = (c.sell_currency or terms.sell_currency or terms.currency).upper()
+	mkt = (market or terms.market).upper()
+	ch = channel or "DIRECT_WEB"
+	try:
+		mandatory = {code: d for code, d in ctxmod.extras_catalog(property, at=now).items() if d.mandatory}
+	except Unsellable as e:      # an ambiguous extras catalog stops every room, as in the search
+		return {**head, "on_sale": True, "days": days, "version": terms.version_id, "currency": sell, "cells": [
+			{"room_type": rt, "date": str(add_days(start, i)), "total": None, "reason": e.code, "message": e.message}
+			for rt in rooms for i in range(days)]}
+	cells = []
+	for rt in rooms:
+		ctx = None     # the markups, promotions, FX and taxes do not depend on the night: built once a room
+		for i in range(days):
+			night = add_days(start, i)
+			req = StayRequest(property=property, room_type=rt, board=board, rate_plan=plan, check_in=night,
+			                  check_out=add_days(night, 1), adults=adults, children=(), sale_at=now, market=mkt,
+			                  channel=ch, sell_currency=sell, promo_codes=())
+			cell = {"room_type": rt, "date": str(night)}
+			try:
+				ctx = ctx or ctxmod.build_context(terms, req, extras=mandatory, check_capacity=False)
+				r = engine.price_stay(ctx, req).to_dict(internal=False)
+			except (Unsellable, PricingError, frappe.ValidationError) as e:
+				cells.append({**cell, "total": None, "reason": getattr(e, "code", None) or "PRICING_ERROR",
+				              "message": str(e)})
+				continue
+			first = (r.get("reasons") or [{}])[0]
+			cells.append({**cell, "total": r["totals"]["total"] if r["sellable"] else None,
+			              "reason": None if r["sellable"] else first.get("code"),
+			              "message": None if r["sellable"] else first.get("message"),
+			              "promotions": [p["name"] for p in r.get("promotions") or [] if p.get("applied")]})
+	return {**head, "on_sale": True, "days": days, "version": terms.version_id, "currency": sell, "market": mkt,
+	        "channel": ch, "board": board, "rate_plan": plan,
+	        "rate_plans": [{"code": k, "name": v.name} for k, v in terms.rate_plans.items()], "cells": cells}

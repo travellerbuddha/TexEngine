@@ -1655,8 +1655,16 @@ was not measured.
 Task 2's typed values grow with the rooms and rules of a period before, and stay one after. A reservation of another hotel
 takes one click more than before by design (the list no longer searches every hotel silently; the palette does).
 
-- **Not done:** the grid shows the contract's price (not the final sell price after markup and promotions); the browser's
-  Back button is not guarded (only in-app links, the hotel switch, the palette and reload); bundles not rebuilt (2Z).
+- Follow-up (2026-10-02) **COMPLETE**:
+  - the grid's daily view has a "Sell price" row under each contract price: one night for the party chosen, the base
+    board and the rate plan named (else the contract's first, said back), priced by the engine with the markups,
+    automatic promotions, FX, taxes and mandatory extras in force now, as the search prices an offer; the promotions
+    in it or why the night is not sold (`crs.ari_sell_prices`) · `test_grid_sell_prices` (5), e2e `rates-availability`;
+  - the browser's Back and Forward buttons ask before unsaved edits are lost (`lib/backGuard.ts`) · e2e `back-guard`;
+  - the dashboard's arrivals and departures today open the list of exactly those reservations
+    (`crs.reservations(arriving, departing)`, one status definition) · `test_dashboard_links`, e2e `dashboard-links`.
+- **Not done:** bundles not rebuilt (2Z). The sell price row assumes no coupon code and no children; a mandatory
+  limited extra sold out still shows a price there (the search refuses the night).
 
 ## 6K3. Audit Part 2K-3 (2026-10-02)
 

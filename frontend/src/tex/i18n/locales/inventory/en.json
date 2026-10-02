@@ -419,5 +419,20 @@
  "inventory.legend.select": "select (also click, Shift+click, drag, a room's name or a day)",
  "inventory.legend.type": "type in a price cell: a price or a change",
  "inventory.legend.clipboard": "copy and paste prices with a spreadsheet",
- "inventory.legend.details": "every setting of a cell"
+ "inventory.legend.details": "every setting of a cell",
+ "inventory.metric.sell": "Sell price",
+ "inventory.sell.ref_short": {
+  "one": "{count} adult · 1 night",
+  "other": "{count} adults · 1 night"
+ },
+ "inventory.sell.ref": "What a guest pays: board {board} · market {market} · {channel} ·",
+ "inventory.sell.ref_note": "markups, promotions and taxes in force now; a code is never assumed",
+ "inventory.sell.plan": "Rate plan of the sell price",
+ "inventory.sell.adults": "Party of the sell price",
+ "inventory.sell.none_on_sale": "No version of this contract is on sale: nothing sells at it yet.",
+ "inventory.sell.not_sold_short": "not sold",
+ "inventory.sell.not_sold": "not sold: {reason}",
+ "inventory.sell.with_promos": "{amount}, with {names}",
+ "inventory.sell.loading": "working out the sell price…",
+ "inventory.sell.out_of_range": "not priced in this view: show fewer days to see it"
 }
