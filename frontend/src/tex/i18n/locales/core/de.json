@@ -84,7 +84,7 @@
  "core.shell.go_live_done": "{hotel} ist live in TEX",
  "core.nav.sections": "{area}: Bereiche",
  "core.nav.not_available": "Noch nicht verfügbar",
- "core.nav.sub.contracts": "Verträge",
+ "core.nav.sub.contracts": "Vertragsliste",
  "core.nav.sub.versions": "Vertragsversionen",
  "core.nav.sub.periods": "Preiszeiträume",
  "core.nav.sub.occupancy": "Belegungsregeln",

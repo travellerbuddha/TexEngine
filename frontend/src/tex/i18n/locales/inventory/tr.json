@@ -239,7 +239,7 @@
  "inventory.short.stop": "STOP",
  "inventory.show_rows": "Satırları göster",
  "inventory.start": "Başlangıç tarihi",
- "inventory.subtitle": "Gün bazında müsaitlik, kısıtlamalar ve kontrat fiyatları. Düzenlemek için bir hücreye tıklayın veya Enter'a basın.",
+ "inventory.subtitle": "Oda ve geceleri seçin; fiyat yazın veya satışı kapatın.",
  "inventory.today": "Bugün",
  "inventory.v.closed": "Kapalı",
  "inventory.v.closed_sale": "Satışa kapalı",
@@ -258,5 +258,166 @@
  "inventory.window.max_advance": "en fazla {n} gün önceden",
  "inventory.window.min_advance": "en az {n} gün önceden",
  "inventory.window.to": "{d} tarihine kadar satışta",
- "inventory.nav.restrictions": "Kısıtlama listesi"
+ "inventory.nav.restrictions": "Kısıtlama listesi",
+ "inventory.view.label": "Görünüm",
+ "inventory.view.daily": "Günlük: fiyat, kalan oda, satış",
+ "inventory.view.all": "Tüm kısıtlar",
+ "inventory.view.custom": "Özel",
+ "inventory.scope.price_source": "Fiyat kaynağı (kontrat)",
+ "inventory.scope.prices": "Fiyatlar",
+ "inventory.scope.prices_from": "{c} kontratı · pazar {m} · {ccy} · {basis}",
+ "inventory.scope.on_sale": "Satışta: {v}",
+ "inventory.scope.none_on_sale": "Satışta versiyon yok",
+ "inventory.scope.draft": "Taslak {v} yayımlanmadı",
+ "inventory.scope.restrictions_now": "satış kapatma ve kısıtlar hemen geçerli",
+ "inventory.draft_cells": {
+  "one": "Görünen {count} fiyat taslak {v} içinde değişti, henüz satışta değil; misafirler hâlâ {live} ile rezervasyon yapıyor.",
+  "other": "Görünen {count} fiyat taslak {v} içinde değişti, henüz satışta değil; misafirler hâlâ {live} ile rezervasyon yapıyor."
+ },
+ "inventory.hotel_level": "Tüm oda tipleri",
+ "inventory.select_day": "{day}: tüm odaları seç",
+ "inventory.select_room": "{room}: görünen tüm geceleri seç",
+ "inventory.unit.PERSON": "kişi başı",
+ "inventory.unit.ROOM": "oda başı",
+ "inventory.entry.cell": "{room}, {day}: fiyat",
+ "inventory.entry.invalid": "“{text}” okunamadı",
+ "inventory.entry.err.SYNTAX": "fiyat (120), yüzde değişim (+10%, -%5) veya tutar (+20, -20) yazın",
+ "inventory.entry.err.PLACES": "çok fazla ondalık basamak",
+ "inventory.entry.err.DIGITS": "çok fazla basamak",
+ "inventory.entry.err.RANGE": "sayı çok büyük",
+ "inventory.entry.err.AMBIGUOUS": "bin beş yüz için 1500, bir buçuk için 1.5 yazın",
+ "inventory.entry.err.OP_NOT_ALLOWED": "formül kontrata aittir: fiyat veya değişim yazın",
+ "inventory.entry.err.NOT_A_RATE": "formül kontrata aittir: fiyat veya değişim yazın",
+ "inventory.entry.err.PERCENT_SHARE": "artış mı indirim mi? +10% veya -10% yazın",
+ "inventory.entry.err.OUTSIDE": "ızgaranın dışında",
+ "inventory.entry.read.ABSOLUTE": "{v} {ccy} olarak ayarla",
+ "inventory.entry.read.PCT_UP": "%{v} artır",
+ "inventory.entry.read.PCT_DOWN": "%{v} indir",
+ "inventory.entry.read.ADD": "{v} {ccy} artır",
+ "inventory.entry.read.SUBTRACT": "{v} {ccy} indir",
+ "inventory.short.unsaved": "kaydedilmedi",
+ "inventory.aria.unsaved": "kaydedilmemiş değişiklik {entry}",
+ "inventory.actions.label": "Seçim ve değişiklikler",
+ "inventory.sel.count": {
+  "one": "{count} hücre seçili",
+  "other": "{count} hücre seçili"
+ },
+ "inventory.sel.rooms": {
+  "one": "{count} oda",
+  "other": "{count} oda"
+ },
+ "inventory.sel.nights": {
+  "one": "{count} gece",
+  "other": "{count} gece"
+ },
+ "inventory.sel.details": "Hücre ayrıntıları…",
+ "inventory.sel.clear": "Seçimi temizle",
+ "inventory.rates.title": "Fiyat",
+ "inventory.rates.entry_label": {
+  "one": "{count} hücre için yeni fiyat veya değişim",
+  "other": "{count} hücre için yeni fiyat veya değişim"
+ },
+ "inventory.rates.entry_ph": "120 · +%10 · -%5 · +20",
+ "inventory.rates.entry_hint": "Fiyat, % değişim veya tutar; doğrudan fiyat hücresine de yazılabilir",
+ "inventory.rates.entry_cells": {
+  "one": "{count} fiyat hücresi",
+  "other": "{count} fiyat hücresi"
+ },
+ "inventory.rates.entry_apply": "Seçime uygula",
+ "inventory.rates.needs_contract": "Fiyatları görmek ve değiştirmek için yukarıdan kontrat (fiyat kaynağı) seçin.",
+ "inventory.rates.needs_rooms": "Fiyatlar oda tipine göre girilir: oda hücreleri seçin.",
+ "inventory.rates.no_rights": "Rolünüz bu fiyatları görebilir ama değiştiremez.",
+ "inventory.rates.saved": {
+  "one": "{count} fiyat taslak {v} içine kaydedildi — satışa yansıması için yayımlayın",
+  "other": "{count} fiyat taslak {v} içine kaydedildi — satışa yansıması için yayımlayın"
+ },
+ "inventory.rates.new_draft": "yeni bir taslak",
+ "inventory.rates.unsaved_badge": "Kaydedilmedi",
+ "inventory.rates.unsaved": {
+  "one": "{count} fiyat değişikliği henüz kaydedilmedi",
+  "other": "{count} fiyat değişikliği henüz kaydedilmedi"
+ },
+ "inventory.rates.target": "→ {c} kontratı, {v} (yayımlanana kadar satışta değil)",
+ "inventory.rates.undo": "Geri al",
+ "inventory.rates.discard": "Tümünü at",
+ "inventory.rates.preview": "Yeni fiyatları önizle",
+ "inventory.rates.save": "Taslağa kaydet",
+ "inventory.rates.save_publish": "Kaydet ve yayımla…",
+ "inventory.rates.preview_hint": "Önizleme, hiçbir şey kaydedilmeden önce her odanın şimdiki ve yeni fiyatını sunucuda hesaplanmış olarak gösterir.",
+ "inventory.rates.refused_title": "Bu değişiklikler reddedilir",
+ "inventory.rates.preview_caption": "Oda ve gecelere göre yeni fiyatlar",
+ "inventory.rates.col_room": "Oda",
+ "inventory.rates.col_nights": "Geceler",
+ "inventory.rates.col_now_live": "Şu an (satışta)",
+ "inventory.rates.col_now_draft": "Şu an (taslak)",
+ "inventory.rates.col_new": "Yeni",
+ "inventory.rates.basis.PERSON": "kişi başı baz fiyat",
+ "inventory.rates.basis.ROOM": "oda başı fiyat",
+ "inventory.rates.new_periods": {
+  "one": "taslağa bu geceler için {count} dönem eklenir",
+  "other": "taslağa bu geceler için {count} dönem eklenir"
+ },
+ "inventory.rates.no_new_periods": "mevcut dönemler düzenlenir",
+ "inventory.rates.not_live": "Misafirler yeni fiyatları ancak taslak yayımlandıktan sonra görür.",
+ "inventory.rates.open_contract": "Kontratı aç",
+ "inventory.rates.entered": {
+  "one": "{count} hücreye girildi — önizleyip kaydedin",
+  "other": "{count} hücreye girildi — önizleyip kaydedin"
+ },
+ "inventory.rates.copied": {
+  "one": "{count} hücre kopyalandı",
+  "other": "{count} hücre kopyalandı"
+ },
+ "inventory.rates.pasted": {
+  "one": "{count} fiyat yapıştırıldı — önizleyip kaydedin",
+  "other": "{count} fiyat yapıştırıldı — önizleyip kaydedin"
+ },
+ "inventory.rates.paste_on_price": "Fiyatları bir fiyat satırına yapıştırın (blok aşağı doğru odaları, sağa doğru geceleri doldurur).",
+ "inventory.rates.paste_outside": "Blok ({rows} × {cols}) bu hücreden itibaren sığmıyor: hiçbir şey yapıştırılmadı.",
+ "inventory.rates.paste_bad": "“{text}”: {error}. Hiçbir şey yapıştırılmadı.",
+ "inventory.sale.title": "Satış",
+ "inventory.sale.close": "Satışa kapat",
+ "inventory.sale.open": "Satışa aç",
+ "inventory.sale.more": "Min. konaklama ve diğer kısıtlar…",
+ "inventory.sale.nothing": "Değişecek bir şey yok: seçili geceler zaten öyle.",
+ "inventory.sale.done_close": {
+  "one": "{count} hücre satışa kapatıldı",
+  "other": "{count} hücre satışa kapatıldı"
+ },
+ "inventory.sale.done_open": {
+  "one": "{count} hücre satışa açıldı",
+  "other": "{count} hücre satışa açıldı"
+ },
+ "inventory.sale.undone": "Geri alındı: önceki değerler geri geldi",
+ "inventory.sale.confirm_close": "Satışa kapat",
+ "inventory.sale.confirm_open": "Satışa aç",
+ "inventory.sale.confirm_close_n": {
+  "one": "{count} hücre satışa kapatılsın mı?",
+  "other": "{count} hücre satışa kapatılsın mı?"
+ },
+ "inventory.sale.confirm_open_n": {
+  "one": "{count} hücre satışa açılsın mı?",
+  "other": "{count} hücre satışa açılsın mı?"
+ },
+ "inventory.sale.where": "Hangi kontratlar için",
+ "inventory.sale.only_contract": "Yalnızca {c} kontratı",
+ "inventory.sale.all_contracts": "Otelin tüm kontratları",
+ "inventory.sale.also": "Ayrıca şununla sınırlı: {scope} (yukarıdaki filtreler).",
+ "inventory.sale.already_closed": {
+  "one": "Bunlardan {count} tanesi zaten kapalı.",
+  "other": "Bunlardan {count} tanesi zaten kapalı."
+ },
+ "inventory.sale.inherited": {
+  "one": "{count} hücre daha geniş bir kapsamda (ör. otel geneli) kapalı: buradan kaldırmak onu açmaz.",
+  "other": "{count} hücre daha geniş bir kapsamda (ör. otel geneli) kapalı: buradan kaldırmak onları açmaz."
+ },
+ "inventory.sale.override": "Yine de burada aç (geniş kapsamlı kapatmaya istisna)",
+ "inventory.sale.immediate": "Yeni aramalara ve rezervasyonlara hemen uygulanır. Mevcut rezervasyonlar değişmez.",
+ "inventory.sale.undo": "Geri al",
+ "inventory.scope.restrictions_label": "Satış ve kısıtlar",
+ "inventory.legend.unsaved": "Henüz kaydedilmemiş fiyat değişikliği",
+ "inventory.legend.select": "seç (tıklama, Shift+tıklama, sürükleme, oda adı veya gün başlığı da olur)",
+ "inventory.legend.type": "fiyat hücresine yazın: fiyat veya değişim",
+ "inventory.legend.clipboard": "fiyatları Excel ile kopyala / yapıştır",
+ "inventory.legend.details": "hücrenin tüm ayarları"
 }

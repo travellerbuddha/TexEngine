@@ -372,7 +372,7 @@ test("navigation: a restricted user sees only what their capabilities open, and 
   await page.goto(texPath("/tex"))
   await pickHotel(page)
   const nav = await openArea(page, "Contracts")
-  for (const shown of ["Contracts", "Contract versions", "Rate plans"])
+  for (const shown of ["Contract list", "Contract versions", "Rate plans"])
     await expect(nav.getByRole("link", { name: shown, exact: true })).toBeVisible()
   for (const hidden of ["Price periods", "Occupancy rules"])
     await expect(nav.getByRole("link", { name: hidden, exact: true })).toHaveCount(0)

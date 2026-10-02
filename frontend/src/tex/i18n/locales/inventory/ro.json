@@ -249,7 +249,7 @@
  "inventory.short.stop": "STOP",
  "inventory.show_rows": "Afișează rândurile",
  "inventory.start": "Data de început",
- "inventory.subtitle": "Disponibilitate, restricții și prețuri de contract pe zile. Faceți clic pe o celulă sau apăsați Enter pentru a edita.",
+ "inventory.subtitle": "Selectați camerele și nopțile, apoi introduceți un preț sau închideți vânzarea.",
  "inventory.today": "Azi",
  "inventory.v.closed": "Închis",
  "inventory.v.closed_sale": "Închis pentru vânzare",
@@ -269,5 +269,184 @@
  "inventory.window.max_advance": "cu cel mult {n} zile înainte",
  "inventory.window.min_advance": "cu cel puțin {n} zile înainte",
  "inventory.window.to": "în vânzare până la {d}",
- "inventory.nav.restrictions": "Lista restricțiilor"
+ "inventory.nav.restrictions": "Lista restricțiilor",
+ "inventory.view.label": "Vizualizare",
+ "inventory.view.daily": "Zilnic: preț, camere libere, vânzare",
+ "inventory.view.all": "Toate restricțiile",
+ "inventory.view.custom": "Personalizat",
+ "inventory.scope.price_source": "Sursa prețurilor (contract)",
+ "inventory.scope.prices": "Prețuri",
+ "inventory.scope.prices_from": "contractul {c} · piața {m} · {ccy} · {basis}",
+ "inventory.scope.on_sale": "În vânzare: {v}",
+ "inventory.scope.none_on_sale": "Nicio versiune în vânzare",
+ "inventory.scope.draft": "Ciorna {v} nepublicată",
+ "inventory.scope.restrictions_now": "închiderea vânzării și restricțiile se aplică imediat",
+ "inventory.draft_cells": {
+  "one": "{count} preț vizibil este modificat în ciorna {v} și nu se vinde încă; oaspeții rezervă în continuare {live}.",
+  "few": "{count} prețuri vizibile sunt modificate în ciorna {v} și nu se vând încă; oaspeții rezervă în continuare {live}.",
+  "other": "{count} de prețuri vizibile sunt modificate în ciorna {v} și nu se vând încă; oaspeții rezervă în continuare {live}."
+ },
+ "inventory.hotel_level": "Toate tipurile de camere",
+ "inventory.select_day": "{day}: selectați toate camerele",
+ "inventory.select_room": "{room}: selectați toate nopțile vizibile",
+ "inventory.unit.PERSON": "pe persoană",
+ "inventory.unit.ROOM": "pe cameră",
+ "inventory.entry.cell": "{room}, {day}: preț",
+ "inventory.entry.invalid": "„{text}” nu poate fi citit",
+ "inventory.entry.err.SYNTAX": "introduceți un preț (120), o modificare procentuală (+10%, -5%) sau o sumă (+20, -20)",
+ "inventory.entry.err.PLACES": "prea multe zecimale",
+ "inventory.entry.err.DIGITS": "prea multe cifre",
+ "inventory.entry.err.RANGE": "numărul este prea mare",
+ "inventory.entry.err.AMBIGUOUS": "introduceți 1500 pentru o mie cinci sute sau 1.5 pentru unu virgulă cinci",
+ "inventory.entry.err.OP_NOT_ALLOWED": "o formulă aparține contractului: introduceți un preț sau o modificare",
+ "inventory.entry.err.NOT_A_RATE": "o formulă aparține contractului: introduceți un preț sau o modificare",
+ "inventory.entry.err.PERCENT_SHARE": "creștere sau reducere? introduceți +10% sau -10%",
+ "inventory.entry.err.OUTSIDE": "în afara grilei",
+ "inventory.entry.read.ABSOLUTE": "Setează la {v} {ccy}",
+ "inventory.entry.read.PCT_UP": "Crește cu {v} %",
+ "inventory.entry.read.PCT_DOWN": "Reduce cu {v} %",
+ "inventory.entry.read.ADD": "Crește cu {v} {ccy}",
+ "inventory.entry.read.SUBTRACT": "Reduce cu {v} {ccy}",
+ "inventory.short.unsaved": "nesalvat",
+ "inventory.aria.unsaved": "modificare nesalvată {entry}",
+ "inventory.actions.label": "Selecție și modificări",
+ "inventory.sel.count": {
+  "one": "{count} celulă selectată",
+  "few": "{count} celule selectate",
+  "other": "{count} de celule selectate"
+ },
+ "inventory.sel.rooms": {
+  "one": "{count} cameră",
+  "few": "{count} camere",
+  "other": "{count} de camere"
+ },
+ "inventory.sel.nights": {
+  "one": "{count} noapte",
+  "few": "{count} nopți",
+  "other": "{count} de nopți"
+ },
+ "inventory.sel.details": "Detalii celulă…",
+ "inventory.sel.clear": "Anulează selecția",
+ "inventory.rates.title": "Preț",
+ "inventory.rates.entry_label": {
+  "one": "Preț nou sau modificare pentru {count} celulă",
+  "few": "Preț nou sau modificare pentru {count} celule",
+  "other": "Preț nou sau modificare pentru {count} de celule"
+ },
+ "inventory.rates.entry_ph": "120 · +10% · -5% · +20",
+ "inventory.rates.entry_hint": "Preț, modificare % sau sumă; se poate tasta și direct în celula de preț",
+ "inventory.rates.entry_cells": {
+  "one": "{count} celulă de preț",
+  "few": "{count} celule de preț",
+  "other": "{count} de celule de preț"
+ },
+ "inventory.rates.entry_apply": "Aplică selecției",
+ "inventory.rates.needs_contract": "Alegeți un contract mai sus (sursa prețurilor) pentru a vedea și modifica prețurile.",
+ "inventory.rates.needs_rooms": "Prețurile se stabilesc pe tip de cameră: selectați celule de cameră.",
+ "inventory.rates.no_rights": "Rolul dvs. poate vedea aceste prețuri, dar nu le poate modifica.",
+ "inventory.rates.saved": {
+  "one": "{count} preț salvat în ciorna {v} — publicați pentru vânzare",
+  "few": "{count} prețuri salvate în ciorna {v} — publicați pentru vânzare",
+  "other": "{count} de prețuri salvate în ciorna {v} — publicați pentru vânzare"
+ },
+ "inventory.rates.new_draft": "o ciornă nouă",
+ "inventory.rates.unsaved_badge": "Nesalvat",
+ "inventory.rates.unsaved": {
+  "one": "{count} modificare de preț încă nesalvată",
+  "few": "{count} modificări de preț încă nesalvate",
+  "other": "{count} de modificări de preț încă nesalvate"
+ },
+ "inventory.rates.target": "→ contractul {c}, {v} (nu se vinde până la publicare)",
+ "inventory.rates.undo": "Anulează",
+ "inventory.rates.discard": "Renunță la toate",
+ "inventory.rates.preview": "Previzualizează prețurile noi",
+ "inventory.rates.save": "Salvează în ciornă",
+ "inventory.rates.save_publish": "Salvează și publică…",
+ "inventory.rates.preview_hint": "Previzualizarea arată prețul actual și cel nou al fiecărei camere, calculate de server, înainte de salvare.",
+ "inventory.rates.refused_title": "Aceste modificări ar fi respinse",
+ "inventory.rates.preview_caption": "Prețuri noi pe camere și nopți",
+ "inventory.rates.col_room": "Cameră",
+ "inventory.rates.col_nights": "Nopți",
+ "inventory.rates.col_now_live": "Acum (în vânzare)",
+ "inventory.rates.col_now_draft": "Acum (ciornă)",
+ "inventory.rates.col_new": "Nou",
+ "inventory.rates.basis.PERSON": "preț de bază pe persoană",
+ "inventory.rates.basis.ROOM": "preț pe cameră",
+ "inventory.rates.new_periods": {
+  "one": "ciorna primește {count} perioadă pentru aceste nopți",
+  "few": "ciorna primește {count} perioade pentru aceste nopți",
+  "other": "ciorna primește {count} de perioade pentru aceste nopți"
+ },
+ "inventory.rates.no_new_periods": "se modifică perioadele existente",
+ "inventory.rates.not_live": "Oaspeții văd prețurile noi doar după publicarea ciornei.",
+ "inventory.rates.open_contract": "Deschide contractul",
+ "inventory.rates.entered": {
+  "one": "Introdus pentru {count} celulă — previzualizați, apoi salvați",
+  "few": "Introdus pentru {count} celule — previzualizați, apoi salvați",
+  "other": "Introdus pentru {count} de celule — previzualizați, apoi salvați"
+ },
+ "inventory.rates.copied": {
+  "one": "{count} celulă copiată",
+  "few": "{count} celule copiate",
+  "other": "{count} de celule copiate"
+ },
+ "inventory.rates.pasted": {
+  "one": "{count} preț lipit — previzualizați, apoi salvați",
+  "few": "{count} prețuri lipite — previzualizați, apoi salvați",
+  "other": "{count} de prețuri lipite — previzualizați, apoi salvați"
+ },
+ "inventory.rates.paste_on_price": "Lipiți prețurile pe un rând de preț (blocul completează camerele în jos și nopțile spre dreapta).",
+ "inventory.rates.paste_outside": "Blocul ({rows} × {cols}) nu încape de la această celulă: nu s-a lipit nimic.",
+ "inventory.rates.paste_bad": "„{text}”: {error}. Nu s-a lipit nimic.",
+ "inventory.sale.title": "Vânzare",
+ "inventory.sale.close": "Închide vânzarea",
+ "inventory.sale.open": "Deschide vânzarea",
+ "inventory.sale.more": "Sejur minim și alte restricții…",
+ "inventory.sale.nothing": "Nimic de schimbat: nopțile selectate sunt deja așa.",
+ "inventory.sale.done_close": {
+  "one": "Vânzare închisă pentru {count} celulă",
+  "few": "Vânzare închisă pentru {count} celule",
+  "other": "Vânzare închisă pentru {count} de celule"
+ },
+ "inventory.sale.done_open": {
+  "one": "Vânzare deschisă pentru {count} celulă",
+  "few": "Vânzare deschisă pentru {count} celule",
+  "other": "Vânzare deschisă pentru {count} de celule"
+ },
+ "inventory.sale.undone": "Anulat: valorile anterioare au revenit",
+ "inventory.sale.confirm_close": "Închide vânzarea",
+ "inventory.sale.confirm_open": "Deschide vânzarea",
+ "inventory.sale.confirm_close_n": {
+  "one": "Închideți vânzarea pentru {count} celulă?",
+  "few": "Închideți vânzarea pentru {count} celule?",
+  "other": "Închideți vânzarea pentru {count} de celule?"
+ },
+ "inventory.sale.confirm_open_n": {
+  "one": "Deschideți vânzarea pentru {count} celulă?",
+  "few": "Deschideți vânzarea pentru {count} celule?",
+  "other": "Deschideți vânzarea pentru {count} de celule?"
+ },
+ "inventory.sale.where": "Pentru ce contracte",
+ "inventory.sale.only_contract": "Doar contractul {c}",
+ "inventory.sale.all_contracts": "Toate contractele hotelului",
+ "inventory.sale.also": "Limitat și la: {scope} (filtrele de mai sus).",
+ "inventory.sale.already_closed": {
+  "one": "{count} dintre ele este deja închisă.",
+  "few": "{count} dintre ele sunt deja închise.",
+  "other": "{count} dintre ele sunt deja închise."
+ },
+ "inventory.sale.inherited": {
+  "one": "{count} celulă este închisă la un nivel mai larg (ex. tot hotelul): ștergerea aici nu o deschide.",
+  "few": "{count} celule sunt închise la un nivel mai larg (ex. tot hotelul): ștergerea aici nu le deschide.",
+  "other": "{count} de celule sunt închise la un nivel mai larg (ex. tot hotelul): ștergerea aici nu le deschide."
+ },
+ "inventory.sale.override": "Deschide-le totuși aici (excepție de la închiderea mai largă)",
+ "inventory.sale.immediate": "Se aplică imediat noilor căutări și rezervări. Rezervările existente nu se modifică.",
+ "inventory.sale.undo": "Anulează",
+ "inventory.scope.restrictions_label": "Vânzare și restricții",
+ "inventory.legend.unsaved": "Modificare de preț încă nesalvată",
+ "inventory.legend.select": "selectare (și clic, Shift+clic, tragere, numele camerei sau ziua)",
+ "inventory.legend.type": "tastați într-o celulă de preț: un preț sau o modificare",
+ "inventory.legend.clipboard": "copiere și lipire de prețuri cu un tabel",
+ "inventory.legend.details": "toate setările unei celule"
 }

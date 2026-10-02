@@ -25,7 +25,7 @@ from kamra.tex.availability import restrictions as rs
 from kamra.tex.availability.restrictions import FIELDS, RestrictionScope, effective
 from kamra.tex.commercial import contracts
 from kamra.tex.commercial.revisions import as_of
-from kamra.tex.money import quantize, to_str
+from kamra.tex.money import minor_units, quantize, to_str
 from kamra.tex.pricing import ratesplit, validate
 from kamra.tex.pricing import rooms as room_math
 from kamra.tex.pricing.enums import Op
@@ -171,7 +171,10 @@ def grid(property: str, start, days: int = 14, contract: str | None = None, mark
 	        "contract": contract, "channel_scope": channel_scope, "version": version, "draft": draft,
 	        "rates_hidden": not show_cost,
 	        "basis": (terms or draft_terms).basis.value if (terms or draft_terms) else None,
-	        "currency": (terms or draft_terms).currency if (terms or draft_terms) else None, "rows": out_rows}
+	        "currency": (terms or draft_terms).currency if (terms or draft_terms) else None,
+	        # how many decimals a typed price has in that currency (the grid reads "1.500" by it)
+	        "minor_units": minor_units((terms or draft_terms).currency) if (terms or draft_terms) else 2,
+	        "rows": out_rows}
 
 
 # ─── write: restrictions & inventory ─────────────────────────────────────

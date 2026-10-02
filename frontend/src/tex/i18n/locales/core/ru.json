@@ -86,7 +86,7 @@
  "core.shell.go_live_done": "{hotel} запущен в TEX",
  "core.nav.sections": "{area}: разделы",
  "core.nav.not_available": "Пока недоступно",
- "core.nav.sub.contracts": "Контракты",
+ "core.nav.sub.contracts": "Список контрактов",
  "core.nav.sub.versions": "Версии контрактов",
  "core.nav.sub.periods": "Ценовые периоды",
  "core.nav.sub.occupancy": "Правила размещения",

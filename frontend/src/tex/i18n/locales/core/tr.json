@@ -83,7 +83,7 @@
  "core.shell.go_live_done": "{hotel} TEX'te canlı",
  "core.nav.sections": "{area}: bölümler",
  "core.nav.not_available": "Henüz mevcut değil",
- "core.nav.sub.contracts": "Kontratlar",
+ "core.nav.sub.contracts": "Kontrat listesi",
  "core.nav.sub.versions": "Kontrat versiyonları",
  "core.nav.sub.periods": "Fiyat dönemleri",
  "core.nav.sub.occupancy": "Kişi kuralları",

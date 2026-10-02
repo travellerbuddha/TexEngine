@@ -71,10 +71,37 @@ export function Legend() {
           </span>,
           t("inventory.legend.window"),
         )}
+        {item(
+          <span className="inline-flex h-5 items-center gap-0.5 rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-800">
+            <span aria-hidden>●</span>
+            +10%
+          </span>,
+          t("inventory.legend.unsaved"),
+        )}
+      </ul>
+      {/* how the grid is worked with the keyboard and the mouse (UX revision 2026-10) */}
+      <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-zinc-100 pt-2 text-zinc-600">
         <li className="flex items-center gap-1.5">
-          <Kbd>←↑↓→</Kbd>
+          <Kbd>Shift</Kbd>+<Kbd>←↑↓→</Kbd>
+          <span>{t("inventory.legend.select")}</span>
+        </li>
+        <li className="flex items-center gap-1.5">
+          <Kbd>120</Kbd>
+          <Kbd>+10%</Kbd>
+          <span>{t("inventory.legend.type")}</span>
+        </li>
+        <li className="flex items-center gap-1.5">
+          <Kbd>Ctrl C</Kbd>
+          <Kbd>Ctrl V</Kbd>
+          <span>{t("inventory.legend.clipboard")}</span>
+        </li>
+        <li className="flex items-center gap-1.5">
+          <Kbd>Ctrl Z</Kbd>
+          <span>{t("inventory.rates.undo")}</span>
+        </li>
+        <li className="flex items-center gap-1.5">
           <Kbd>Enter</Kbd>
-          <span>{t("inventory.legend.keys")}</span>
+          <span>{t("inventory.legend.details")}</span>
         </li>
       </ul>
     </section>
