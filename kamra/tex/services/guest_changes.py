@@ -51,6 +51,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import modification, quoting
+from kamra.tex.services.refusals import refusal
 
 DT = "TEX Guest Change Request"
 TXN = "TEX Payment Transaction"
@@ -490,7 +491,7 @@ def submit(b, proposal_token: str, *, note: str | None = None, return_url: str |
 	modification.require_proposer(p, guest=True)
 	res = frappe.get_doc("Reservation", p["reservation"], for_update=True)
 	if res.tex_booking != b.name:
-		frappe.throw(_("Invalid reservation."), frappe.PermissionError)
+		frappe.throw(_("Invalid reservation."), refusal("MANAGE_RESERVATION_INVALID", frappe.PermissionError))
 	guard_room(res)
 	# the reservation's requests as they are now (a locking read of existing rows: another tab
 	# may have submitted this proposal while this one waited for the booking)
@@ -537,14 +538,16 @@ def _derive(res, p: dict) -> dict:
 	an unchanged reservation, at the price the guest accepted (the checks ``apply`` repeats)."""
 	guard_room(res)
 	if str(res.modified) != p["modified"]:
-		frappe.throw(_("The reservation changed since this proposal was made — review it again."))
+		frappe.throw(_("The reservation changed since this proposal was made — review it again."),
+		             refusal("RESERVATION_CHANGED"))
 	prop = modification.propose(res.name, p["changes"], basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
 	                            _check_permission=False, internal=True)
 	if not prop["sellable"]:
 		why = "; ".join(w["message"] for w in prop["warnings"]) or prop["proposed"].get("reasons")
-		frappe.throw(_("The modified stay cannot be sold: {0}").format(guest_reason(str(why))))
+		frappe.throw(_("The modified stay cannot be sold: {0}").format(guest_reason(str(why))),
+		             refusal("CHANGE_NOT_SELLABLE"))
 	if prop["proposed"]["totals"]["total"] != p["new_total"]:
-		frappe.throw(_("The price moved since this proposal was made — review it again."))
+		frappe.throw(_("The price moved since this proposal was made — review it again."), refusal("PRICE_MOVED"))
 	return prop
 
 
@@ -751,7 +754,8 @@ def _not_made(req) -> None:
 	       "Expired": _("its payment did not arrive in time"),
 	       "Superseded": _("you made another change after it, or the room was cancelled"),
 	       "Rejected": _("the hotel declined it")}.get(req.status, req.status)
-	frappe.throw(_("This change was not made: {0}. Please look at your booking and try again.").format(why))
+	frappe.throw(_("This change was not made: {0}. Please look at your booking and try again.").format(why),
+	             refusal("CHANGE_NOT_MADE", status=req.status))
 
 
 def _replay(name: str, p: dict, return_url: str | None, *, concurrent: bool = False) -> dict:
@@ -778,7 +782,7 @@ def pay_again(b, name: str, return_url: str | None = None) -> dict:
 	the change again."""
 	req = frappe.get_doc(DT, name) if frappe.db.exists(DT, name) else None
 	if not req or req.booking != b.name:
-		frappe.throw(_("Invalid link."), frappe.PermissionError)
+		frappe.throw(_("Invalid link."), refusal("MANAGE_REQUEST_INVALID", frappe.PermissionError))
 	if req.status in DONE:
 		return _applied(req, replay=True)
 	if req.status != "Awaiting Payment":
@@ -806,7 +810,7 @@ def _start_payment(req, b, return_url: str | None, *, new_attempt: bool = False)
 
 	account = card_account(b)
 	if not account:
-		frappe.throw(_("This payment method is not available."))
+		frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
 	attempt = int(req.attempt or 0)
 	current = frappe.db.get_value(TXN, req.payment_transaction, "status") if req.payment_transaction else None
 	if new_attempt or current != "Pending":

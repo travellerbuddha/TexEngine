@@ -22,6 +22,7 @@ from frappe import _
 from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.security.audit import audit, log_exception
+from kamra.tex.services.refusals import with_code
 
 HOLDING = ("Pending Payment", "Held")
 # K-2d: the hold of each payment method — (TEX Settings field, hotel override on Property, default)
@@ -268,8 +269,8 @@ def open_attempt(booking: str, method: str | None, now: datetime | None = None) 
 		if deadline <= now:
 			# a transfer lasts until the hold ends, never past it: a card attempt still open keeps the rooms,
 			# no transfer is started beside it (P1-9)
-			raise HoldExpired(_("The time to pay for booking {0} by bank transfer is over. Please pay by card, "
-			                    "or book again.").format(booking))
+			raise with_code(HoldExpired(_("The time to pay for booking {0} by bank transfer is over. Please pay by "
+			                              "card, or book again.").format(booking)), "HOLD_EXPIRED_TRANSFER")
 		until = deadline
 	else:
 		cap = add_to_date(deadline, minutes=THREEDS_MARGIN_MINUTES)

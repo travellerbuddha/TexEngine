@@ -4,6 +4,7 @@ import { useI18n } from "../i18n"
 import { nightsBetween } from "../lib/dates"
 import { isZero } from "../lib/format"
 import { boardLabel, cancellation, paymentTerms, reasonText } from "../lib/policy"
+import { refusalMessage } from "../lib/refusals"
 import { trackRoomView } from "../lib/track"
 import { useBooking } from "../flow/BookingContext"
 import { Summary, uniformNight } from "../flow/Summary"
@@ -562,7 +563,8 @@ function MarketNotice({ notice }: { notice: MarketRefusal }) {
 }
 
 export default function Results() {
-  const { t, money } = useI18n()
+  const i18n = useI18n()
+  const { t, money } = i18n
   const { site } = useSite()
   const { search, criteria, runSearch, flow, allSelected, marketNotice } = useBooking()
   const { error, errorView } = useContinue()
@@ -578,7 +580,7 @@ export default function Results() {
         title={search.error?.kind === "rate_limit" ? t("errors.rateLimitTitle") : t("results.errorTitle")}
         actions={<Button onClick={() => void runSearch({ force: true })}>{t("common.retry")}</Button>}
       >
-        {search.error?.message || t("errors.network")}
+        {search.error?.code ? refusalMessage(i18n, search.error) : search.error?.message || t("errors.network")}
       </Alert>
     )
   } else if (!data) {

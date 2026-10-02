@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
+import { refusalMessage } from "../lib/refusals"
 import { getItem, rememberPayment, rememberReturn, setItem } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import { payLinkPath } from "../lib/mount"
@@ -31,7 +32,8 @@ function takeLinkToken(): string | null {
 }
 
 export default function PayLinkPage() {
-  const { t, money, dateTime } = useI18n()
+  const i18n = useI18n()
+  const { t, money, dateTime } = i18n
   const { hash } = useLocation()
   // a link opened again in this tab (only its fragment changes) brings a new token
   const token = useMemo(() => takeLinkToken() ?? "", [hash]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -87,11 +89,13 @@ export default function PayLinkPage() {
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {
       setPaying(false)
-      if (!account && link.methods.length > 1 && e instanceof ApiError && e.kind === "invalid") {
+      // several card gateways and none chosen: the guest picks one (G-70b: by code, never any refusal)
+      if (!account && link.methods.length > 1 && e instanceof ApiError
+          && (e.code === "LINK_NO_CARD" || e.code === "PAYMENT_METHOD_UNAVAILABLE")) {
         setAccount(link.methods[0].provider_account)
         return
       }
-      setPayError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+      setPayError(refusalMessage(i18n, e instanceof ApiError ? e : null))
     }
   }
 
@@ -108,7 +112,7 @@ export default function PayLinkPage() {
       <PlainShell title={t("paylink.title")} badge={badge}>
         <h1 className="sr-only">{t("paylink.title")}</h1>
         <EmptyState icon={<XCircle className="size-8" aria-hidden />} title={error.kind === "not_found" ? t("paylink.invalidTitle") : t("confirm.loadError")} actions={error.kind !== "not_found" && <Button onClick={() => void load()}>{t("common.retry")}</Button>}>
-          {error.kind === "not_found" ? t("paylink.invalidBody") : error.message || t("errors.network")}
+          {error.kind === "not_found" ? t("paylink.invalidBody") : error.code ? refusalMessage(i18n, error) : error.message || t("errors.network")}
         </EmptyState>
       </PlainShell>
     )

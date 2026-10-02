@@ -85,6 +85,17 @@ def refusal(code: str, base: type[Exception] | None = None, **params) -> Excepti
 	return e
 
 
+def with_code(e: Exception, code: str | None = None, **params) -> Exception:
+	"""``e`` (an instance of an existing exception class, its message kept) with a refusal code (default: its
+	class's) and guest-safe params, for a refusal raised without ``frappe.throw``::
+
+	    raise with_code(ExtraSoldOut(msg), extra=name, date=day.isoformat())"""
+	if code is not None:
+		e.code = _known(code)
+	e.params = _safe(params)
+	return e
+
+
 def code_of(e: BaseException) -> str | None:
 	"""The refusal code ``e`` carries: a registered string only (a werkzeug error's ``code`` is its HTTP status)."""
 	code = getattr(e, "code", None)

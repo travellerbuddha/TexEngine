@@ -9,7 +9,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs"
 import { join, relative } from "node:path"
 
 const LANGS = ["en", "tr", "de", "ru", "ro", "pl"]
-const roots = [["admin", "src/tex/i18n/locales"], ["booking", "src/booking/i18n/locales"]]
+const roots = [["admin", "src/tex/i18n/locales"], ["booking", "src/booking/i18n"]]
 let problems = 0
 // the Pricing Workspace's namespaces (§3.20; the boards' keys are rates.brd.*)
 const WORKSPACE_KEYS = ["rates.section.", "rates.ws.", "rates.sh.", "rates.occ.", "rates.combo.", "rates.bands.", "rates.brd.", "rates.boards.", "rates.pt.", "rates.kbd.", "rates.explain."]

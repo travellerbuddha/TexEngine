@@ -153,6 +153,25 @@ guest-facing strings use Frappe `_()`. Legacy Kamra screens keep the existing en
   guest refusal (HANDOFF_STAGE3 §5f),
   adds `refusal.<CODE>` texts in the six catalogs and drops the wording. `unit/test_guest_refusal_codes` fails on a
   guest endpoint without the decorator.
+- *Addendum (Part 2G-3, G-70b): every guest refusal is coded, and said in the guest's language.* Every `frappe.throw`
+  and `raise` of `api/public.py` and of the service functions a guest endpoint reaches (HANDOFF_STAGE3 §5f; the
+  list `GUEST_PATHS` in `unit/test_guest_refusal_codes`, an AST check) passes a coded exception: `refusal(code, base,
+  **params)`, `with_code(existing_instance, code, **params)` for a refusal raised without `frappe.throw`
+  (`ExtraSoldOut` with the extra and its ISO day, `HoldExpired` as `HOLD_EXPIRED_TRANSFER`, `PayloadMismatch` as
+  `CHANGE_NOT_ONLINE` for a guest), a class with a registered `code`, or a helper's coded answer
+  (`quoting.quote_refusal`, `payments.link_refusal`: a `Refusal`, raised as `frappe.throw(str(why), why)`). The English
+  texts are unchanged for staff and logs; the three that named internals say less to a guest (the market in
+  `modification._resolve`, the version id in `contracts.load_terms`). One English text may carry two codes (O-16's
+  arrival-day cancellation is `CANCEL_TOO_LATE`, a change refused `CHANGE_REFUSED`); a room cancelled meanwhile is
+  `ROOM_NOT_ACTIVE` before O-16's day check; a forged sandbox signature is a coded 417, no longer a 500. A guest's
+  channel booking is `CHANNEL_BOOKING` with `params.sold_by` (the connection's label, LO-13). The booking app keeps
+  `KIND_BY_CODE` and `refusalMessage` in `booking/lib/refusals.ts`: kinds `payment_method` (choose another method),
+  `retry` (busy), `hold_expired` (the time to pay is over) join the others, and an error without a code is
+  classified by its status and type only — no wording. Every page shows `refusal.<CODE>` with its params (days in the
+  guest's format, amounts with their currency, countries by name), else the server's message; all 99 codes have a
+  text in the six catalogs (`unit/test_guest_refusal_codes` compares `CODES` with en.json; `npm run i18n:tex` now
+  checks the booking catalogs too: its root was `src/booking/i18n/locales`, which never existed). The market codes
+  keep the kinds G-55b gave them (no separate "market" kind: the search and checkout act on the code itself).
 
 ## ADR-014 Hide, don't delete, PMS modules
 **Decision.** TEX navigation omits housekeeping, laundry, POS, banquet, night audit, maintenance

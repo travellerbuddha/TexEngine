@@ -51,9 +51,10 @@ class TestPaymentIntegrity(TexTestCase):
 	def test_h1_unverifiable_callbacks_leave_the_payment_pending(self):
 		b = guest_books(session="sec-h1")
 		txn = b["payment"]["transaction"]
-		with self.assertRaises(ProviderError):                     # unknown outcome is not "Failed"
+		# a coded refusal since G-70b (PAYMENT_SIGNATURE_INVALID), never a server error
+		with self.assertRaisesRegex(frappe.ValidationError, "Invalid payment signature"):  # unknown outcome is not "Failed"
 			public.mock_pay(transaction=txn, outcome="nope", sig="x")
-		with self.assertRaises(ProviderError):
+		with self.assertRaisesRegex(frappe.ValidationError, "Invalid payment signature"):
 			public.mock_pay(transaction=txn, outcome="fail", sig="0" * 64)
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "status"), "Pending")
 		frappe.form_dict.update({"txn": txn, "cb": "forged"})
@@ -717,7 +718,7 @@ class TestPaymentLinkTokens(TexTestCase):
 		ok = public.mock_pay(transaction=self.txn, outcome="success", sig=self.start["fields"]["success_sig"])
 		self.assertEqual(ok["status"], "Succeeded")
 		self.assertNotIn(self.link["token"], ok.get("return_url") or "")
-		with self.assertRaises(ProviderError):                      # the payment is final; a forged replay
+		with self.assertRaisesRegex(frappe.ValidationError, "Invalid payment signature"):  # final; a forged replay
 			public.mock_pay(transaction=self.txn, outcome="success", sig="0" * 64)
 
 	def test_old_transactions_are_scrubbed(self):

@@ -52,6 +52,7 @@ from kamra.tex.pricing.model import (
 from kamra.tex.pricing.promotions import offer_currency
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, doc_values, row_values
+from kamra.tex.services.refusals import refusal
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
@@ -880,22 +881,27 @@ def load_terms(version_name: str, *, expected_hash: str | None = None) -> Contra
 	(``PayloadMismatch``) unless the payload still hashes to it."""
 	digest = frappe.db.get_value("TEX Contract Version", version_name, "payload_hash")
 	cached = _TERMS.get(version_name)
+	# a guest (a quote raced by a withdraw, a change of a booked stay) is never told the version (G-71, G-70b)
+	guest = frappe.session.user == "Guest"
+	unavailable = _("This rate cannot be sold right now. Please search again.")
 	if digest and cached and cached.payload_hash == digest:
 		terms = cached      # selection loads every live version: the payload is read only on a miss
 	else:
 		row = frappe.db.get_value("TEX Contract Version", version_name, ["payload", "payload_hash"], as_dict=True)
 		if not row or not row.payload:
-			frappe.throw(_("Contract version {0} is not published.").format(version_name),
-			             PayloadMismatch(version=version_name) if expected_hash else frappe.ValidationError)
+			frappe.throw(_("This rate is no longer on sale. Please search again.") if guest else
+			             _("Contract version {0} is not published.").format(version_name),
+			             PayloadMismatch(version=version_name) if expected_hash else refusal("NOT_ON_SALE"))
 		payload = json.loads(row.payload)
 		if serialize.payload_hash(payload) != row.payload_hash:
-			frappe.throw(_("Contract version {0} failed its integrity check.").format(version_name),
-			             PayloadMismatch(version=version_name, found_hash=row.payload_hash))
+			frappe.throw(unavailable if guest else _("Contract version {0} failed its integrity check.").format(
+				version_name), PayloadMismatch(version=version_name, found_hash=row.payload_hash))
 		terms = serialize.terms_from_payload(payload, row.payload_hash)
 		_TERMS[version_name] = terms
 	if expected_hash and terms.payload_hash != expected_hash:
-		frappe.throw(_("Contract version {0} is not the terms it was sold on: its payload hash is {1}…, the sale "
-		               "recorded {2}….").format(version_name, terms.payload_hash[:12], expected_hash[:12]),
+		frappe.throw(unavailable if guest else _(
+			"Contract version {0} is not the terms it was sold on: its payload hash is {1}…, the sale recorded "
+			"{2}….").format(version_name, terms.payload_hash[:12], expected_hash[:12]),
 		             PayloadMismatch(version=version_name, found_hash=terms.payload_hash))
 	return terms
 

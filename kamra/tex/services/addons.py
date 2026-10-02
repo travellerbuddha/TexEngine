@@ -24,6 +24,7 @@ from kamra.tex.pricing.model import ExtraRequest
 from kamra.tex.security.audit import audit
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import quoting, sold_terms
+from kamra.tex.services.refusals import refusal
 
 OPEN_STATUSES = ("Confirmed", "Pending Payment", "Held")     # not yet arrived, not cancelled
 PROPOSAL_TTL_MINUTES = 30
@@ -31,15 +32,18 @@ PROPOSAL_TTL_MINUTES = 30
 
 def _snapshot(res) -> dict:
 	if not res.tex_pricing_snapshot:
-		frappe.throw(_("Reservation {0} was not priced by TEX; extras cannot be added here.").format(res.name))
+		frappe.throw(_("Reservation {0} was not priced by TEX; extras cannot be added here.").format(res.name),
+		             refusal("NOT_TEX_PRICED"))
 	return json.loads(res.tex_pricing_snapshot)
 
 
 def _open(res) -> None:
 	if res.get("tex_pricing_source") == "Channel":
-		frappe.throw(_("This booking came from a channel: its price is the channel's."))
+		frappe.throw(_("This booking came from a channel: its price is the channel's."),
+		             refusal("CHANNEL_BOOKING", **booking_svc.sold_by(res.tex_booking)))
 	if res.status not in OPEN_STATUSES:
-		frappe.throw(_("Extras can no longer be added to a {0} reservation.").format(_(res.status).lower()))
+		frappe.throw(_("Extras can no longer be added to a {0} reservation.").format(_(res.status).lower()),
+		             refusal("ROOM_NOT_ACTIVE", status=res.status))
 
 
 def _booked(snap: dict) -> dict[str, int]:
@@ -59,7 +63,7 @@ def _requests(raw) -> tuple[ExtraRequest, ...]:
 		code = str((e or {}).get("code") or "").strip().upper()
 		qty = int((e or {}).get("quantity") or 1)
 		if not code or qty < 1 or qty > 99:
-			frappe.throw(_("Choose the extras and how many."))
+			frappe.throw(_("Choose the extras and how many."), refusal("EXTRAS_INVALID"))
 		out.append(ExtraRequest(code, qty, tuple(sorted(getdate(d) for d in (e.get("service_dates") or [])))))
 	return tuple(out)
 
@@ -160,7 +164,7 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 	# retried late): the replay is answered before freshness is required
 	p = quoting.verify(proposal_token, kind="addon", allow_expired=True)
 	if bool(p.get("guest")) != guest:
-		frappe.throw(_("Invalid proposal."))
+		frappe.throw(_("Invalid proposal."), refusal("PROPOSAL_INVALID"))
 	addon_id = "ADD-" + hashlib.sha256(proposal_token.encode()).hexdigest()[:12]
 	# the booking first, then its room (the order of a payment and of the expiry, ADR-066 Locks, P1-4); the room is
 	# read under its lock, as it is now, never as the snapshot taken before the lock saw it
@@ -174,13 +178,17 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 	quoting.require_fresh(p)
 	_open(res)
 	if str(res.modified) != p["modified"]:
-		frappe.throw(_("The reservation changed since these extras were priced — please check them again."))
+		frappe.throw(_("The reservation changed since these extras were priced — please check them again."),
+		             refusal("RESERVATION_CHANGED"))
 	q, snap, _unused = price(res, p["requests"], guest=guest)
 	if not q.ok:
 		msg = "; ".join(r["message"] for r in q.reasons)
-		frappe.throw(extras.guest_reason(msg) if guest else msg)
+		# the ADDON_* codes of the refused extras (G-70b)
+		frappe.throw(extras.guest_reason(msg) if guest else msg,
+		             refusal("EXTRAS_REFUSED", reasons=[r.get("code") for r in q.reasons]))
 	if to_str(q.totals["total"]) != p["total"]:
-		frappe.throw(_("The price moved since these extras were priced — please check them again."))
+		frappe.throw(_("The price moved since these extras were priced — please check them again."),
+		             refusal("PRICE_MOVED"))
 	now = now_datetime()
 	# limited extras: re-checked and taken under the day locks (G-19)
 	block = q.to_dict(internal=True)

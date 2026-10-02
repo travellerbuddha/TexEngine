@@ -18,6 +18,7 @@ from frappe import _
 
 from kamra.tex.commercial import contracts
 from kamra.tex.security.audit import audit_refusal
+from kamra.tex.services.refusals import with_code
 
 REFUSED = "reservation.reprice_refused"
 
@@ -72,7 +73,9 @@ def refuse(res, snap: dict, error: Exception, *, use: str, basis: str | None = N
 	else:
 		msg = _("Reservation {0} cannot be priced: {1} Its price stays as sold. Ask an administrator to check "
 		        "the contract version before re-pricing it.").format(res.name, str(error))
-	frappe.throw(msg, contracts.PayloadMismatch(version=version, found_hash=found))
+	# a guest is told it cannot be changed online; staff get the class's RATE_UNAVAILABLE (G-70b)
+	frappe.throw(msg, with_code(contracts.PayloadMismatch(version=version, found_hash=found),
+	                            "CHANGE_NOT_ONLINE" if guest else None))
 
 
 def load(res, snap: dict, version: str, *, use: str, guest: bool = False):

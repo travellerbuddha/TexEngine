@@ -7,6 +7,7 @@ import { MAX_ADULTS, MAX_CHILDREN, apiChild, type Party } from "../lib/criteria"
 import { parseRefusal, refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
 import { roomActions } from "../lib/manage"
+import { refusalMessage } from "../lib/refusals"
 import { getItem, rememberPayment, removeItem, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment, resumeAt } from "../flow/payment"
 import { sitePath, siteUrl, useSiteSlug } from "../lib/mount"
@@ -246,7 +247,7 @@ function CancelDialog({ room, currency, token, onClose, onDone }: { room: Bookin
       })
     } catch (e) {
       setBusy(false)
-      setError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+      setError(refusalMessage(i18n, e instanceof ApiError ? e : null))
     }
   }
   return (
@@ -327,7 +328,7 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
       })
       setProposal(p)
     } catch (e) {
-      setError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+      setError(refusalMessage(i18n, e instanceof ApiError ? e : null))
     }
     setBusy(false)
   }
@@ -361,7 +362,7 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
         await check()
         return
       }
-      setError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+      setError(refusalMessage(i18n, e instanceof ApiError ? e : null))
     }
   }
 
@@ -593,7 +594,7 @@ function Manage({ token }: { token: string | null }) {
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {
       setPaying(false)
-      setNotice({ tone: "bad", title: t("confirm.retryFailed"), body: e instanceof ApiError ? e.message : undefined })
+      setNotice({ tone: "bad", title: t("confirm.retryFailed"), body: e instanceof ApiError ? refusalMessage(i18n, e) : undefined })
     }
   }
 
@@ -618,7 +619,7 @@ function Manage({ token }: { token: string | null }) {
       setNotice({
         tone: "bad",
         title: t("confirm.retryFailed"),
-        body: e instanceof ApiError && e.kind === "expired" ? t("manage.pending.expired") : e instanceof ApiError ? e.message : undefined,
+        body: e instanceof ApiError && e.kind === "expired" ? t("manage.pending.expired") : e instanceof ApiError ? refusalMessage(i18n, e) : undefined,
       })
       void load()
     }
@@ -633,7 +634,7 @@ function Manage({ token }: { token: string | null }) {
   if (error)
     return (
       <Alert tone="bad" title={error.kind === "permission" ? t("manage.invalidLink") : t("confirm.loadError")} actions={error.kind !== "permission" && <Button onClick={() => void load()}>{t("common.retry")}</Button>}>
-        {error.message || t("errors.network")}
+        {error.code ? refusalMessage(i18n, error) : error.message || t("errors.network")}
       </Alert>
     )
   if (!data) return <Spinner label={t("common.loading")} className="py-10" />

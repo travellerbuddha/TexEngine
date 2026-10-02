@@ -9,6 +9,7 @@ import { ApiError, pub, type ErrorKind } from "../lib/api"
 import { addDays } from "../lib/dates"
 import { addonRefusalText, earliestOrderDay, stayDays } from "../lib/extras"
 import { isPositive } from "../lib/format"
+import { refusalMessage } from "../lib/refusals"
 import type { AddonApplied, AddonOption, AddonOptions, AddonProposal, AddonRequest, BookingRoom } from "../types"
 import { Badge, Button, Checkbox, Counter, Field, Select } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
@@ -114,13 +115,13 @@ function toRequest(x: AddonOption, plan: Plan, c: Choice | undefined): AddonRequ
   return { code: x.code, quantity: Math.min(c.quantity, plan.left), ...(day ? { service_dates: [day] } : {}) }
 }
 
-function errorText(t: I18n["t"], e: unknown) {
+function errorText(i18n: I18n, e: unknown) {
   if (e instanceof ApiError) {
-    if (e.kind === "network") return t("errors.network")
-    if (e.kind === "rate_limit") return t("errors.rateLimitBody")
-    if (e.message) return e.message
+    if (e.kind === "network") return i18n.t("errors.network")
+    if (e.kind === "rate_limit") return i18n.t("errors.rateLimitBody")
+    return refusalMessage(i18n, e)
   }
-  return t("errors.generic")
+  return i18n.t("errors.generic")
 }
 
 function ExtraCard({ x, plan, choice, onChange }: { x: AddonOption; plan: Plan; choice: Choice | undefined; onChange: (c: Choice) => void }) {
@@ -367,7 +368,8 @@ export function AddExtrasDialog({
   onClose: () => void
   onDone: (n: ExtrasNotice) => void
 }) {
-  const { t, money, range } = useI18n()
+  const i18n = useI18n()
+  const { t, money, range } = i18n
   const [options, setOptions] = useState<AddonOptions | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [choices, setChoices] = useState<Record<string, Choice>>({})
@@ -390,7 +392,7 @@ export function AddExtrasDialog({
       } catch (e) {
         if ((e as Error).name === "AbortError") return
         // a reload keeps the list as it was: the server decides on the next price check
-        if (!quiet) setLoadError(errorText(t, e))
+        if (!quiet) setLoadError(errorText(i18n, e))
       }
     },
     [token, room.reservation, t],
@@ -460,7 +462,7 @@ export function AddExtrasDialog({
       focusNext.current = "review"
       setProposal(p)
     } catch (e) {
-      setError(errorText(t, e))
+      setError(errorText(i18n, e))
     }
     setBusy(false)
   }
@@ -495,7 +497,7 @@ export function AddExtrasDialog({
       }
       // the proposal and its token stay: "Add" again is replayed by the server, never added twice
       setUnsure(outcomeUnknown(e))
-      setError(errorText(t, e))
+      setError(errorText(i18n, e))
     }
   }
 

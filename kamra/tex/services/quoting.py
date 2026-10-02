@@ -28,6 +28,7 @@ from kamra.tex.money import D, quantize, to_str
 from kamra.tex.pricing import ages, engine, promotions, serialize
 from kamra.tex.pricing.model import ChildSpec, ExtraRequest, PricingError, StayRequest, Unsellable
 from kamra.tex.security.keys import site_secret
+from kamra.tex.services.refusals import Refusal, refusal
 
 MAX_ROOMS = 8
 
@@ -51,18 +52,19 @@ def verify(token: str, kind: str = "offer", *, allow_expired: bool = False) -> d
 	"""Check signature, expiry and token kind (an offer key can never be replayed as a
 	modification proposal or the other way round). ``allow_expired``: the caller checks
 	``require_fresh`` itself, after recognising a replay of what the token already did."""
+	invalid = "OFFER_INVALID" if kind == "offer" else "PROPOSAL_INVALID"     # a guest's change or extras (G-70b)
 	try:
 		body_b64, mac_b64 = token.split(".", 1)
 		pad = lambda s: s + "=" * (-len(s) % 4)  # noqa: E731
 		body = base64.urlsafe_b64decode(pad(body_b64))
 		mac = base64.urlsafe_b64decode(pad(mac_b64))
 	except Exception:
-		frappe.throw(_("Invalid offer."), frappe.ValidationError)
+		frappe.throw(_("Invalid offer."), refusal(invalid))
 	if not hmac.compare_digest(hmac.new(_secret(), body, hashlib.sha256).digest(), mac):
-		frappe.throw(_("Invalid offer."), frappe.ValidationError)
+		frappe.throw(_("Invalid offer."), refusal(invalid))
 	data = json.loads(body)
 	if (data.get("kind") or "offer") != kind:
-		frappe.throw(_("Invalid offer."), frappe.ValidationError)
+		frappe.throw(_("Invalid offer."), refusal(invalid))
 	if not allow_expired:
 		require_fresh(data)
 	return data
@@ -70,7 +72,8 @@ def verify(token: str, kind: str = "offer", *, allow_expired: bool = False) -> d
 
 def require_fresh(data: dict) -> None:
 	if data.get("exp") and get_datetime(data["exp"]) < now_datetime():
-		frappe.throw(_("This offer has expired — please search again."), frappe.ValidationError)
+		frappe.throw(_("This offer has expired — please search again."),
+		             refusal("OFFER_EXPIRED" if (data.get("kind") or "offer") == "offer" else "PROPOSAL_EXPIRED"))
 
 
 # ─── request helpers ─────────────────────────────────────────────────────
@@ -81,7 +84,7 @@ def parse_dob(value) -> date:
 	try:
 		return date.fromisoformat(str(value).strip()[:10])
 	except ValueError:
-		frappe.throw(_("Invalid date of birth."))       # never echoed: personal data
+		frappe.throw(_("Invalid date of birth."), refusal("CHILD_DOB_INVALID"))       # never echoed: personal data
 
 
 def checked_dob(dob: date, arrival: date, n: int) -> int:
@@ -92,9 +95,10 @@ def checked_dob(dob: date, arrival: date, n: int) -> int:
 		months = ages.check_child_dob(dob, arrival, today=getdate(now_datetime()))
 	except PricingError:
 		if dob > getdate(now_datetime()):
-			frappe.throw(_("Child {0}: the date of birth cannot be in the future.").format(n))
+			frappe.throw(_("Child {0}: the date of birth cannot be in the future.").format(n),
+			             refusal("CHILD_DOB_FUTURE", child=n))
 		frappe.throw(_("Child {0} is {1} or older on arrival: add them as an adult.").format(
-			n, ages.MAX_CHILD_AGE + 1))
+			n, ages.MAX_CHILD_AGE + 1), refusal("CHILD_TOO_OLD", child=n, age=ages.MAX_CHILD_AGE + 1))
 	return months // 12
 
 
@@ -121,12 +125,12 @@ class Party:
 			else:
 				kids.append(ChildSpec(age=int(c)))
 		if adults < 1 or adults > 12 or len(kids) > 8:
-			frappe.throw(_("Each room needs 1–12 adults and at most 8 children."))
+			frappe.throw(_("Each room needs 1–12 adults and at most 8 children."), refusal("PARTY_INVALID"))
 		for k in kids:
 			if k.age is None and k.dob is None:
-				frappe.throw(_("Each child needs an age."))
+				frappe.throw(_("Each child needs an age."), refusal("CHILD_AGE_REQUIRED"))
 			if k.age is not None and not (0 <= k.age <= ages.MAX_CHILD_AGE):
-				frappe.throw(_("Child ages must be 0–17."))
+				frappe.throw(_("Child ages must be 0–17."), refusal("CHILD_AGE_INVALID"))
 		return cls(adults, kids)
 
 	def key(self) -> dict:
@@ -143,20 +147,21 @@ def parse_rooms(rooms, *, arrival: date | None = None) -> list[Party]:
 	if isinstance(rooms, str):
 		rooms = json.loads(rooms)
 	if not rooms:
-		frappe.throw(_("At least one room is required."))
+		frappe.throw(_("At least one room is required."), refusal("ROOMS_COUNT", max=MAX_ROOMS))
 	if len(rooms) > MAX_ROOMS:
-		frappe.throw(_("At most {0} rooms per booking.").format(MAX_ROOMS))
+		frappe.throw(_("At most {0} rooms per booking.").format(MAX_ROOMS), refusal("ROOMS_COUNT", max=MAX_ROOMS))
 	return [Party.parse(r, arrival=arrival) for r in rooms]
 
 
 def _dates(check_in, check_out) -> tuple[date, date]:
 	ci, co = getdate(check_in), getdate(check_out)
 	if co <= ci:
-		frappe.throw(_("Check-out must be after check-in."))
+		frappe.throw(_("Check-out must be after check-in."), refusal("DATES_INVALID"))
 	if (co - ci).days > engine.MAX_NIGHTS:
-		frappe.throw(_("Stays longer than {0} nights are booked by the reservations team.").format(engine.MAX_NIGHTS))
+		frappe.throw(_("Stays longer than {0} nights are booked by the reservations team.").format(engine.MAX_NIGHTS),
+		             refusal("STAY_TOO_LONG", max=engine.MAX_NIGHTS))
 	if ci < getdate(now_datetime()):
-		frappe.throw(_("Check-in cannot be in the past."))
+		frappe.throw(_("Check-in cannot be in the past."), refusal("CHECKIN_PAST"))
 	return ci, co
 
 
@@ -419,9 +424,9 @@ def search(*, properties: list[str], check_in, check_out, rooms, market: str, ch
 	parties = parse_rooms(rooms, arrival=ci)
 	market = (market or "").upper()
 	if not frappe.db.exists("TEX Market", market):
-		frappe.throw(_("Unknown market {0}.").format(market))
+		frappe.throw(_("Unknown market {0}.").format(market), refusal("MARKET_UNKNOWN", market=market))
 	if not frappe.db.exists("TEX Sales Channel", channel):
-		frappe.throw(_("Unknown sales channel {0}.").format(channel))
+		frappe.throw(_("Unknown sales channel {0}.").format(channel), refusal("SITE_CLOSED"))
 	out = []
 	for p in properties:
 		res = search_property(p, check_in=ci, check_out=co, parties=parties, market=market, channel=channel,
@@ -479,7 +484,7 @@ def _json(value, default):
 		try:
 			return json.loads(value or "null") or default
 		except ValueError:
-			frappe.throw(_("Invalid JSON payload."))
+			frappe.throw(_("Invalid JSON payload."), refusal("INVALID_REQUEST"))
 	return default if value is None else value
 
 
@@ -488,13 +493,13 @@ def extra_items(extras) -> list[dict]:
 	shape: anything else is a clean refusal, never a server error with a log (G-84 review L2)."""
 	extras = _json(extras, [])
 	if not isinstance(extras, list) or len(extras) > MAX_EXTRAS:
-		frappe.throw(_("Invalid extras."))
+		frappe.throw(_("Invalid extras."), refusal("EXTRAS_INVALID"))
 	for e in extras:
 		if not isinstance(e, dict) or not isinstance(e.get("code"), str) or not e["code"].strip() \
 				or not isinstance(e.get("quantity", 1), int | str | None) \
 				or not isinstance(e.get("service_dates") or [], list) \
 				or not all(isinstance(d, str) for d in e.get("service_dates") or []):
-			frappe.throw(_("Invalid extras."))
+			frappe.throw(_("Invalid extras."), refusal("EXTRAS_INVALID"))
 	return extras
 
 
@@ -503,11 +508,11 @@ def room_items(rooms) -> list[dict]:
 	``MAX_ROOMS`` — checked for their shape (G-84 review L2)."""
 	rooms = _json(rooms, [])
 	if not isinstance(rooms, list) or not rooms or len(rooms) > MAX_ROOMS:
-		frappe.throw(_("Select between 1 and {0} rooms.").format(MAX_ROOMS))
+		frappe.throw(_("Select between 1 and {0} rooms.").format(MAX_ROOMS), refusal("ROOMS_COUNT", max=MAX_ROOMS))
 	out = []
 	for r in rooms:
 		if not isinstance(r, dict) or not isinstance(r.get("offer_key"), str) or not r["offer_key"]:
-			frappe.throw(_("Invalid rooms."))
+			frappe.throw(_("Invalid rooms."), refusal("INVALID_REQUEST"))
 		out.append({"offer_key": r["offer_key"], "extras": extra_items(r.get("extras"))})
 	return out
 
@@ -519,9 +524,9 @@ def _extras_list(extras) -> tuple[ExtraRequest, ...]:
 			qty = int(e.get("quantity") or 1)
 			days = tuple(getdate(d) for d in e.get("service_dates") or [])
 		except (TypeError, ValueError):
-			frappe.throw(_("Invalid extras."))
+			frappe.throw(_("Invalid extras."), refusal("EXTRAS_INVALID"))
 		if qty < 1 or qty > 99:
-			frappe.throw(_("Invalid extra quantity."))
+			frappe.throw(_("Invalid extra quantity."), refusal("EXTRAS_INVALID"))
 		out.append(ExtraRequest(code=str(e["code"]).upper(), quantity=qty, service_dates=days))
 	return tuple(out)
 
@@ -539,7 +544,7 @@ def _on_sale(offer: dict, now, *, refuse: bool = True) -> tuple[object | None, d
 	live = contracts.active_version_header(offer["contract"], now)
 	if not live:
 		if refuse:
-			frappe.throw(_("This rate is no longer on sale — please search again."))
+			frappe.throw(_("This rate is no longer on sale — please search again."), refusal("NOT_ON_SALE"))
 		return None, {"ok": False, "reasons": [{"code": "NOT_ON_SALE",
 		                                        "message": _("This rate is no longer on sale — please search again.")}]}
 	stopped = contracts.not_on_sale(offer["contract"])        # suspended since the search (ADR-045)
@@ -584,7 +589,8 @@ def _persist(offer_key: str, offer: dict, req: StayRequest, q, terms, live, now,
 	row = frappe.db.sql("SELECT status FROM `tabTEX Contract Version` WHERE name=%s LOCK IN SHARE MODE",
 	                    live.version_id)
 	if row and row[0][0] == "Withdrawn":
-		frappe.throw(_("This rate is no longer on sale. Please search again."), contracts.ContractNotOnSale)
+		frappe.throw(_("This rate is no longer on sale. Please search again."),
+		             refusal("NOT_ON_SALE", contracts.ContractNotOnSale))
 	price_changed = to_str(q.total) != offer.get("total") and not changed_inputs
 	return {"ok": True, "quote_id": doc.name, "expires_at": str(doc.expires_at), "price_changed": price_changed,
 	        "previous_total": offer.get("total"), "quote": q.to_dict(internal=False),
@@ -598,15 +604,15 @@ def create_quote(offer_key: str, *, extras=None, promo_codes=None, guest_email: 
 	now = now_datetime()
 	offer, req, extras_req = _offer_request(offer_key, extras=extras, promo_codes=promo_codes, now=now)
 	gkey = ctxmod.guest_key(guest_email)
-	live, refusal = _on_sale(offer, now)
-	if refusal:
-		return refusal
+	live, refused = _on_sale(offer, now)
+	if refused:
+		return refused
 	q, terms = price_request(live.version_id, req, gkey=gkey)
 	if not q.sellable:
 		return {"ok": False, "reasons": q.reasons}
-	refusal = _stay_refusal(offer, req, now)
-	if refusal:
-		return refusal
+	refused = _stay_refusal(offer, req, now)
+	if refused:
+		return refused
 	return _persist(offer_key, offer, req, q, terms, live, now, session_id=session_id,
 	                changed_inputs=bool(extras_req) or promo_codes is not None)
 
@@ -632,7 +638,8 @@ def create_quotes(rooms: list[dict], *, promo_codes=None, guest_email: str | Non
 	keys = {(i["offer"]["property"], i["offer"]["currency"], i["offer"]["market"], i["offer"]["channel"]) for i in items}
 	indexes = [int(i["offer"].get("room_index") or 0) for i in items]
 	if len(keys) != 1 or len(set(indexes)) != len(indexes):
-		frappe.throw(_("The rooms of one booking must come from one search. Please search again."))
+		frappe.throw(_("The rooms of one booking must come from one search. Please search again."),
+		             refusal("SEARCH_AGAIN"))
 	for i in items:
 		i["live"], i["out"] = _on_sale(i["offer"], now, refuse=False)
 		if i["out"] is None:
@@ -666,15 +673,22 @@ def load_quote(quote_id: str, *, for_update: bool = False) -> tuple[dict, dict, 
 	return row, json.loads(row.request_json), json.loads(row.result_json)
 
 
-def quote_is_usable(row) -> str | None:
+def quote_refusal(row) -> Refusal | None:
+	"""Why a stored quote cannot be booked (coded, G-70b), or None."""
 	if row.status == "Expired":
 		# its version was withdrawn (``contracts.withdraw``, O-13): the rate is gone, not used
-		return _("This rate is no longer on sale. Please search again.")
+		return Refusal(_("This rate is no longer on sale. Please search again."), code="NOT_ON_SALE")
 	if row.status != "Open":
-		return _("This quote was already used.")
+		return Refusal(_("This quote was already used."), code="QUOTE_USED")
 	if get_datetime(row.expires_at) < now_datetime():
-		return _("This quote has expired — please search again.")
+		return Refusal(_("This quote has expired — please search again."), code="QUOTE_EXPIRED")
 	return None
+
+
+def quote_is_usable(row) -> str | None:
+	"""``quote_refusal``'s text (a basket's ``problem``)."""
+	why = quote_refusal(row)
+	return str(why) if why else None
 
 
 def default_sale_window(check_in: date) -> timedelta:

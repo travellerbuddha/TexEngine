@@ -5,6 +5,7 @@ import { useI18n, type MessageKey } from "../i18n"
 import { pub } from "../lib/api"
 import { extraAnchor, extraStock, refusalText, stayDays, type DayAvailability, type ExtrasAvailability } from "../lib/extras"
 import { boardLabel, cancellation, paymentTerms } from "../lib/policy"
+import { refusalMessage } from "../lib/refusals"
 import { useBooking, type Step } from "../flow/BookingContext"
 import { continuePayment } from "../flow/payment"
 import { sitePath, siteRoute } from "../lib/mount"
@@ -623,8 +624,10 @@ function PaymentStep() {
         b.goStep("details", { keepError: true })
         return setFlowError(res.error)
       }
-      if (res.error.kind === "invalid" && /payment|pay|hotel/i.test(res.error.message)) {
-        setMethodError(res.error.message)
+      if (res.error.kind === "payment_method") {
+        // the method chosen cannot be used (G-70b: by code): the guest chooses another, from methods read again
+        setMethodError(refusalMessage(i18n, res.error))
+        b.reloadBasket()
         requestAnimationFrame(() => methodErrRef.current?.focus())
       } else setFlowError(res.error)
       return

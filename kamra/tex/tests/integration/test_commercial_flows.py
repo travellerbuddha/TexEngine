@@ -126,9 +126,10 @@ class TestGuestPayment(TexTestCase):
 		self.assertTrue(pmt["sandbox"])
 		txn = pmt["transaction"]
 
-		# a forged signature is rejected and changes nothing
-		with self.assertRaises(ProviderError):
+		# a forged signature is rejected and changes nothing (a coded refusal since G-70b, not a server error)
+		with self.assertRaises(frappe.ValidationError) as cm:
 			public.mock_pay(transaction=txn, outcome="success", sig="0" * 64)
+		self.assertEqual(cm.exception.code, "PAYMENT_SIGNATURE_INVALID")
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "status"), "Pending")
 
 		out = public.mock_pay(transaction=txn, outcome="success", sig=pmt["fields"]["success_sig"])
@@ -480,8 +481,11 @@ class TestSelfService(TexTestCase):
 		for day in (add_days(arrival, 1), arrival):                       # arrived yesterday, arriving today
 			with on(day):
 				self.assertFalse(room()["can_cancel"], day)
-				with self.assertRaisesRegex(frappe.ValidationError, "no longer be changed online"):
+				with self.assertRaisesRegex(frappe.ValidationError, "no longer be changed online") as cm:
 					public.manage_cancel(token=token, reservation=res)
+				# the code of a cancellation too late, not of a change refused (same English text, G-70b)
+				self.assertEqual((cm.exception.code, frappe.local.response["tex_code"]),
+				                 ("CANCEL_TOO_LATE", "CANCEL_TOO_LATE"))
 		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
 		with on(arrival):                                                  # the change flow is still open
 			self.assertTrue(room()["can_change"])

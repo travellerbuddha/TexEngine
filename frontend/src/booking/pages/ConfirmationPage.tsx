@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
+import { refusalMessage } from "../lib/refusals"
 import { instructionsFor, manageToken, rememberPayment, rememberReturn, saveManageToken } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import { sitePath, siteRoute, siteUrl, useSiteSlug } from "../lib/mount"
@@ -52,7 +53,8 @@ function Instructions({ data, currency }: { data: Record<string, string | null>;
 }
 
 function Confirmation({ booking }: { booking: string }) {
-  const { t, lang } = useI18n()
+  const i18n = useI18n()
+  const { t, lang } = i18n
   const { site } = useSite()
   const navigate = useNavigate()
   const [sp] = useSearchParams()
@@ -119,7 +121,7 @@ function Confirmation({ booking }: { booking: string }) {
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {
       setPaying(false)
-      setPayError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+      setPayError(refusalMessage(i18n, e instanceof ApiError ? e : null))
     }
   }
 
@@ -132,7 +134,7 @@ function Confirmation({ booking }: { booking: string }) {
   if (error)
     return (
       <Alert tone="bad" title={t("confirm.loadError")} actions={<Button onClick={() => void load()}>{t("common.retry")}</Button>}>
-        {error.message || t("errors.network")}
+        {error.code ? refusalMessage(i18n, error) : error.message || t("errors.network")}
       </Alert>
     )
   if (!data) return <Spinner label={t("common.loading")} className="py-10" />

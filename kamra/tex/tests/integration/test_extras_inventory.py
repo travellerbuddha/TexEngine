@@ -76,8 +76,13 @@ class TestExtrasCapacity(ExtrasCase):
 		res = b["rooms"][0]["reservation"]
 		self.assertEqual(self.allocations(res), [("SPA", str(fx.d(6, 10)), 1, "Confirmed")])
 		self.assertEqual(self.sold("SPA", fx.d(6, 10)), 1)
-		with self.assertRaises(ExtraSoldOut):                      # quoted before, booked after: refused
+		with self.assertRaises(ExtraSoldOut) as cm:                # quoted before, booked after: refused
 			self.book("g19-b", second)
+		# raised without frappe.throw, its code and the extra's name and day still reach the guest (G-70b)
+		params = {"extra": "Spa", "date": str(fx.d(6, 10))}
+		self.assertEqual((cm.exception.code, cm.exception.params), ("EXTRA_SOLD_OUT", params))
+		self.assertEqual((frappe.local.response["tex_code"], frappe.local.response["tex_params"]),
+		                 ("EXTRA_SOLD_OUT", params))
 		late = self.extra(self.quotes("g19-c", [{"code": "SPA"}])[0], "SPA")
 		self.assertEqual((late["ok"], late["reason"]), (False, f"sold out on {fx.d(6, 10)}"))
 

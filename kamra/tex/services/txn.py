@@ -9,6 +9,8 @@ import time
 import frappe
 from frappe import _
 
+from kamra.tex.services.refusals import refusal
+
 DEADLOCK_ATTEMPTS = 3
 # innodb_rollback_on_timeout per site (a server setting, read once, on the first timeout)
 _ROLLBACK_ON_TIMEOUT: dict[str, bool] = {}
@@ -99,7 +101,7 @@ def retry_on_deadlock(fn):
 				frappe.db.rollback()
 				if attempt == DEADLOCK_ATTEMPTS or committed_steps() != steps:
 					frappe.throw(_("The hotel is very busy right now. Please try again in a moment."),
-					             title=_("Please try again"))
+					             refusal("BUSY"), title=_("Please try again"))
 				time.sleep(random.uniform(0.02, 0.1) * attempt)
 		return None
 
