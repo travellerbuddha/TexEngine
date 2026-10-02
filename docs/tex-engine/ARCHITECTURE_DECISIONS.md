@@ -810,8 +810,9 @@ enterprise or group view (G-25).
   - A disabled room type sends the close-out of a disabled mapping (`build_days`: every day closed, nothing
     available), and a Room Type `on_update` hook queues its mappings' sync whenever `disabled` changes, so a channel
     stops selling a type TEX no longer sells, and sells it again once enabled (ADR-048's Part 2K-3 addendum). A stay the
-    channel sold in such a type meanwhile (before the close-out reached it, or while its connection is off), or a change
-    moving a room into one, is accepted like an overbooking, with a warning (`channel.overbooking`).
+    channel sold in such a type meanwhile (before the close-out reached it, or while its connection is off), a change
+    moving a room into one, or a room the channel brings back into one, is accepted like an overbooking, with a warning
+    (`channel.overbooking`).
   - People are told the channel by its connection's label, never its id: `channel_of` returns `{connection, label,
     ref}` (label falls back to the name); the "Sold by …" refusal, the cancel dialog and the reservation use the
     label; the audit keeps the id.
@@ -9290,8 +9291,9 @@ main `1575c8b` is contained, so nothing was merged.
   check runs under the booking's lock and reads the guest's stays as they are now. The profiles are a plain read; each
   profile's stays at the hotel a locking read of Reservation alone (`GUEST_STAYS`: `LOCK IN SHARE MODE`, the index
   `Reservation(guest, property)` forced when the site has it, the dates judged after it; never a join, which would
-  share-lock the other bookings after their rooms); their bookings a plain read, one missing from the read view being
-  new, so live. A booking committed after the callback's read view began is found; one being made for that guest at
+  share-lock the other bookings after their rooms). A stay live now is its booking's (a booking the read view shows
+  Cancelled was revived since; only a Draft one is left out). A booking committed after the callback's read view
+  began is found; one being made for that guest at
   the hotel waits for this request, or deadlocks with it (its nights against the revival's), and the victim is run
   again by `complete_retrying` / `retry_on_deadlock` — a booking made after a revival committed is staff's, as before.
   The shared locks cover every stay of those profiles at the hotel, whatever the dates (a phone shared by many profiles
