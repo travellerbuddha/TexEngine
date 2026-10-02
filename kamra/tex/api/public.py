@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 import frappe
 from frappe import _
@@ -147,7 +148,6 @@ def site(slug: str | None = None, domain: str | None = None):
 		"slug": s.site_slug, "name": s.site_name, "hotels": hotels, "group": bool(s.hotel_group and not s.property),
 		"default_language": s.default_language or "en", "languages": _csv(s.languages) or ["en"],
 		"default_currency": s.default_currency, "currencies": _csv(s.currencies),
-		"default_market": s.default_market,
 		"branding": {"logo": s.logo, "primary": s.primary_color, "accent": s.accent_color,
 		             "background": s.background_color, "font": s.font_family, "radius": s.radius,
 		             "card_radius": s.card_radius, "button_style": s.button_style, "header": s.header_layout,
@@ -226,6 +226,65 @@ def residency(market: versions.MarketDef | str | None) -> dict | None:
 	return {"countries": sorted(market.countries)} if market and market.residency_required else None
 
 
+# ─── what a guest answer leaves out (G-71, R-52, R-53) ──────────────────
+
+# a reason by its code, the room it is about and the limit it names (MAX_ADULTS / MAX_CHILDREN / MAX_OCCUPANTS)
+_REASON_LIMITS = ("max_adults", "max_children", "max_occupants")
+# what the booking app shows of a promotion
+_PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added")
+# an extra's reason that names the market, the channel or the room type's record (``pricing.extras.eligibility``)
+_NAMES_SCOPE = re.compile(r"^not available (?:for market|on channel|with room) ")
+
+
+def _guest_reasons(reasons) -> list[dict]:
+	"""Reasons as codes, the room each is about and the limit it names; never the engine's text, which may name
+	the contract or its dates ("STD is not sold under SUMMER", "contract stays end on …")."""
+	out = []
+	for r in reasons or []:
+		if isinstance(r, dict):
+			out.append({k: r[k] for k in ("code", "room_index") if k in r}
+			           | {k: r[k] for k in _REASON_LIMITS if isinstance(r.get(k), int)})
+	return out
+
+
+def _guest_quote(q: dict | None) -> dict | None:
+	"""A room quote as the guest sees it: no contract block (id, code, version, payload hash, market), no request
+	(market, channel, sale time), no engine version; promotions by name and amount; reasons by code."""
+	if not isinstance(q, dict):
+		return q
+	for k in ("contract", "request", "engine_version"):
+		q.pop(k, None)
+	if isinstance(q.get("promotions"), list):
+		q["promotions"] = [{k: pr.get(k) for k in _PROMOTION_KEYS} for pr in q["promotions"] if isinstance(pr, dict)]
+	if "reasons" in q:
+		q["reasons"] = _guest_reasons(q["reasons"])
+	for e in q.get("extras") or []:
+		# "not available for market DE / on channel … / with room …": only that it is not available
+		if isinstance(e, dict) and isinstance(e.get("reason"), str) and _NAMES_SCOPE.match(e["reason"]):
+			e["reason"] = "not available"
+	return q
+
+
+def _guest_offer(o: dict) -> dict:
+	"""A search offer as the guest sees it: no contract, contract code, version or market."""
+	for k in ("contract", "contract_code", "version", "market"):
+		o.pop(k, None)
+	for r in o.get("rooms") or []:
+		_guest_quote(r.get("quote"))
+	for k in ("reasons", "room_reasons"):
+		if k in o:
+			o[k] = _guest_reasons(o[k])
+	return o
+
+
+def _guest_answer(out: dict) -> dict:
+	"""A quote answer (``create_quote``, or one room of ``create_quotes``) as the guest sees it."""
+	_guest_quote(out.get("quote"))
+	if "reasons" in out:
+		out["reasons"] = _guest_reasons(out["reasons"])
+	return out
+
+
 # ─── search / quote / book ───────────────────────────────────────────────
 
 
@@ -249,18 +308,17 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
 	                     channel=_channel(s), currency=currency or s.default_currency or None,
 	                     promo_codes=[promo_code] if promo_code else (), internal=False)
-	for p in res["properties"]:
-		p.pop("messages", None)
-		for o in p["unavailable"]:
-			o.pop("contract", None)
-			o.pop("version", None)
-		for o in p["offers"]:
-			o.pop("contract", None)
-			o.pop("version", None)
-	res["market"] = mkt
 	# a residents-only market's prices: checkout asks the guest's country of residence (O-8)
 	res["residency"] = residency(m)
 	content.Localizer(content.guest_language()).search(res)
+	# after the localizer, which reads each quote's request (room type, board): the guest is not told the contract
+	# that priced an offer, its version, the market or the channel (G-71)
+	res.pop("market", None)
+	res.pop("channel", None)
+	for p in res["properties"]:
+		p.pop("messages", None)
+		for o in p["offers"] + p["unavailable"]:
+			_guest_offer(o)
 	# the party as ages on arrival: a child's date of birth never reaches analytics (G-52 review)
 	parties = quoting.parse_rooms(rooms, arrival=getdate(check_in))
 	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out,
@@ -316,7 +374,7 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	if out.get("ok"):
 		_track(s, session_id, "quote", {"quote": out["quote_id"], "total": out["quote"]["totals"]["total"],
 		                                "currency": out["quote"]["currency"]})
-	return guest_safe(out)                            # guests never see how many are left (G-19)
+	return guest_safe(_guest_answer(out))             # guests never see how many are left (G-19)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -350,10 +408,10 @@ def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str
 	for r in out["rooms"]:
 		if r.get("quote"):
 			loc.quote(r["quote"]["request"]["property"], r["quote"])
-		rooms_out.append(guest_safe(r))              # guests never see how many are left (G-19)
 		if r.get("ok"):
 			_track(s, session_id, "quote", {"quote": r["quote_id"], "total": r["quote"]["totals"]["total"],
 			                                "currency": r["quote"]["currency"]})
+		rooms_out.append(guest_safe(_guest_answer(r)))   # guests never see how many are left (G-19)
 	return {"ok": out["ok"], "rooms": rooms_out}
 
 
@@ -459,7 +517,7 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 				s, result, due=due, method=method, provider_account=provider_account, language=language,
 				customer={"name": b.booker_name, "email": b.booker_email, "phone": b.booker_phone},
 				return_url=return_url, replay=True)
-		return result
+		return _guest_summary(result)
 	due = D(result["due_now"])
 	if due > 0:
 		_track(s, session_id, "payment_started", {"booking": result["booking"]})
@@ -471,7 +529,15 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 			return_url=return_url)
 	else:
 		_track(s, session_id, "booked", {"booking": result["booking"], "total": result["total"]})
-	return result
+	return _guest_summary(result)
+
+
+def _guest_summary(summary: dict) -> dict:
+	"""A booking summary as the guest sees it: not the market it was priced in nor the channel (G-71); read only
+	once the payment was started (its methods are the market's and the channel's)."""
+	summary.pop("market", None)
+	summary.pop("channel", None)
+	return summary
 
 
 def _start_booking_payment(s, result: dict, *, due, method: str, provider_account: str | None,
@@ -859,7 +925,7 @@ def _basket_view(claw: dict | None) -> dict | None:
 
 
 def _guest_booking(b) -> dict:
-	summary = booking_svc.booking_summary(b.name)
+	summary = _guest_summary(booking_svc.booking_summary(b.name))
 	loc = content.Localizer(content.guest_language() or content.guest_language(b.language))
 	rooms = []
 	for r in summary["rooms"]:

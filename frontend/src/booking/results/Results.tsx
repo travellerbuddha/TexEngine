@@ -10,7 +10,7 @@ import { Summary, uniformNight } from "../flow/Summary"
 import { useContinue } from "../flow/useContinue"
 import { partyText } from "../search/GuestsPicker"
 import { useSite } from "../site/SiteContext"
-import type { Offer, PropertyResult, Reason, RoomContent } from "../types"
+import type { Offer, OfferReason, PropertyResult, RoomContent } from "../types"
 import { countryNames, regionDisplay, type Residency } from "../../lib/residency"
 import { marketNotice as noticeKey, type MarketRefusal } from "../lib/marketLink"
 import { Badge, Button } from "../ui/controls"
@@ -407,7 +407,7 @@ function RoomList({ property }: { property: PropertyResult }) {
   // room types this room cannot have, with the reason for THIS room
   const unavailable = useMemo(() => {
     const ok = new Set(fitting.map((o) => o.room_type))
-    const m = new Map<string, Reason[] | undefined>()
+    const m = new Map<string, OfferReason[] | undefined>()
     for (const o of [...property.offers, ...property.unavailable]) {
       if (ok.has(o.room_type) || m.has(o.room_type)) continue
       const own = o.room_reasons?.find((r) => r.room_index === activeRoom)

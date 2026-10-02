@@ -104,6 +104,9 @@ checked by.)
 `Reservation`s (one per room). Each reservation stores the pricing snapshot, contract version,
 payload hash, FX snapshot, sale timestamp; confirmation sets `tex_price_locked`.
 **Consequences.** Cheap searches, authoritative quotes, clear parent/child booking structure.
+- *Note (Part 2G-3, G-71): the offer key is signed, not encrypted.* Its body (base64 JSON) names the contract
+  (CTR-…), the version id and the market; a guest who decodes it learns them. Accepted residual: changing it touches
+  `verify` on every path and the CRS. Every other guest answer leaves them out (ADR-026's G-71 addendum).
 
 ## ADR-010 Modification = proposal + revision; legacy auto-price neutralised for TEX
 **Decision.** Reservation changes go through `propose_modification` (read-only OLD vs PROPOSED) and
@@ -273,6 +276,19 @@ Rate-plan and policy dicts are shared with cached contract terms, so the localis
 copies. Translations are cached per hotel in Redis and invalidated on every change.
 **Consequences.** Staff screens keep the hotel's own texts; guest e-mails do not name rooms.
 Promotion names (group-level) are not yet translatable.
+- *Addendum (Part 2G-3, G-71, R-52/R-53): a guest answer names no contract.* After localisation (the localiser reads
+  each quote's request) `public.search`, `quote` and `quote_rooms` strip, guest side only: an offer's `contract`,
+  `contract_code`, `version`, `market`; a room quote's `contract` block (id, code, name, version, version number,
+  payload hash, market, currency, basis), `request` (market, channel, sale time) and `engine_version`; promotions keep
+  `promo_id`, `name`, `applied`, `discount`, `code`, `value_added`; reasons keep `code`, `room_index` and the numeric
+  `max_*` limits, never the engine's text ("STD is not sold under SUMMER", "contract stays end on …"); an extra whose
+  reason names the market, the channel or the room type's record says only "not available" (its capacity on a day
+  and "charged once per booking" stay). The search's top-level `market`/`channel`, `book`'s and `booking_status`'s `market`/`channel`
+  (popped after the payment was started with them) and `site`'s `default_market` are gone. Staff answers
+  (`crs.*`, `ui_crs.*`), the stored `TEX Quote.result_json` and reservation snapshots keep everything
+  (`quoting.strip_internal` and `RoomQuote.to_dict` unchanged). Residual: the signed offer key (ADR-009 note).
+  Test: `test_public_booking.TestPublicBooking.test_guest_answers_name_no_contract` (a recursive scan of every guest
+  answer for those keys and for any contract docname, version id or payload hash).
 
 ## ADR-027 Legacy endpoints declare the record behind every id argument
 **Context.** `require_roles` scoped legacy Kamra endpoints only through the arguments

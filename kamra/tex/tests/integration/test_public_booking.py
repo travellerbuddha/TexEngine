@@ -28,6 +28,32 @@ def _search(rooms, session="sess-s"):
 	                     market="DE", session_id=session)["properties"][0]
 
 
+# what names a contract, its version, its market or its channel (G-71, R-52/R-53): never in a guest answer
+IDENTITY_KEYS = frozenset({"contract", "contract_code", "contract_name", "version", "version_no", "payload_hash",
+                           "market", "channel"})
+
+
+def contract_identities() -> set[str]:
+	"""Every contract docname, version id and payload hash: no guest answer carries one as a value."""
+	out = set(frappe.get_all("TEX Contract", pluck="name"))
+	for v in frappe.get_all("TEX Contract Version", fields=["name", "payload_hash"]):
+		out.add(v.name)
+		if v.payload_hash:
+			out.add(v.payload_hash)
+	return out
+
+
+def identity_leaks(payload, secrets: set[str], path: str = "$") -> list[str]:
+	"""Where ``payload`` names a contract's identity: an ``IDENTITY_KEYS`` key, or a value equal to a
+	contract docname, version id or payload hash."""
+	if isinstance(payload, dict):
+		return [leak for k, v in payload.items()
+		        for leak in ([f"{path}.{k}"] if k in IDENTITY_KEYS else []) + identity_leaks(v, secrets, f"{path}.{k}")]
+	if isinstance(payload, list | tuple):
+		return [leak for i, v in enumerate(payload) for leak in identity_leaks(v, secrets, f"{path}[{i}]")]
+	return [f"{path}={payload}"] if isinstance(payload, str) and payload in secrets else []
+
+
 class TestPublicBooking(TexTestCase):
 	def setUp(self):
 		super().setUp()
@@ -98,6 +124,64 @@ class TestPublicBooking(TexTestCase):
 		q = public.quote(site=SLUG, offer_key=prop["offers"][0]["rooms"][0]["offer_key"], session_id="sess-s")
 		for k in quoting.INTERNAL_TOTALS:
 			self.assertNotIn(k, q["quote"]["totals"])
+
+	def test_guest_answers_name_no_contract(self):
+		"""G-71: no guest answer names the contract, its version, its payload hash, the market or the channel
+		(search, quote, quote_rooms and their refusals, basket, book, booking status, site); staff keep them."""
+		secrets = contract_identities()
+		self.assertTrue(secrets)
+
+		def clean(name: str, payload) -> None:
+			self.assertEqual(identity_leaks(payload, secrets), [], f"{name} names the contract")
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2, "children": []}], market="DE", session_id="sess-g71")
+		clean("search", res)
+		prop = res["properties"][0]
+		offer = next(o for o in prop["offers"] if o["room_type"] == self.std and o["board"] == "AI"
+		             and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+		key = offer["rooms"][0]["offer_key"]
+		q = public.quote(site=SLUG, offer_key=key, session_id="sess-g71")
+		self.assertTrue(q["ok"], q)
+		clean("quote", q)
+		# what the booking app reads stays: the price, the promotions' names and the rate plan
+		self.assertTrue(q["quote"]["totals"]["total"] and q["quote"]["rate_plan"]["name"])
+		together = public.quote_rooms(site=SLUG, rooms=[{"offer_key": key, "extras": []}], session_id="sess-g71")
+		self.assertTrue(together["ok"], together)
+		clean("quote_rooms", together)
+		clean("basket", public.basket(site=SLUG, quote_ids=[q["quote_id"]], session_id="sess-g71"))
+		booked = public.book(site=SLUG, quote_ids=[q["quote_id"]], guest=GUEST, payment_method="Card",
+		                     session_id="sess-g71", idempotency_key="idem-g71")
+		clean("book", booked)
+		clean("booking_status", public.booking_status(token=booked["manage_token"]))
+		clean("site", public.site(slug=SLUG))
+
+		# a refusal answers with codes, never the engine's text (which may name the contract)
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		for name, out in (("quote refused", public.quote(site=SLUG, offer_key=key, session_id="sess-g71")),
+		                  ("quote_rooms refused", public.quote_rooms(site=SLUG, rooms=[{"offer_key": key, "extras": []}],
+		                                                             session_id="sess-g71")["rooms"][0])):
+			self.assertFalse(out["ok"], out)
+			clean(name, out)
+			self.assertEqual(out["reasons"], [{"code": "ROOM_NOT_SOLD"}], name)
+		frappe.db.set_value("Room Type", self.std, "disabled", 0)
+		# an extra refused for the market, the channel or the room type says only that it is not available
+		extras = public._guest_quote({"extras": [{"ok": False, "reason": "not available for market DE"},
+		                                         {"ok": False, "reason": "charged once per booking, on room 1"}]})
+		self.assertEqual([e["reason"] for e in extras["extras"]], ["not available", "charged once per booking, on room 1"])
+
+		# staff keep every identity (the call centre names the contract it sells)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent searches
+		staff = crs.search(check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)), rooms=[{"adults": 2, "children": []}],
+		                   market="DE", channel="CALL_CENTER", properties=[fx.PROPERTY])
+		self.assertEqual((staff["market"], staff["channel"]), ("DE", "CALL_CENTER"))
+		so = staff["properties"][0]["offers"][0]
+		self.assertTrue(so["contract"] and so["contract_code"] and so["version"] and so["market"])
+		sq = crs.quote(offer_key=so["rooms"][0]["offer_key"])
+		self.assertTrue(sq["ok"], sq)
+		self.assertTrue(sq["quote"]["contract"]["payload_hash"])
+		self.assertEqual(sq["quote"]["request"]["channel"], "CALL_CENTER")
 
 	def test_basket_lists_amount_due_per_method(self):
 		prop = _search([{"adults": 2, "children": [8]}], session="sess-b")

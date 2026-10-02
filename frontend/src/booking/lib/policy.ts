@@ -1,7 +1,7 @@
 // Human wording for the frozen rate-plan policies the server returns. Only dates and
 // percentages are described here; amounts always come from the server.
 import type { I18n, MessageKey } from "../i18n"
-import type { RatePlanInfo, Reason } from "../types"
+import type { OfferReason, RatePlanInfo } from "../types"
 import { addDays, today } from "./dates.ts"
 
 const BOARDS: Record<string, MessageKey> = {
@@ -76,7 +76,7 @@ const whole = (n: unknown): n is number => typeof n === "number" && Number.isInt
  * Occupancy reasons name the limit when the server sends it (else the room content's). */
 export function reasonText(
   t: I18n["t"],
-  reasons: Reason[] | undefined,
+  reasons: OfferReason[] | undefined,
   room?: { max_adults?: number | null; max_children?: number | null },
 ) {
   const r = reasons?.[0]

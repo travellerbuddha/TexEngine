@@ -462,7 +462,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       const q = results[i]
       if (!q.ok || !q.quote) {
         const code = q.reasons?.[0]?.code
-        return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: q.reasons?.[0]?.message ?? "", room: i })
+        return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: "", room: i })
       }
       const before = (base[i] ?? sels[i])!.quote.totals.accommodation
       const after = q.quote.totals.accommodation
