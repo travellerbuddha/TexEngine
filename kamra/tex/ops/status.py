@@ -332,6 +332,20 @@ def _bookings_overpaid(props, now) -> dict:
 	return C.overpaid_bookings_check(n, sum(int(r.cancelled or 0) for r in rows), oldest, hotels)
 
 
+def _loyalty_earnings(props, now) -> dict:
+	"""LO-47: the stays whose loyalty earning failed in the last days (their Error Log, titled with the stay), per
+	hotel: the stay was kept, its points wait for staff."""
+	titles = frappe.db.sql("""SELECT method FROM `tabError Log` WHERE creation >= %(t)s
+	                          AND method LIKE 'TEX loyalty earning %%'""",
+	                       {"t": now - timedelta(days=C.LOYALTY_EARNING_WINDOW_DAYS)}, pluck=True)
+	stays = sorted({t.rsplit(" ", 1)[-1] for t in titles if t})
+	owner = dict(frappe.get_all("Reservation", filters={"name": ("in", stays or [""])}, fields=["name", "property"],
+	                            as_list=True))
+	hotels = [owner.get(s) for s in stays]
+	hotels = [p for p in hotels if p and (props is None or p in props)]
+	return C.loyalty_earnings_check(len(hotels), set(hotels))
+
+
 def fx_pairs(props, now) -> list[dict]:
 	"""The provider currency pairs the active FX policies of these hotels (and the global
 	ones) use, each with the date of its latest rate as pricing would find it, the hotels it concerns
@@ -475,6 +489,7 @@ HOTEL_PROBES = (
 	("fx.rates", _fx), ("mail.account", _mail_account),
 	("mail.delivery", _mail_delivery),
 	("contracts.live", _contracts_live),
+	("loyalty.earnings", _loyalty_earnings),
 )
 
 

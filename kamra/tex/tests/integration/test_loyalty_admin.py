@@ -1004,3 +1004,28 @@ class TestPointsBack(LoyaltyCase):
 		self.give(guest, 500)
 		[account] = loyalty.summary(guest, {self.club})
 		self.assertEqual((account["available"], account["debt"], account["value"]), (300, 0, "30.00"))
+
+
+class TestAnEarningNeverUndoesTheStay(LoyaltyCase):
+	"""LO-47 (audit 2K-2, owner's choice a): the loyalty earning runs in the reservation's save. A rule that fails
+	must never roll back what the save does (a confirmation, a payment's callback, a cancellation): the earning is
+	undone alone, logged, and the system status warns that a stay's points are missing."""
+
+	def test_a_failing_earning_leaves_the_confirmation_and_is_reported(self):
+		from kamra.tex.ops import status as ops_status
+
+		self.create()
+		b = guest_books(session="lo47")
+		p = b["payment"]
+		with mock.patch.object(loyalty, "points_for", side_effect=RuntimeError("a broken rule")):
+			public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what is on record
+		res = b["rooms"][0]["reservation"]
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "status"), "Confirmed")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		self.assertFalse(frappe.db.exists("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn"}))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX loyalty earning {res}"}))
+		check = next(c for c in ops_status.collect(properties=[fx.PROPERTY]) if c["key"] == "loyalty.earnings")
+		self.assertEqual(check["status"], "warn")
+		self.assertEqual(check["issues"][0]["reason"], "loyalty_earning_failed")
+		self.assertIn(fx.PROPERTY, check["properties"])

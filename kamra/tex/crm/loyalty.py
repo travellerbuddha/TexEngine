@@ -160,10 +160,22 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 	return int(total.to_integral_value(rounding=ROUND_FLOOR)), lines
 
 
+EARN_SAVEPOINT = "tex_loyalty_earn"
+
+
 def on_reservation_change(doc) -> None:
 	"""doc_event (Reservation.on_update): earn when confirmed, reverse when cancelled, and
 	earn again only when the stay itself changed (its fingerprint). Editing the program's
-	rules, tiers or points never rewrites earnings already made (G-24)."""
+	rules, tiers or points never rewrites earnings already made (G-24).
+
+	It runs inside the reservation's save (a confirmation, a payment's callback, a cancellation): an earning
+	that fails never rolls that back (LO-47, owner's choice). It is undone alone to its savepoint, its message
+	dropped, logged ("TEX loyalty earning <reservation>"), and ``loyalty.earnings`` warns that a stay's points
+	are missing. A deadlock or a lost transaction is raised as it is (its savepoint is gone with it). The points
+	return of a cancellation (O-20) is never under this: it is money and fails its request."""
+	from kamra.tex.security.audit import log_exception
+	from kamra.tex.services.txn import transaction_lost
+
 	if not doc.get("tex_booking") or not doc.guest:
 		return
 	if doc.flags.get("tex_loyalty_after_money"):
@@ -171,6 +183,21 @@ def on_reservation_change(doc) -> None:
 	program = program_for(doc.property)
 	if not program:
 		return
+	frappe.db.savepoint(EARN_SAVEPOINT)
+	messages = frappe.local.message_log
+	mark = len(messages)
+	try:
+		_earn(doc, program)
+	except Exception as e:
+		if transaction_lost(e):
+			raise
+		frappe.db.rollback(save_point=EARN_SAVEPOINT)
+		del messages[mark:]                   # the earning's refusal is a note for staff, never the save's answer
+		log_exception(f"TEX loyalty earning {doc.name}")
+
+
+def _earn(doc, program: str) -> None:
+	"""``on_reservation_change``'s work, under its savepoint."""
 	existing = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": doc.name, "entry_type": "Earn",
 	                                                         "status": ("!=", "Reversed")},
 	                          fields=["name", "points", "status", "stay_fingerprint", "expires_on"])
