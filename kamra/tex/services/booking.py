@@ -1500,7 +1500,12 @@ def live_duplicate(booking: str) -> str | None:
 	e-mail (an agency's desk) never counts, nor a name alone. → its name, or None.
 
 	NULL meaning (ADR-064): an empty e-mail or phone is dropped, never matched (a NULL equals nothing, and ``("",)``
-	would match every profile without one); a room's dates are required, so never NULL."""
+	would match every profile without one); a room's dates are required, so never NULL.
+
+	Called under the booking's lock (a late payment's reconciliation or revival): the guest's profiles are a plain
+	read, their stays at the hotel a locking read through ``Reservation(guest, property)``, so a booking committed
+	after this request's read view began (staff booked the guest again during the gateway call) is found (LO-09);
+	never an OR across the three Guest indexes under a lock."""
 	b = frappe.get_doc("TEX Booking", booking)
 	if not b.rooms:
 		return None
@@ -1513,22 +1518,19 @@ def live_duplicate(booking: str) -> str | None:
 	profiles = frappe.get_all("Guest", filters={"name": ("in", sorted(mine))}, fields=["email", "phone"])
 	emails = sorted({p.email.strip().lower() for p in profiles if p.email and p.email.strip()})
 	phones = sorted({p.phone.strip() for p in profiles if p.phone and p.phone.strip()})
-	params = {"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, "mine": sorted(mine)}
-	same = ["g.name IN %(mine)s"]               # a condition only for a set that is not empty
+	guests = set(mine)
 	if emails:
-		same.append("g.email IN %(emails)s")
-		params["emails"] = emails
+		guests.update(frappe.get_all("Guest", filters={"email": ("in", emails)}, pluck="name"))
 	if phones:
-		same.append("g.phone IN %(phones)s")
-		params["phones"] = phones
+		guests.update(frappe.get_all("Guest", filters={"phone": ("in", phones)}, pluck="name"))
 	rows = frappe.db.sql(
-		f"""SELECT r.tex_booking FROM `tabGuest` g
-		    JOIN `tabReservation` r ON r.guest = g.name AND r.property = %(p)s
-		    JOIN `tabTEX Booking` o ON o.name = r.tex_booking
-		    WHERE ({" OR ".join(same)}) AND r.tex_booking != %(b)s AND r.status NOT IN ('Cancelled', 'No Show')
-		      AND r.check_in_date < %(co)s AND r.check_out_date > %(ci)s AND o.status IN %(live)s
-		    ORDER BY r.tex_booking LIMIT 1""",  # nosemgrep -- the conditions are constants
-		params)
+		"""SELECT r.tex_booking FROM `tabReservation` r
+		   JOIN `tabTEX Booking` o ON o.name = r.tex_booking
+		   WHERE r.guest IN %(guests)s AND r.property = %(p)s AND r.tex_booking != %(b)s
+		     AND r.status NOT IN ('Cancelled', 'No Show') AND r.check_in_date < %(co)s AND r.check_out_date > %(ci)s
+		     AND o.status IN %(live)s
+		   ORDER BY r.tex_booking LIMIT 1 LOCK IN SHARE MODE""",
+		{"guests": sorted(guests), "p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co})
 	return rows[0][0] if rows else None
 
 
