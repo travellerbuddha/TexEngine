@@ -1418,7 +1418,8 @@ class TestSmallPatches(PatchCase):
 		a, b, c = (int(n) for n in re.search(r"p61: (\d+) lot\(s\) closed by the old expiry marked, (\d+) lot\(s\) "
 		                                    r"that expired with nothing left closed; (\d+) past-due lot\(s\) left to "
 		                                    r"the daily expiry", line).groups())
-		self.assertGreaterEqual((a, b, c), (1, 1, 1))
+		for got in (a, b, c):                     # each count, never the tuples' order: (2, 0, 0) >= (1, 1, 1) (LO-15)
+			self.assertGreaterEqual(got, 1, (a, b, c))
 		self.assertEqual(a + b + c, earlier + 3)                            # every past-due lot is one of the three
 		again = " ".join(str(x) for x in migrate("p61_loyalty_lots")["print"].call_args_list)
 		self.assertIn(f"p61: 0 lot(s) closed by the old expiry marked, 0 lot(s) that expired with nothing left closed; "
@@ -1556,7 +1557,9 @@ class TestSmallPatches(PatchCase):
 		n, r, k = (int(x) for x in re.search(
 			r"p58: (\d+) pool\(s\) re-keyed \((\d+) row\(s\) moved\), (\d+) pool\(s\) keep the rows of their "
 			r"disabled first member", line).groups())
-		self.assertGreaterEqual((n, r, k), (1, 3, 1))                          # the site may hold other pools
+		# the site may hold other pools; each count, never the tuples' order: (2, 0, 0) >= (1, 3, 1) (LO-15)
+		for got, least in zip((n, r, k), (1, 3, 1), strict=True):
+			self.assertGreaterEqual(got, least, (n, r, k))
 		again = " ".join(str(x) for x in migrate("p58_pool_key_with_disabled_members")["print"].call_args_list)
 		self.assertIn("p58: 0 pool(s) re-keyed (0 row(s) moved),", again)
 
