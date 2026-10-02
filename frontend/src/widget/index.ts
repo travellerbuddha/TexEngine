@@ -153,7 +153,11 @@ export class TexBookingWidget extends HTMLElement {
   attributeChangedCallback(name: string, a: string | null, b: string | null) {
     if (!this.rendered || a === b) return
     const other = name === "site" || name === "api"
-    if (other) this.info = null
+    // another site: none of the previous one's theme or name until its own arrives (LO-31)
+    if (other) {
+      this.info = null
+      this.siteName = ""
+    }
     this.render()
     if (other) void this.loadTheme()
   }

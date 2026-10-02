@@ -103,3 +103,32 @@ test("the widget keeps the site's theme and never leaves the host page locked", 
     await admin.dispose()
   }
 })
+
+test("when its site changes, the modal names no hotel until the new site's theme arrives (LO-31)", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  const OTHER = "lo31-other"
+  const title = () => page.evaluate(() => document.querySelector("tex-booking-widget")?.shadowRoot?.querySelector(".mt")?.textContent ?? "")
+  await page.route(HOST_PAGE, (route) => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: HOST_HTML }))
+  // the other site's theme arrives only when the test lets it
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route(
+    (url) => url.pathname === "/api/method/kamra.tex.api.public.site" && url.searchParams.get("slug") === OTHER,
+    async (route) => {
+      await held
+      await route.fulfill({ status: 200, contentType: "application/json", json: { message: { name: "Other Resort", branding: {} } } })
+    },
+  )
+  await page.goto(HOST_PAGE)
+  // the aurora site's name, once its theme is applied (the widget's own word before: "Rezervasyon", lang tr)
+  await expect.poll(title).not.toBe("Rezervasyon")
+  const aurora = await title()
+  expect(aurora).not.toBe("")
+
+  await page.evaluate((slug) => document.querySelector("tex-booking-widget")!.setAttribute("site", slug), OTHER)
+  // re-rendered for the other site, its theme not here yet: never the previous site's name
+  expect(await title()).toBe("Rezervasyon")
+  release()
+  await expect.poll(title).toBe("Other Resort")
+  noErrors()
+})
