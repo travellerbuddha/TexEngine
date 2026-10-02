@@ -27,6 +27,13 @@ class TestWholeNumber(unittest.TestCase):
 		for value in ("2.5", "0.000001", "abc", "NaN", "Infinity", 2.5):
 			self.assertIsNone(whole_number(value), value)
 
+	def test_a_count_too_large_to_be_one_is_none(self):
+		"""2K-4 review round 1: an exponent this large would build a billion-digit int; no count is near it."""
+		from kamra.tex.money import whole_number
+
+		self.assertIsNone(whole_number("1e999999999"))
+		self.assertEqual(whole_number("1e6"), 1000000)
+
 
 class TestOldSnapshotUnits(unittest.TestCase):
 	"""``_usage_of``: a snapshot from before G-19 carries no ``usage``; its units come from its quantity."""
