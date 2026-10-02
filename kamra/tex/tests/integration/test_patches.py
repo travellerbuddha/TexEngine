@@ -126,6 +126,7 @@ BEHAVIOUR = {
 	"p72_market_refused_funnel_event": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p73_ledger_booking_index": "test_patches.TestP03Indexes.test_p73_creates_the_ledger_booking_index",
 	"p74_outbox_order_index": "test_patches.TestP03Indexes.test_p74_creates_the_outbox_order_index",
+	"p75_payment_last_reverified": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
 
@@ -1250,6 +1251,8 @@ class TestSmallPatches(PatchCase):
 				 ("TEX Payment Transaction", "captured_at")),
 				("p68_payment_checkout_lease", [("tex_payments", "doctype", "tex_payment_transaction")],
 				 ("TEX Payment Transaction", "checkout_started_at")),
+				("p75_payment_last_reverified", [("tex_payments", "doctype", "tex_payment_transaction")],
+				 ("TEX Payment Transaction", "last_reverified_at")),
 				("p72_market_refused_funnel_event", [("tex_booking", "doctype", "tex_funnel_event")],
 				 ("TEX Funnel Event", "event"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
