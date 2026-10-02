@@ -122,7 +122,7 @@ test("Turkish letters (LO-49): ı and İ are the I key on both Turkish layouts; 
   assert.equal(shortcutLetter({ key: "ı", code: "KeyR" }), "i")
   assert.equal(shortcutLetter({ key: "İ", code: "KeyS" }), "i")
   assert.equal(shortcutLetter({ key: "İ", code: "Quote" }), "i") // Turkish-Q
-  for (const [key, code] of [["ü", "KeyG"], ["ö", "KeyX"], ["ç", "KeyV"], ["ş", "Semicolon"], ["ğ", "KeyE"], ["Ü", "KeyG"]])
+  for (const [key, code] of [["ü", "KeyG"], ["ö", "KeyX"], ["ç", "KeyB"], ["ş", "Semicolon"], ["ğ", "KeyE"], ["Ü", "KeyG"]])
     assert.equal(shortcutLetter({ key, code }), null, `${key} at ${code}`)
   // German QWERTZ keeps its ü key out of the letters, as before
   assert.equal(shortcutLetter({ key: "ü", code: "BracketLeft" }), null)

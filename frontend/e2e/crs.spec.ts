@@ -208,6 +208,7 @@ test("Call Center on a Mac: the shortcuts help says what VoiceOver's ⌃⌥ mean
 })
 
 test("Call Center elsewhere: the shortcuts help says nothing of VoiceOver (LO-49)", async ({ page }) => {
+  const noErrors = trackErrors(page)
   await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "platform", { get: () => "Win32", configurable: true }))
   await english(page)
   await login(page, "agent@demo.tex")
@@ -217,4 +218,5 @@ test("Call Center elsewhere: the shortcuts help says nothing of VoiceOver (LO-49
   const help = page.getByRole("dialog", { name: "Shortcuts" })
   await expect(help).toBeVisible()
   await expect(help.getByText(/VoiceOver/)).toHaveCount(0)
+  noErrors()
 })

@@ -88,3 +88,15 @@ test("Turkish-F (LO-49): Alt with the key printed ı or ü runs no other letter'
   // the key printed R is still Alt+R
   assert.equal(callCenterShortcut(ev({ key: "r", code: "KeyU", altKey: true }), "windows"), "results")
 })
+
+// 2K-5 review: on a Mac ⌥ makes a key type its Option-layer character, never the key's own letter; a letter with a
+// diacritic there (US ⌥⇧S "Í", ⌥⇧M "Â", French ⌥S "Ò") is the physical key's shortcut, as before LO-49
+test("mac: Option typing a letter with a diacritic is still the physical key's shortcut", () => {
+  assert.equal(callCenterShortcut(ev({ key: "Í", code: "KeyS", altKey: true }), "mac"), "search")
+  assert.equal(callCenterShortcut(ev({ key: "Â", code: "KeyM", altKey: true }), "mac"), "notes")
+  assert.equal(callCenterShortcut(ev({ key: "Ò", code: "KeyS", altKey: true, ctrlKey: true }), "mac"), "search")
+  // ⌥⇧B types "ı": the B key, which runs nothing
+  assert.equal(callCenterShortcut(ev({ key: "ı", code: "KeyB", altKey: true }), "mac"), null)
+  // in a field, Option typing a character of its own stays the character
+  assert.equal(callCenterShortcut(ev({ key: "Í", code: "KeyS", altKey: true, editable: true }), "mac"), null)
+})
