@@ -396,6 +396,17 @@ def ari_bulk_update(property: str, start: str, end: str, room_types=None, weekda
 	                            hotel_level=bool(as_int(hotel_level, 0)))
 
 
+@frappe.whitelist(methods=["POST"])
+def ari_rate_changes(property: str, contract: str, changes, apply: int = 0):
+	"""Several rate edits of the rates & availability grid as one edit of the contract's draft
+	(UX revision 2026-10): ``changes`` = [{room_types, start, end, op, value}], each night once.
+	Without ``apply``: what they would do (each room's price now and after, the periods the draft
+	would gain, the errors that would refuse it); nothing is written. With ``apply``: written to the
+	draft in one transaction, all or nothing, and audited. Needs ``contract.edit`` at the hotel."""
+	scope.assert_property(property)
+	return grid_svc.rate_changes(property, contract, parse(changes, None), apply=bool(as_int(apply, 0)))
+
+
 # ─── limited extras (G-19) ───────────────────────────────────────────────
 
 
