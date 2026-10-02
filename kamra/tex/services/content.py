@@ -14,6 +14,8 @@ import copy
 import frappe
 from frappe.utils import now_datetime
 
+from kamra.tex.money import whole_number
+
 LANGS = ("tr", "en", "de", "ru", "ro", "pl")
 
 # translatable fields per record type (the hotel's own field names)
@@ -135,8 +137,8 @@ class Localizer:
 		for line in q.get("lines") or []:
 			if line.get("kind") == "ACCOMMODATION" and line.get("code") == req.get("room_type"):
 				room = self.room_type_name(property, req.get("room_type"), None)
-				if room:
-					n = int(float(line.get("quantity") or 0))
+				n = whole_number(line.get("quantity"))
+				if room and n is not None:              # not whole: the line keeps its own text (LO-48)
 					line["description"] = f"{room} · {req.get('board')} · {nights_label(n, self.lang)}"
 			elif line.get("kind") == "EXTRA" and line.get("code") in names:
 				line["description"] = names[line["code"]]

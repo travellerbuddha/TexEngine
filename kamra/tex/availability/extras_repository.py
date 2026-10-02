@@ -20,6 +20,7 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime
 
+from kamra.tex.money import whole_number
 from kamra.tex.pricing.enums import ExtraPricingMode as M
 from kamra.tex.pricing.model import ExtraDayAvailability
 from kamra.tex.security.changes import SEP
@@ -96,7 +97,11 @@ def _usage_of(e: dict, request: dict) -> list[tuple[date, int]]:
 	snapshots are read from the priced units the same way ``pricing.extras.usage`` counts."""
 	if "usage" in e:
 		return [(getdate(u["date"]), int(u["units"])) for u in e["usage"]]
-	units = int(float(e.get("quantity") or 0))
+	units = whole_number(e.get("quantity"))
+	if units is None:
+		# a count of units is never part of one: refused by name, never cut to a whole number (LO-48)
+		raise ValueError(f"extra {e.get('code')}: quantity {e.get('quantity')!r} of a price snapshot is not a whole "
+		                 "number of units")
 	ci, co = getdate(request["check_in"]), getdate(request["check_out"])
 	nights = [ci + timedelta(days=i) for i in range(max((co - ci).days, 1))]
 	dates = [getdate(d) for d in e.get("service_dates") or []]
