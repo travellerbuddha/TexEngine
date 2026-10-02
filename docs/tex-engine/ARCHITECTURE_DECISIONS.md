@@ -190,6 +190,11 @@ dead-lettering. Core reservation code never calls vendors directly.
   ones until it is sent or Dead (8 tries, ~4 h 15 min); a Dead one never blocks; staff retry only the latest. Each
   carries its `Idempotency-Key` and the full state; the receiver upserts. The outbox is its own 5-minute job
   (`scheduler.outbox_every_5_minutes`): holds, payments and links never wait behind a PMS.
+- *Own queue (Part 2K-4, LO-08).* That cron entry only queues `scheduler.deliver_outbox` on the RQ `long` queue
+  (job id `tex_pms_outbox`, deduplicated: a delivery still queued or running is not queued again; 300 s limit), so a
+  worker of the default queue never runs it ahead of the 5-minute group. A deploy runs a worker for `long` next to
+  the one for `short,default` (frappe_docker's `queue-long`; `deploy/tex-local` Procfile `worker_long`); System status
+  names a TEX queue no running worker listens on (`queue_unserved`), and the outbox's late messages stay watched.
 
 ## ADR-016 Payments: provider interface, no card data at rest
 **Decision.** `PaymentProvider` interface (`create_checkout`, `handle_callback`, `refund`,

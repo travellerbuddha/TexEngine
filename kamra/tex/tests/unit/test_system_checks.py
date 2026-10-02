@@ -71,6 +71,20 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.workers_check(reachable=True, workers=2, backlog=c.QUEUE_BACKLOG_FAIL, live=True)["status"],
 		                 c.FAIL)
 
+	def test_a_queue_no_worker_listens_on_is_named(self):
+		"""LO-08 (2K-4): the PMS outbox runs on the ``long`` queue. Workers that all listen elsewhere never deliver
+		it: the check names the queue (FAIL on a live site), however many workers run."""
+		out = c.workers_check(reachable=True, workers=2, backlog=0, live=True, unserved=["long"])
+		self.assertEqual((out["status"], out["issues"]),
+		                 (c.FAIL, [{"reason": "queue_unserved", "status": c.FAIL, "params": {"queue": "long"}}]))
+		self.assertEqual(c.workers_check(reachable=True, workers=2, backlog=0, live=False, unserved=["long"])["status"],
+		                 c.WARN)
+		self.assertEqual(c.describe(out["issues"][0]),
+		                 "No background worker listens on the long queue: its jobs (the PMS delivery queue) never run.")
+		# no worker at all is said once
+		none = c.workers_check(reachable=True, workers=0, backlog=0, live=True, unserved=["default", "long"])
+		self.assertEqual([i["reason"] for i in none["issues"]], ["no_workers"])
+
 	def test_snapshot_isolation_on_fails_globally_or_for_the_connection(self):
 		"""ADR-063: ON turns a waiting booking's "sold out" into error 1020."""
 		for values in (None, {"global": 0, "session": 0}):

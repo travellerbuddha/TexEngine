@@ -35,6 +35,12 @@ EVERY_5_MINUTES = ("kamra.tex.payments.service.reverify_pending",
 # the PMS outbox is its own job (its own RQ job and time limit): a stalled PMS delays only PMS messages, never
 # the holds, payments, links and mail status of the group above (ADR-015, NEW-7)
 OUTBOX_EVERY_5_MINUTES = ("kamra.tex.connect.outbox.deliver_pending",)
+# ... on its own RQ queue (LO-08): the scheduler's cron job only queues it, so a worker of the default queue never
+# runs it before the group above. One job id: a delivery still queued or running is not queued again. Its time
+# limit fits deliver_pending's budget (120 s) and one PMS call (30 s); a hung call is ended there
+OUTBOX_QUEUE = "long"
+OUTBOX_JOB_ID = "tex_pms_outbox"
+OUTBOX_TIMEOUT = 300
 # system-status alerts run last, so they see this run's outcome (ADR-047)
 EVERY_15_MINUTES = ("kamra.tex.commercial.contracts.roll_version_statuses",
                     "kamra.tex.crm.service.detect_abandoned",
@@ -54,6 +60,12 @@ def every_5_minutes() -> None:
 
 
 def outbox_every_5_minutes() -> None:
+	"""The cron entry: queues :func:`deliver_outbox` on the outbox's own queue (LO-08); delivers nothing itself."""
+	frappe.enqueue("kamra.tex.scheduler.deliver_outbox", queue=OUTBOX_QUEUE, timeout=OUTBOX_TIMEOUT,
+	               job_id=OUTBOX_JOB_ID, deduplicate=True)
+
+
+def deliver_outbox() -> None:
 	for job in OUTBOX_EVERY_5_MINUTES:
 		_run(job)
 

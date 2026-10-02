@@ -127,6 +127,7 @@ REASONS: dict[str, str] = {
 	"job_errors": "{count} TEX job error(s) in the last {hours} hours (see the Error Log).",
 	"redis_unreachable": "The background job queue (Redis) cannot be reached.",
 	"no_workers": "No background worker is running.",
+	"queue_unserved": "No background worker listens on the {queue} queue: its jobs (the PMS delivery queue) never run.",
 	"backlog": "{count} background job(s) are waiting in the queues.",
 	"key_missing": "The site has no encryption_key: offers, payment callbacks and webhooks cannot be signed.",
 	"snapshot_isolation_on": "MariaDB innodb_snapshot_isolation is ON ({level}): a booking that waited for the last "
@@ -290,13 +291,17 @@ def job_errors_check(count: int, since=None) -> dict:
 	return make("scheduler.errors", issues, scope="platform", since=since)
 
 
-def workers_check(*, reachable: bool, workers: int, backlog: int, live: bool) -> dict:
+def workers_check(*, reachable: bool, workers: int, backlog: int, live: bool, unserved: Iterable[str] = ()) -> dict:
+	"""``unserved``: the queues TEX queues jobs on that no running worker listens on (LO-08: the PMS outbox runs on
+	``long``); named only while some worker runs (none at all is ``no_workers``)."""
 	issues = []
 	if not reachable:
 		issues.append(issue("redis_unreachable", FAIL))
 	else:
 		if workers <= 0:
 			issues.append(issue("no_workers", FAIL if live else WARN))
+		else:
+			issues += [issue("queue_unserved", FAIL if live else WARN, queue=q) for q in unserved]
 		if backlog >= QUEUE_BACKLOG_WARN:
 			issues.append(issue("backlog", FAIL if backlog >= QUEUE_BACKLOG_FAIL else WARN, count=backlog))
 	return make("workers", issues, scope="platform", count=backlog if reachable else 0)

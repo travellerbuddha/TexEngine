@@ -403,6 +403,7 @@
  "settings.status.reason.job_errors": "Erori ale joburilor TEX în ultimele {hours} ore: {count} (vezi Error Log).",
  "settings.status.reason.redis_unreachable": "Coada de joburi de fundal (Redis) nu poate fi accesată.",
  "settings.status.reason.no_workers": "Niciun proces de fundal nu rulează.",
+ "settings.status.reason.queue_unserved": "Niciun proces de fundal nu ascultă coada {queue}: joburile ei (coada de livrare PMS) nu rulează niciodată.",
  "settings.status.reason.backlog": "Joburi de fundal în așteptare: {count}.",
  "settings.status.reason.key_missing": "Lipsește encryption_key din site_config: ofertele, notificările de plată și webhook-urile nu pot fi semnate.",
  "settings.status.reason.snapshot_isolation_on": "MariaDB innodb_snapshot_isolation este ACTIVAT ({level}): o rezervare care a așteptat ultima cameră eșuează cu o eroare în loc să afle că nu mai sunt locuri. Setați innodb_snapshot_isolation = 0 în configurația serverului de baze de date.",

@@ -349,6 +349,7 @@
  "settings.status.reason.maintenance_mode": "The site is in maintenance mode: no TEX job runs.",
  "settings.status.reason.no_outgoing_account": "No default outgoing e-mail account: guest e-mails cannot be sent.",
  "settings.status.reason.no_workers": "No background worker is running.",
+ "settings.status.reason.queue_unserved": "No background worker listens on the {queue} queue: its jobs (the PMS delivery queue) never run.",
  "settings.status.reason.overpaid": "Payment links paid twice in the last {days} days: {count}.",
  "settings.status.reason.payment_pending": "Card payments still pending: {count}, oldest started {minutes} min ago.",
  "settings.status.reason.payment_pending_unverified": "Card payments of a gateway TEX cannot ask, still pending after their deadline: {count}, oldest started {minutes} min ago. Check them in the bank's panel; if one was charged, record it as a Manual payment with the bank's reference. The alert clears 48 hours after the payment. A payment the bank did not charge can be marked not paid on its page (Payments).",

@@ -349,6 +349,7 @@
  "settings.status.reason.maintenance_mode": "Die Website ist im Wartungsmodus: kein TEX-Job läuft.",
  "settings.status.reason.no_outgoing_account": "Kein Standard-Konto für ausgehende E-Mails: Gast-E-Mails können nicht gesendet werden.",
  "settings.status.reason.no_workers": "Es läuft kein Hintergrund-Worker.",
+ "settings.status.reason.queue_unserved": "Kein Hintergrund-Worker bedient die Warteschlange {queue}: ihre Jobs (die PMS-Zustellwarteschlange) laufen nie.",
  "settings.status.reason.overpaid": "Zweimal bezahlte Zahlungslinks in den letzten {days} Tagen: {count}.",
  "settings.status.reason.payment_pending": "Noch ausstehende Kartenzahlungen: {count}, die älteste begann vor {minutes} Min.",
  "settings.status.reason.payment_pending_unverified": "Kartenzahlungen eines Gateways, das TEX nicht abfragen kann, nach ihrer Frist noch ausstehend: {count}, die älteste begann vor {minutes} Min. Prüfen Sie sie im Bankportal; wurde eine belastet, erfassen Sie sie als manuelle Zahlung mit der Bankreferenz. Die Warnung endet 48 Stunden nach der Zahlung. Eine Zahlung, die die Bank nicht belastet hat, kann auf ihrer Seite als nicht bezahlt markiert werden (Zahlungen).",

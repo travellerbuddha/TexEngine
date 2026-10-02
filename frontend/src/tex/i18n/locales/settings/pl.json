@@ -415,6 +415,7 @@
  "settings.status.reason.job_errors": "Błędy zadań TEX w ciągu ostatnich {hours} godz.: {count} (zob. Error Log).",
  "settings.status.reason.redis_unreachable": "Kolejka zadań w tle (Redis) jest nieosiągalna.",
  "settings.status.reason.no_workers": "Nie działa żaden proces w tle.",
+ "settings.status.reason.queue_unserved": "Żaden proces w tle nie obsługuje kolejki {queue}: jej zadania (kolejka wysyłki do PMS) nigdy się nie wykonują.",
  "settings.status.reason.backlog": "Oczekujące zadania w tle: {count}.",
  "settings.status.reason.key_missing": "Brak encryption_key w site_config: nie można podpisywać ofert, powiadomień o płatnościach ani webhooków.",
  "settings.status.reason.snapshot_isolation_on": "W MariaDB włączone jest innodb_snapshot_isolation ({level}): rezerwacja czekająca na ostatni pokój kończy się błędem zamiast informacji o braku miejsc. Ustaw innodb_snapshot_isolation = 0 w konfiguracji serwera bazy danych.",

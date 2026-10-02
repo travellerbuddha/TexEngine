@@ -271,8 +271,9 @@ bench start          # Ctrl+C stops everything
 ```
 
 `bench start` runs the processes in the `Procfile`: the two private Redis servers (not
-with `--redis URL`), the web server, the realtime server, the scheduler and a background
-worker. Nothing runs
+with `--redis URL`), the web server, the realtime server, the scheduler and two background
+workers (`short,default`, and `long` for the PMS outbox; System status names a queue no
+worker listens on). Nothing runs
 between sessions, so start it again after a restart.
 
 | Open | URL (default port 8000) |

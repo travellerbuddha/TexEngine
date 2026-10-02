@@ -18,10 +18,13 @@ from datetime import timedelta
 import frappe
 from frappe.utils import cint, get_datetime, getdate, now_datetime
 
+from kamra.tex import scheduler
 from kamra.tex.ops import checks as C
 from kamra.tex.security.audit import log_exception
 
 TEX_JOBS = tuple(C.JOB_MAX_AGE_MINUTES)
+# the RQ queues TEX's jobs run on: Frappe queues the cron entries on default, the PMS outbox runs on its own (LO-08)
+TEX_QUEUES = ("default", scheduler.OUTBOX_QUEUE)
 FX_LOOKBACK_DAYS = 60
 
 
@@ -91,8 +94,9 @@ def _job_errors(now) -> dict:
 
 
 def queue_probe() -> dict:
-	"""{reachable, workers, backlog} of this bench's RQ queues. Never raises: an unreachable
-	Redis is a finding, not an error. One connection attempt (Frappe retries five times)."""
+	"""{reachable, workers, backlog, unserved} of this bench's RQ queues (``unserved``: the TEX queues no worker
+	listens on). Never raises: an unreachable Redis is a finding, not an error. One connection attempt (Frappe
+	retries five times)."""
 	try:
 		from frappe.utils.background_jobs import generate_qname, get_queue_list, get_redis_conn
 		from rq import Queue, Worker
@@ -108,9 +112,11 @@ def queue_probe() -> dict:
 		names = {generate_qname(q) for q in get_queue_list()}
 		backlog = sum(Queue(n, connection=conn).count for n in names)
 		workers = [w for w in Worker.all(connection=conn) if set(w.queue_names()) & names]
-		return {"reachable": True, "workers": len(workers), "backlog": int(backlog)}
+		served = {n for w in workers for n in w.queue_names()}
+		return {"reachable": True, "workers": len(workers), "backlog": int(backlog),
+		        "unserved": [q for q in TEX_QUEUES if generate_qname(q) not in served]}
 	except Exception:
-		return {"reachable": False, "workers": 0, "backlog": 0}
+		return {"reachable": False, "workers": 0, "backlog": 0, "unserved": []}
 
 
 def _workers(now) -> dict:
