@@ -37,13 +37,18 @@ import { GridActions, type RateChangesAnswer } from "./GridActions"
 import { InventoryNav } from "./InventoryNav"
 import { Legend } from "./Legend"
 import { cellKey, parseRateEntry, planRatePaste, rateEditText, type GridTarget, type PendingRate, type RateEdit } from "./rateEdits.ts"
-import { CHANNEL_SCOPES, channelArgs, HOTEL_METRICS, METRICS, SCOPE_PREFIX, type Grid, type GridCell, type GridRow, type Metric, type Scope } from "./types"
+import { CHANNEL_SCOPES, channelArgs, HOTEL_METRICS, METRICS, SCOPE_PREFIX, type Grid, type GridCell, type GridRow, type Metric, type Scope, type SellCell, type SellPrices } from "./types"
 
 const PREF = "tex-inv-grid"
-/** The daily work view: price, rooms left, open or closed (UX revision 2026-10). The other rows
- * (stay length, arrival/departure, release, booking window) are one click away. */
-export const DAILY: Metric[] = ["rate", "avail", "stop"]
+/** The daily work view: the contract price and what a guest pays for it, rooms left, open or
+ * closed (UX revision 2026-10). The other rows (stay length, arrival/departure, release, booking
+ * window) are one click away. */
+export const DAILY: Metric[] = ["rate", "sell", "avail", "stop"]
+/** the daily view before the sell price row: kept as the daily view, not shown as a custom one */
+const OLD_DAILY: Metric[] = ["rate", "avail", "stop"]
 const DAY_OPTIONS = [7, 14, 31, 60]
+
+const sameSet = (a: Metric[], b: Metric[]) => a.length === b.length && a.every((m) => b.includes(m))
 
 interface Prefs {
   days: number
@@ -57,14 +62,13 @@ function loadPrefs(property: string | undefined): Prefs {
     const raw = localStorage.getItem(`${PREF}:${property}`)
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<Prefs>
-    const metrics = (p.metrics ?? []).filter((m) => METRICS.includes(m))
+    const saved = (p.metrics ?? []).filter((m) => METRICS.includes(m))
+    const metrics = sameSet(saved, OLD_DAILY) ? DAILY : saved
     return { days: [...DAY_OPTIONS, 28].includes(p.days ?? 0) ? p.days! : 14, scope: { ...fallback.scope, ...(p.scope ?? {}) }, metrics: metrics.length ? metrics : DAILY }
   } catch {
     return fallback
   }
 }
-
-const sameSet = (a: Metric[], b: Metric[]) => a.length === b.length && a.every((m) => b.includes(m))
 
 interface FlatRow {
   row: GridRow
@@ -169,7 +173,29 @@ export default function AriGrid() {
   const ratePlan = lookups.data?.rate_plans.find((r) => r.name === scope.rate_plan)
   const channel = boot.channels.find((c) => c.name === scope.channel)
   const scopeLabel = scopeText(t, scope, contract ? `${contract.contract_code}` : undefined, ratePlan?.rate_plan_name, channel?.channel_name)
-  const metrics = prefs.metrics.filter((m) => m !== "rate" || Boolean(grid?.contract))
+  // the price rows need a contract; the sell price, the right to see prices
+  const metrics = prefs.metrics.filter((m) => (m !== "rate" && m !== "sell") || (Boolean(grid?.contract) && (m !== "sell" || can("price.view"))))
+  // what a guest pays for one night, room by room: the engine's price of a reference stay (UX revision 2026-10)
+  const [sellRef, setSellRef] = useState<{ plan: string; adults: number }>({ plan: "", adults: 2 })
+  const sellQ = useTexQuery<SellPrices>(
+    "crs",
+    "ari_sell_prices",
+    {
+      property,
+      contract: scope.contract,
+      start,
+      days,
+      rate_plan: sellRef.plan || undefined,
+      adults: sellRef.adults,
+      market: scope.market || undefined,
+      channel: ch.channel || undefined,
+    },
+    [property, scope.contract, start, days, sellRef.plan, sellRef.adults, scope.market, ch.channel],
+    Boolean(property && scope.contract && metrics.includes("sell")),
+  )
+  const sell = sellQ.data
+  const sellAt = useMemo(() => new Map((sell?.cells ?? []).map((c) => [cellKey(c.room_type, c.date), c])), [sell])
+  const sellPlanName = sell?.rate_plans?.find((r) => r.code === sell.rate_plan)?.name ?? sell?.rate_plan ?? ""
   const canRestrict = can("restriction.edit")
   // rates are cost (G-11): the grid hides them from who may not see cost, and they cannot be changed there
   const canRate = can("contract.edit") && Boolean(scope.contract) && Boolean(grid && !grid.rates_hidden)
@@ -419,7 +445,7 @@ export default function AriGrid() {
                   key={m}
                   label={t(`inventory.metric.${m}`)}
                   checked={prefs.metrics.includes(m)}
-                  disabled={m === "rate" && !scope.contract}
+                  disabled={(m === "rate" || m === "sell") && !scope.contract}
                   onChange={(e) => setPrefs((p) => ({ ...p, metrics: e.target.checked ? METRICS.filter((x) => x === m || p.metrics.includes(x)) : p.metrics.filter((x) => x !== m) }))}
                 />
               ))}
@@ -467,6 +493,51 @@ export default function AriGrid() {
             <span className="text-zinc-600">{t("inventory.choose_contract_hint")}</span>
           )}
         </dd>
+        {metrics.includes("sell") && grid?.contract && (
+          <>
+            <dt className="font-semibold text-zinc-600">{t("inventory.metric.sell")}</dt>
+            <dd className="text-zinc-800">
+              {sellQ.error ? (
+                <span className="text-rose-700">{sellQ.error.message}</span>
+              ) : sell && !sell.on_sale ? (
+                <span className="text-zinc-600">{t("inventory.sell.none_on_sale")}</span>
+              ) : (
+                // the reference stay is said, and its plan and party are a choice, never assumed silently
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span>{t("inventory.sell.ref", { board: sell?.board ?? "—", market: sell?.market ?? scope.market ?? "", channel: boot.channels.find((c) => c.name === sell?.channel)?.channel_name ?? sell?.channel ?? "" })}</span>
+                  {sell?.rate_plans && sell.rate_plans.length > 1 && (
+                    <select
+                      aria-label={t("inventory.sell.plan")}
+                      className="h-7 rounded-md border border-zinc-300 bg-white px-1.5 text-xs"
+                      value={sell.rate_plan ?? ""}
+                      onChange={(e) => setSellRef((r) => ({ ...r, plan: e.target.value }))}
+                    >
+                      {sell.rate_plans.map((rp) => (
+                        <option key={rp.code} value={rp.code}>
+                          {rp.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {sell?.rate_plans && sell.rate_plans.length === 1 && <span>· {sellPlanName}</span>}
+                  <select
+                    aria-label={t("inventory.sell.adults")}
+                    className="h-7 rounded-md border border-zinc-300 bg-white px-1.5 text-xs"
+                    value={sellRef.adults}
+                    onChange={(e) => setSellRef((r) => ({ ...r, adults: Number(e.target.value) }))}
+                  >
+                    {[1, 2, 3, 4].map((n) => (
+                      <option key={n} value={n}>
+                        {t("inventory.sell.ref_short", { count: n })}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-zinc-500">· {t("inventory.sell.ref_note")}</span>
+                </span>
+              )}
+            </dd>
+          </>
+        )}
         <dt className="font-semibold text-zinc-600">{t("inventory.scope.restrictions_label")}</dt>
         <dd className="text-zinc-800">
           {scopeLabel} <span className="text-zinc-500">· {t("inventory.scope.restrictions_now")}</span>
@@ -522,6 +593,9 @@ export default function AriGrid() {
             showSelection={touched || sel.multiple}
             pending={pending}
             newPrice={newPrice}
+            sell={sell}
+            sellAt={sellAt}
+            sellLoading={sellQ.loading}
             editing={editing}
             onEditingText={(text) => setEditing((e) => (e ? { ...e, text, error: undefined } : e))}
             onTouched={() => setTouched(true)}
@@ -636,6 +710,9 @@ function GridTable({
   showSelection,
   pending,
   newPrice,
+  sell,
+  sellAt,
+  sellLoading,
   editing,
   onEditingText,
   onEditingKey,
@@ -654,6 +731,10 @@ function GridTable({
   showSelection: boolean
   pending: Map<string, PendingRate>
   newPrice: Map<string, string>
+  /** the sell price row: what a guest pays for one night (crs.ari_sell_prices) */
+  sell?: SellPrices
+  sellAt: Map<string, SellCell>
+  sellLoading: boolean
   editing: Editing | null
   onEditingText: (text: string) => void
   onEditingKey: (e: KeyboardEvent<HTMLInputElement>) => void
@@ -773,6 +854,12 @@ function GridTable({
                           · {ccy} · {t(`inventory.unit.${grid.basis ?? "PERSON"}`)}
                         </span>
                       )}
+                      {metric === "sell" && sell?.on_sale && (
+                        <span className="text-zinc-400">
+                          {" "}
+                          · {sell.currency} · {t("inventory.sell.ref_short", { count: sell.adults })}
+                        </span>
+                      )}
                       <span className="sr-only"> · {rowName}</span>
                     </span>
                   </th>
@@ -796,7 +883,8 @@ function GridTable({
                         onMouseEnter={() => {
                           if (dragging.current) sel.click(ri, ci, { shift: true })
                         }}
-                        aria-label={cellLabel(t, metric, cell, rowName, ccy, p, p ? newPrice.get(key) : undefined)}
+                        aria-label={cellLabel(t, metric, cell, rowName, metric === "sell" ? (sell?.currency ?? "") : ccy, p, p ? newPrice.get(key) : undefined, sellAt.get(key))}
+                        title={metric === "sell" ? sellTitle(t, sellAt.get(key), sell?.currency) : undefined}
                         className={cn(
                           "relative h-9 cursor-default px-1 text-center align-middle tabular-nums outline-none focus-visible:z-[3] focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
                           mi === shown.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
@@ -830,7 +918,7 @@ function GridTable({
                             )}
                           />
                         ) : (
-                          <CellContent metric={metric} cell={cell} pending={p} next={p ? newPrice.get(key) : undefined} />
+                          <CellContent metric={metric} cell={cell} pending={p} next={p ? newPrice.get(key) : undefined} sell={sellAt.get(key)} sellLoading={sellLoading} />
                         )}
                         {isOwn(metric, cell) && <span aria-hidden className="absolute top-0 right-0 size-0 border-t-[6px] border-l-[6px] border-t-tex-600 border-l-transparent" />}
                       </td>
@@ -881,9 +969,19 @@ function cellTone(metric: Metric, c: GridCell): string | false {
   return false
 }
 
-function CellContent({ metric, cell, pending, next }: { metric: Metric; cell: GridCell; pending?: PendingRate; next?: string }) {
+function CellContent({ metric, cell, pending, next, sell, sellLoading }: { metric: Metric; cell: GridCell; pending?: PendingRate; next?: string; sell?: SellCell; sellLoading?: boolean }) {
   const { t } = useTexT()
   switch (metric) {
+    case "sell":
+      if (!sell) return <span className="text-zinc-300">{sellLoading ? "…" : "·"}</span>
+      return sell.total ? (
+        <span className="inline-flex flex-col items-center leading-tight">
+          <span className="font-semibold text-zinc-900">{decText(sell.total)}</span>
+          {sell.promotions && sell.promotions.length > 0 && <Tag className="size-3 text-emerald-700" aria-hidden />}
+        </span>
+      ) : (
+        <span className="text-[10px] font-medium text-zinc-500">{t("inventory.sell.not_sold_short")}</span>
+      )
     case "rate": {
       if (pending)
         // an unsaved entry: as typed, and the server's new price once previewed
@@ -996,10 +1094,13 @@ function shortDay(iso: string | null) {
   return new Intl.DateTimeFormat(intlLocale(getTexLang()), { day: "numeric", month: "short" }).format(new Date(`${iso}T12:00:00`))
 }
 
-function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string, pending?: PendingRate, next?: string): string {
+function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string, pending?: PendingRate, next?: string, sell?: SellCell): string {
   const day = `${weekdayName(isoWeekday(c.date), "long")} ${fmtDate(c.date)}`
   let v: string
   switch (metric) {
+    case "sell":
+      v = sellTitle(t, sell, ccy)
+      break
     case "rate":
       v = c.rate ? `${decText(c.rate)} ${ccy}` : t("inventory.aria.no_rate")
       if (c.draft_rate && c.draft_rate !== c.rate) v += `, ${t("inventory.legend.draft")} ${decText(c.draft_rate)}`
@@ -1029,3 +1130,11 @@ function cellLabel(t: (k: string, p?: Record<string, string | number>) => string
   return `${room}, ${t(`inventory.metric.${metric}`)}, ${day}: ${v}${own}`
 }
 
+
+/** A sell price in words: the amount and the promotions in it, or why the night is not sold. */
+function sellTitle(t: (k: string, p?: Record<string, string | number>) => string, c: SellCell | undefined, ccy: string | undefined): string {
+  if (!c) return t("inventory.sell.loading")
+  if (!c.total) return t("inventory.sell.not_sold", { reason: c.message || c.reason || "—" })
+  const amount = `${decText(c.total)} ${ccy ?? ""}`.trim()
+  return c.promotions && c.promotions.length ? t("inventory.sell.with_promos", { amount, names: c.promotions.join(", ") }) : amount
+}

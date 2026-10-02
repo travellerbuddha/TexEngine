@@ -448,5 +448,20 @@
  "inventory.legend.select": "selectare (și clic, Shift+clic, tragere, numele camerei sau ziua)",
  "inventory.legend.type": "tastați într-o celulă de preț: un preț sau o modificare",
  "inventory.legend.clipboard": "copiere și lipire de prețuri cu un tabel",
- "inventory.legend.details": "toate setările unei celule"
+ "inventory.legend.details": "toate setările unei celule",
+ "inventory.metric.sell": "Preț de vânzare",
+ "inventory.sell.ref_short": {
+  "one": "{count} adult · 1 noapte",
+  "few": "{count} adulți · 1 noapte",
+  "other": "{count} de adulți · 1 noapte"
+ },
+ "inventory.sell.ref": "Ce plătește oaspetele: masă {board} · piață {market} · {channel} ·",
+ "inventory.sell.ref_note": "cu adaosurile, promoțiile și taxele în vigoare acum; un cod nu este niciodată presupus",
+ "inventory.sell.plan": "Planul tarifar al prețului de vânzare",
+ "inventory.sell.adults": "Componența pentru prețul de vânzare",
+ "inventory.sell.none_on_sale": "Nicio versiune a acestui contract nu este în vânzare: încă nu se vinde nimic pe el.",
+ "inventory.sell.not_sold_short": "nevândut",
+ "inventory.sell.not_sold": "nevândut: {reason}",
+ "inventory.sell.with_promos": "{amount}, cu {names}",
+ "inventory.sell.loading": "se calculează prețul de vânzare…"
 }

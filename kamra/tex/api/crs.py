@@ -420,6 +420,18 @@ def ari_rate_changes(property: str, contract: str, changes, apply: int = 0):
 	return grid_svc.rate_changes(property, contract, parse(changes, None), apply=bool(as_int(apply, 0)))
 
 
+@frappe.whitelist()
+def ari_sell_prices(property: str, contract: str, start: str, days: int = 14, rate_plan: str | None = None,
+                    adults: int = 2, market: str | None = None, channel: str | None = None):
+	"""The sell price of one night, room by room, beside the grid's contract price (UX revision
+	2026-10): a reference stay priced by the engine with the markups and promotions in force now.
+	Read-only; ``price.view`` at the hotel."""
+	scope.assert_property(property)
+	return grid_svc.sell_prices(property, contract, start, as_int(days, 14, lo=1, hi=62), rate_plan=rate_plan or None,
+	                            adults=as_int(adults, 2, lo=1, hi=6), market=market or None,
+	                            channel=channel or None)
+
+
 # ─── limited extras (G-19) ───────────────────────────────────────────────
 
 

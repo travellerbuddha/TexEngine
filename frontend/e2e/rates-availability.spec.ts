@@ -184,3 +184,33 @@ test("close sale for a selection with its scope stated, applied at once, and und
   expect(std.slice(1, 6).every((c) => !c.own && !c.stop_sell)).toBe(true)
   noErrors()
 })
+
+test("the sell price row says what a guest pays for each night, for the party chosen", async ({ page }) => {
+  test.setTimeout(120_000)
+  const noErrors = trackErrors(page)
+  const d = await openGrid(page)
+  const sellOf = async (adults: number) =>
+    (
+      await pageApiOk<{ cells: { room_type: string; date: string; total: string | null }[]; board: string }>(page, "kamra.tex.api.crs.ari_sell_prices", {
+        property: HOTEL,
+        contract: d.contract,
+        start: `${Y}-05-10`,
+        days: 14,
+        adults,
+      })
+    ).cells.find((c) => c.room_type === STD && c.date === `${Y}-05-11`)!.total!
+  // the reference stay is said: the base board, the party, what is in it
+  const scopeBox = page.locator("dl").filter({ hasText: "Sell price" })
+  await expect(scopeBox).toContainText("board BB")
+  await expect(scopeBox).toContainText("markups, promotions and taxes in force now")
+  // the row shows the server's price of one night for 2 adults, beside the contract's per-person price
+  const two = await sellOf(2)
+  await expect(cell(page, N.STD, "Sell price", 1)).toHaveAccessibleName(new RegExp(`: ${two.replace(".", "\\.")} EUR`))
+  expect(Number(two)).toBeGreaterThan(80) // 2 adults pay more than one person's contract price
+  // one adult: another price, the server's again
+  await page.getByLabel("Party of the sell price").selectOption({ label: "1 adult · 1 night" })
+  const one = await sellOf(1)
+  expect(one).not.toBe(two)
+  await expect(cell(page, N.STD, "Sell price", 1)).toHaveAccessibleName(new RegExp(`: ${one.replace(".", "\\.")} EUR`))
+  noErrors()
+})

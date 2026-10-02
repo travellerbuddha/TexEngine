@@ -477,5 +477,21 @@
  "inventory.legend.select": "zaznacz (także klik, Shift+klik, przeciąganie, nazwa pokoju lub dzień)",
  "inventory.legend.type": "wpisz w komórkę ceny: cenę lub zmianę",
  "inventory.legend.clipboard": "kopiuj i wklejaj ceny z arkusza",
- "inventory.legend.details": "wszystkie ustawienia komórki"
+ "inventory.legend.details": "wszystkie ustawienia komórki",
+ "inventory.metric.sell": "Cena sprzedaży",
+ "inventory.sell.ref_short": {
+  "one": "{count} dorosły · 1 noc",
+  "few": "{count} dorosłych · 1 noc",
+  "many": "{count} dorosłych · 1 noc",
+  "other": "{count} dorosłych · 1 noc"
+ },
+ "inventory.sell.ref": "Co płaci gość: wyżywienie {board} · rynek {market} · {channel} ·",
+ "inventory.sell.ref_note": "z narzutami, promocjami i podatkami obowiązującymi teraz; kod nigdy nie jest zakładany",
+ "inventory.sell.plan": "Plan cenowy ceny sprzedaży",
+ "inventory.sell.adults": "Liczba gości dla ceny sprzedaży",
+ "inventory.sell.none_on_sale": "Żadna wersja tego kontraktu nie jest w sprzedaży: nic jeszcze po nim nie sprzedaje się.",
+ "inventory.sell.not_sold_short": "nie w sprzedaży",
+ "inventory.sell.not_sold": "nie w sprzedaży: {reason}",
+ "inventory.sell.with_promos": "{amount}, z {names}",
+ "inventory.sell.loading": "obliczanie ceny sprzedaży…"
 }
