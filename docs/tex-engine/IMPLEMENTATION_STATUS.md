@@ -1754,15 +1754,22 @@ C-05 (a documented limitation).
 No owner decision was needed. LO-30 (left to this batch by Part 2G-3) is done here.
 
 - LO-35 **COMPLETE**: a fixed deposit is named once per booking and policy, as the server takes it (`deposit_shares`):
-  at checkout the first room of a FIXED policy says "for the whole booking", its other rooms that it is taken with that
-  room (`policy.bookingPaymentTerms`); a search of several rooms says "for the whole booking"; two keys in six booking
-  catalogs (ADR-067 note) · node `booking-deposit` (three).
+  at checkout, where two rooms or more carry a FIXED policy, the first says "for the whole booking", the others that it
+  is taken with that room; a room alone with its policy reads as on its own (review: the other rooms pay their own
+  deposit) (`policy.bookingPaymentTerms`); a search of several rooms says "for the whole booking"; two keys in six
+  booking catalogs (ADR-067 note) · node `booking-deposit` (four).
 - LO-14 **COMPLETE**: a basket that could not be read offers no guessed method: the payment step says the options could
-  not be loaded, that nothing is booked or charged, and offers "Try again" (`methods.checkoutChoices`; while it is not
-  read yet the card stays as before) · node `checkout-fallback` (two new; the existing two unchanged).
-- LO-32 **COMPLETE**: a re-quote (O-30) is compared with the last quote the guest saw of each room, extras included,
-  else with the search's offer: an accepted change is not announced again, a change of the extras alone or back to the
-  search's price is · e2e `booking` (desktop).
+  not be loaded and why (a rate limit asks to wait, a coded refusal is told in its own words, else the connection and
+  that nothing is booked or charged), and offers "Try again" (`methods.checkoutChoices`, `basketFailureText`; while it
+  is not read yet the card stays as before) · node `checkout-fallback` (three new; the existing two unchanged), e2e
+  `booking` (desktop: the alert and Try again).
+- LO-32 **COMPLETE**: a re-quote (O-30) is compared with the last quote the guest saw of each room (kept per room in
+  the flow, through an extras change; dropped when the room is chosen again), else with the search's offer and the
+  server's flag (`lib/priceChange.ts`). With a quote shown the server's `price_changed`/`previous_total` are not used
+  (they compare with the search: review BLOCKER); the totals are compared, extras included, so an accepted change is
+  not announced again and a new price of an extra or one back to the search's is; where the two quotes add other
+  extras (the guest changed them, or the new quote refuses one, which has its own notice) the room's own price is ·
+  node `price-change` (six), e2e `booking` (desktop: the server's flag, an extra added after, a refused extra).
 - LO-33 **COMPLETE**: the price-change notice focuses itself and scrolls into view when it appears · e2e `booking`
   (mobile).
 - LO-31 **COMPLETE** (verified first): a widget whose site changes drops the old site's name with its theme; the modal
@@ -1771,13 +1778,18 @@ No owner decision was needed. LO-30 (left to this batch by Part 2G-3) is done he
   - an analytics id is stripped exactly as the server strips it (Python's whitespace set) · node `analytics-ids`;
   - "?" opens the Call Center help with Ctrl or AltGr too, never with ⌘ · node `callcenter-shortcuts`;
   - Turkish-F: ı and İ are the I key on both Turkish layouts; a letter with a diacritic is its base letter only on that
-    letter's key (Mac ⌥C types ç on C), else none, so Alt+ı and Alt+ü run no other letter's shortcut · node `keys`,
-    `callcenter-shortcuts`;
+    letter's key (Mac ⌥C types ç on C), else none, so Alt+ı and Alt+ü run no other letter's shortcut; on a Mac,
+    Option types its own layer (⌥⇧S "Í"), so the Call Center takes the letter typed or the physical key there, as
+    before (review) · node `keys`, `callcenter-shortcuts`;
+  - the admin form finds an analytics id blank as the server strips it (review) · node `analytics-ids`;
   - the widget unlocks the host page on its dialog's own close event · e2e `widget`;
   - on a Mac the shortcuts help says that ⌃⌥ is VoiceOver's key and ⌥+letter outside a field still works (no logic
     change); six staff catalogs · e2e `crs` (Mac and Windows).
 - LO-30 **COMPLETE**: back from the gateway the payment-link page shows no address with its token: the tab keeps it for
   the charge, the return is `/pay` with no fragment (ADR-046 addendum) · e2e `pay-link`.
 - **Not done:** bundles not rebuilt (2Z); the checkout's deposit text names no per-room share (the server's
-  `due_now` per method gives the amount); Turkish-F letters other than ı/İ are no letter shortcut at all (the page's
-  buttons and the other keys stay).
+  `due_now` per method gives the amount; a first room whose total is below the deposit leaves the rest to the next
+  room, which "taken with room 1" does not say); Turkish-F letters other than ı/İ are no letter shortcut at all (the
+  page's buttons and the other keys stay); on a Mac Turkish-F, ⌥+letter is the physical key's, as before LO-49 (the
+  Option layer names no letter); a basket refused as expired offers Try again, not the expired flow's "Refresh
+  prices".
