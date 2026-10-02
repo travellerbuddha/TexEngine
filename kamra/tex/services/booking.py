@@ -1492,6 +1492,21 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
 
 
+# one guest's stays at a hotel, as they are now (LO-09): a locking read of Reservation alone, by its (guest, property)
+# index (forced: on few rows the optimizer may take (property, check_in), which would lock the hotel's stays), the
+# dates judged after it; never a join (it would share-lock the other bookings' rows after their rooms: bookings first)
+GUEST_STAYS_INDEX = "tex_res_guest_prop"
+GUEST_STAYS = """SELECT r.name, r.tex_booking, r.status, r.check_in_date, r.check_out_date FROM `tabReservation` r {hint}
+                 WHERE r.guest = %(g)s AND r.property = %(p)s LOCK IN SHARE MODE"""
+
+
+def guest_stays_sql() -> str:
+	"""``GUEST_STAYS`` with its index forced when the site has it (a site whose index could not be made still reads
+	the stays, its locks wider)."""
+	has = frappe.db.has_index("tabReservation", GUEST_STAYS_INDEX)
+	return GUEST_STAYS.format(hint=f"FORCE INDEX ({GUEST_STAYS_INDEX})" if has else "")  # nosemgrep -- a constant
+
+
 def live_duplicate(booking: str) -> str | None:
 	"""D4 c): another live booking at the same hotel with a live room for nights of this booking's stay whose guest
 	is the same person — staff booked the guest again after it expired. The guest, never the booker (P1-2): one of
@@ -1502,10 +1517,13 @@ def live_duplicate(booking: str) -> str | None:
 	NULL meaning (ADR-064): an empty e-mail or phone is dropped, never matched (a NULL equals nothing, and ``("",)``
 	would match every profile without one); a room's dates are required, so never NULL.
 
-	Called under the booking's lock (a late payment's reconciliation or revival): the guest's profiles are a plain
-	read, their stays at the hotel a locking read through ``Reservation(guest, property)``, so a booking committed
-	after this request's read view began (staff booked the guest again during the gateway call) is found (LO-09);
-	never an OR across the three Guest indexes under a lock."""
+	Called under the booking's lock (a late payment's reconciliation or revival), it reads the guest's stays as they
+	are now (LO-09, ADR-062 D4 c): the profiles are a plain read, their stays at the hotel a locking read of
+	Reservation alone (``GUEST_STAYS``, by ``Reservation(guest, property)``), and the bookings of the stays found a
+	plain read, one missing from this request's read view being new, so live. A booking committed after the
+	callback's read view began is found, or one being made waits for this request (a deadlock with it is retried by
+	the caller). A duplicate made on a profile created meanwhile (another e-mail on the same phone) is not found:
+	the CRM shows it as a possible duplicate."""
 	b = frappe.get_doc("TEX Booking", booking)
 	if not b.rooms:
 		return None
@@ -1523,15 +1541,17 @@ def live_duplicate(booking: str) -> str | None:
 		guests.update(frappe.get_all("Guest", filters={"email": ("in", emails)}, pluck="name"))
 	if phones:
 		guests.update(frappe.get_all("Guest", filters={"phone": ("in", phones)}, pluck="name"))
-	rows = frappe.db.sql(
-		"""SELECT r.tex_booking FROM `tabReservation` r
-		   JOIN `tabTEX Booking` o ON o.name = r.tex_booking
-		   WHERE r.guest IN %(guests)s AND r.property = %(p)s AND r.tex_booking != %(b)s
-		     AND r.status NOT IN ('Cancelled', 'No Show') AND r.check_in_date < %(co)s AND r.check_out_date > %(ci)s
-		     AND o.status IN %(live)s
-		   ORDER BY r.tex_booking LIMIT 1 LOCK IN SHARE MODE""",
-		{"guests": sorted(guests), "p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co})
-	return rows[0][0] if rows else None
+	sql = guest_stays_sql()
+	stays = [s for g in sorted(guests)
+	         for s in frappe.db.sql(sql, {"g": g, "p": b.property}, as_dict=True)]  # nosemgrep -- constant SQL, values bound
+	others = sorted({s.tex_booking for s in stays if s.tex_booking and s.tex_booking != b.name
+	                 and s.status not in ("Cancelled", "No Show")
+	                 and getdate(s.check_in_date) < co and getdate(s.check_out_date) > ci})
+	if not others:
+		return None
+	seen = dict(frappe.get_all("TEX Booking", filters={"name": ("in", others)}, fields=["name", "status"],
+	                           as_list=True))
+	return next((o for o in others if o not in seen or seen[o] in LIVE_BOOKINGS), None)
 
 
 def revive_expired(booking: str, *, reason: str) -> list[str]:

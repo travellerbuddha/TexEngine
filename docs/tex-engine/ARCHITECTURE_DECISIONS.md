@@ -9282,9 +9282,16 @@ main `1575c8b` is contained, so nothing was merged.
   same hotel has a live room (not Cancelled or No Show) for nights of the stay whose guest is one of the expired
   booking's guest profiles, or a profile with one of their e-mails (case-insensitive) or phones (trimmed) — the CRM's
   possible-duplicate rule. The booker's (an agency's) e-mail never counts, nor a name alone. *Part 2K-3 (LO-09):* the
-  check runs under the booking's lock and reads the guest's stays as they are now: the profiles are a plain read, their
-  stays at the hotel a locking read (`LOCK IN SHARE MODE` through `Reservation(guest, property)`, never an OR across
-  the Guest indexes). A booking committed after the callback's read view began is found, or waits for it.
+  check runs under the booking's lock and reads the guest's stays as they are now. The profiles are a plain read; each
+  profile's stays at the hotel a locking read of Reservation alone (`GUEST_STAYS`: `LOCK IN SHARE MODE`, the index
+  `Reservation(guest, property)` forced when the site has it, the dates judged after it; never a join, which would
+  share-lock the other bookings after their rooms); their bookings a plain read, one missing from the read view being
+  new, so live. A booking committed after the callback's read view began is found; one being made for that guest at
+  the hotel waits for this request, or deadlocks with it (its nights against the revival's), and the victim is run
+  again by `complete_retrying` / `retry_on_deadlock` — a booking made after a revival committed is staff's, as before.
+  The shared locks cover every stay of those profiles at the hotel, whatever the dates (a phone shared by many profiles
+  locks all their stays there for the request). Not found: a duplicate made on a profile created after the read view
+  began (another e-mail on the same phone makes a new profile, ADR-056); the CRM shows it as a possible duplicate.
 - *A charge TEX cannot ask about (Part 2K-1, LO-18).* A Pending charge of a gateway with no status query (the Virtual
   POS, `ops.status.unverifiable_providers`) is closed by staff once the bank's panel shows it was never charged:
   "Not paid (checked with the bank)", `payment.refund`, a reason required. It becomes Failed (`CLOSED_UNPAID`, the
@@ -9388,7 +9395,9 @@ the versions the roll superseded the state their contract's later publishes woul
   expiry (the job, `reconcile`, a refused attempt or link, P1-9) and money going out lock booking → charges (ADR-062
   "Locks") against money coming in (charge → booking); a revival's share lock on the booking's allocations against an
   allocation insert; a CRM merge (both profiles, then their records); the recount (ADR-048); withdraw's quote scan
-  (index order, ADR-069): name order ends caller-against-caller cycles, not create-against-withdraw.
+  (index order, ADR-069): name order ends caller-against-caller cycles, not create-against-withdraw. Also (Part 2K-3,
+  LO-09): the duplicate check's shared locks on the guest's stays (booking → its guest's reservations) against a booking
+  made for that guest meanwhile (nights → reservation insert), ADR-062 D4 c.
 - Every write endpoint taking these locks is wrapped; a request that committed a step is not run again (P1-8 e).
 - *Points returned (Part 2H-2, ADR-071 §4).* A cancellation's or an expiry's return of points is money going out: booking →
   rooms → the guests who may have spent → their Loyalty charges (name order) → burn and ledger rows. A cycle needs one

@@ -746,6 +746,14 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(booking.live_duplicate(mine), made[0])     # found under the lock all the same
 		frappe.db.rollback()
 
+	def test_the_guests_stays_are_locked_by_their_own_index(self):
+		"""LO-09 review: the duplicate check's locking read goes by ``Reservation(guest, property)``, so its shared
+		locks hold the guest's stays at the hotel only, never the hotel's stays of those dates."""
+		guest = frappe.db.get_value("TEX Booking", self.a["booking"], "booker_guest")
+		rows = frappe.db.sql("EXPLAIN " + booking.guest_stays_sql().replace(" LOCK IN SHARE MODE", ""),
+		                     {"g": guest, "p": fx.PROPERTY}, as_dict=True)
+		self.assertEqual([(r.table, r.key) for r in rows], [("r", "tex_res_guest_prop")])
+
 	def test_the_expiry_job_a_late_payment_and_a_new_guest_race_for_the_last_room(self):
 		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			results = self._race(("expiry", self.expiry, "Administrator"), ("a_pays", self.late_payment, "Guest"),
