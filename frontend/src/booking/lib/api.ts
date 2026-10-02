@@ -60,6 +60,8 @@ const KIND_BY_CODE: Record<string, ErrorKind> = {
   EXTRA_SOLD_OUT: "extra_sold_out",
   CONTRACT_NOT_ON_SALE: "expired",
   CONTRACT_SUSPENDED: "expired",
+  // a room type disabled since the search (LO-03): search again
+  ROOM_NOT_SOLD: "expired",
   MARKET_UNKNOWN: "invalid",
   MARKET_AMBIGUOUS: "invalid",
   MARKET_REQUIRED: "invalid",
