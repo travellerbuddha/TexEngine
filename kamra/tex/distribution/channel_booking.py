@@ -279,8 +279,9 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			w = _lock_and_check(prop, m.room_type, ci, co, [res.name])
 			# the nights, arrival and departure the line already had are its own (ADR-057)
 			same = (res.room_type, res.rate_plan or None, res.tex_market) == (m.room_type, m.rate_plan or None, m.market)
-			# moved into a room type no longer sold; a stay already in it is the hotel's to keep (ADR-048)
-			disabled = _room_type_warning(m) if res.room_type != m.room_type else None
+			# moved into a room type no longer sold, or brought back into one (a new sale, as for the restrictions); a
+			# stay already in it is the hotel's to keep (ADR-048)
+			disabled = _room_type_warning(m) if res.room_type != m.room_type or res.status not in LIVE else None
 			if disabled:
 				warnings.append(disabled)
 			restricted = _restriction_warning(prop, m, ci, co, now, before=(

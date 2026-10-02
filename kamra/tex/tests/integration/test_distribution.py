@@ -444,6 +444,18 @@ class TestChannelBookings(DistributionCase):
 		                          order_by="creation desc")
 		self.assertEqual(json.loads(revision[0])["status"], ["Cancelled", "Confirmed"])
 
+	def test_a_room_the_channel_brings_back_into_a_disabled_type_is_warned(self):
+		"""LO-03 review round 2: a room the channel had taken off and brings back is a new sale: in a type disabled
+		meanwhile it is accepted with the warning (before: only a change of room type warned)."""
+		self.booked("L1", "L2")
+		self.send(message(status="modified", rooms=[self.line("L1")]))                  # the channel removes L2
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		self.send(message(status="modified", rooms=[self.line("L1"), self.line("L2")]))  # ... and brings it back
+		back = self.apply_all()
+		self.assertIn("room type is no longer sold", back[0]["warning"] or "")
+		self.assertEqual(back[0]["warning"].count("room type is no longer sold"), 1)   # L1 was never off: no warning
+
 	def test_an_ota_booking_is_cancelled_at_the_desk_only_by_someone_who_manages_the_channel(self):
 		from kamra.tex.api import crs as crs_api
 
