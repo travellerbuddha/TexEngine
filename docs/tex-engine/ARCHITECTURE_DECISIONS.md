@@ -806,6 +806,16 @@ enterprise or group view (G-25).
     reservation screen hides Cancel without `channel.manage` and the dialog warns and sends the override.
   - Same class as the PMS outbox's retry (ADR-015): `retry_inbound` rejects a Failed or Dead message when a newer one
     of the same booking was Applied.
+- *Addendum (Part 2K-3, LO-03, LO-13, LO-11): what channels sell and how a channel is named.*
+  - A disabled room type sends the close-out of a disabled mapping (`build_days`: every day closed, nothing
+    available), and a Room Type `on_update` hook queues its mappings' sync whenever `disabled` changes, so a channel
+    stops selling a type TEX no longer sells, and sells it again once enabled (ADR-048's Part 2K-3 addendum).
+  - People are told the channel by its connection's label, never its id: `channel_of` returns `{connection, label,
+    ref}` (label falls back to the name); the "Sold by …" refusal, the cancel dialog and the reservation use the
+    label; the audit keeps the id.
+  - TEX never e-mails a channel's booking (the channel confirms it, and its price is the channel's):
+    `resend_confirmation` refuses it, naming the channel, before any manage token is minted. `crs.booking` carries
+    `channel_booking` (staff only), and the booking and reservation screens hide the resend button for one.
 
 ## ADR-040 The tenant structure is itself tenant data; guest identity is shared inside an enterprise
 **Context.** G-26: Desk/REST exposed the tenant structure across tenants.
@@ -1875,6 +1885,11 @@ the inventory lock are migration imports and status moves into a live status.*
   and the old key's rows move to it (`room_type` and the date-derived `name`); where it has none the disabled first
   member's rows come back into force as they are (the hotel's last settings before it disabled the type; counted, not
   touched). A pool of disabled members is left alone. Counts only; a second run moves nothing.
+- *Addendum (Part 2K-3, LO-03): a disabled room type is not sold anywhere.* Search skipped it, but an offer key or a
+  quote made before it was disabled still sold it, and so did a modification into it. The quote (`_stay_refusal`)
+  and `create_booking` now refuse a disabled type, and `modification.propose` refuses a change into one; the guest
+  code is `ROOM_NOT_SOLD`. A stay already in a disabled type still changes (its dates, its party), and the type keeps
+  counting in its pool, as above. Channels: ADR-039's Part 2K-3 addendum.
 
 ## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
 **Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day
@@ -9266,7 +9281,10 @@ main `1575c8b` is contained, so nothing was merged.
 - *D4 c) identity (Part 2F-1, P1-2).* The guest has another live booking for the stay when another live booking at the
   same hotel has a live room (not Cancelled or No Show) for nights of the stay whose guest is one of the expired
   booking's guest profiles, or a profile with one of their e-mails (case-insensitive) or phones (trimmed) — the CRM's
-  possible-duplicate rule. The booker's (an agency's) e-mail never counts, nor a name alone.
+  possible-duplicate rule. The booker's (an agency's) e-mail never counts, nor a name alone. *Part 2K-3 (LO-09):* the
+  check runs under the booking's lock and reads the guest's stays as they are now: the profiles are a plain read, their
+  stays at the hotel a locking read (`LOCK IN SHARE MODE` through `Reservation(guest, property)`, never an OR across
+  the Guest indexes). A booking committed after the callback's read view began is found, or waits for it.
 - *A charge TEX cannot ask about (Part 2K-1, LO-18).* A Pending charge of a gateway with no status query (the Virtual
   POS, `ops.status.unverifiable_providers`) is closed by staff once the bank's panel shows it was never charged:
   "Not paid (checked with the bank)", `payment.refund`, a reason required. It becomes Failed (`CLOSED_UNPAID`, the

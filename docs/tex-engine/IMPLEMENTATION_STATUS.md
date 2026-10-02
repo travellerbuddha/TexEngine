@@ -1606,3 +1606,14 @@ D-12: loyalty is live at go-live (the default). LO-47: the owner's choice (a).
 - LO-26 **COMPLETE** (reachable: a past stay still Confirmed can be changed): an earning whose points had expired passes its expiry on; the new lot is settled at once (ADR-071 §6 amendment); the expired lot is read on the earning's own guest (review round 1) · `TestModification` (three tests).
 - LO-47 **COMPLETE** (option a): a failing earning or reversal is undone alone under its savepoint, logged, and `loyalty.earnings` warns ("earn or take back"); the reservation's save is kept · `TestAnEarningNeverUndoesTheStay` (two tests), unit `test_system_checks`.
 - **Not done:** the CRM "Redeem" button still shows on a channel's booking (the server refuses it); No Show still gives no points back (C-01); the points of a stay changed into the future stay Available (O-21's state rule).
+
+## 6K3. Audit Part 2K-3 (2026-10-02)
+
+No owner decision was needed. LO-11: refused (TEX never e-mails a channel's booking), the card's first option.
+
+- LO-03 **COMPLETE**: a disabled room type is not sold anywhere: ARI sends its days closed and disabling or enabling it queues its mappings' sync (a Room Type `on_update` hook); a quote of an offer key made before, a booking of a quote made before, and a staff change into it are refused (`ROOM_NOT_SOLD`); its own stays still change, and it keeps counting in its pool (ADR-048 and ADR-039 addenda) · `TestADisabledRoomTypeIsNotSold` (three tests), `TestAri`.
+- LO-13 **COMPLETE**: the channel is named by its connection's label (`channel_of` → `label`) in the "Sold by …" refusal, the cancel dialog and the reservation; the audit keeps the id · `TestChannelBookings`.
+- LO-11 **COMPLETE**: `resend_confirmation` refuses a channel's booking before any manage token is minted; the staff booking view carries `channel_booking` and both detail screens hide the resend button · `TestChannelBookings`.
+- LO-09 **COMPLETE**: the revival's duplicate check reads the guest's stays at the hotel with a locking read under the booking's lock (ADR-062 D4 c amendment) · `TestLastRoomRace` (two connections).
+- LO-15 **COMPLETE**: the p58 and p61 tests assert each count against its own floor · `test_patches`.
+- **Not done:** the guest's manage view still says a channel's booking can be cancelled and changed, which the server refuses (LO-12, Stage 3); the "Sold by …" refusal has no guest code yet (G-70b codes it, `CHANNEL_BOOKING`); a booking site's search already hides a disabled type, but a channel mapping of one can still be saved enabled (it sends closed days).
