@@ -345,5 +345,8 @@
  "res.list.none_here": "{hotel} içinde eşleşen yok. Başka bir otelin rezervasyonu olabilir.",
  "res.list.search_all": "Tüm otellerimde ara",
  "res.list.channel_ref": "Kanalın kendi rezervasyon numarası",
- "res.list.channel_ref_short": "Kanal ref. {ref}"
+ "res.list.channel_ref_short": "Kanal ref. {ref}",
+ "res.list.arriving_on": "{date} girişleri",
+ "res.list.departing_on": "{date} çıkışları",
+ "res.list.day_clear": "Tüm tarihleri göster"
 }

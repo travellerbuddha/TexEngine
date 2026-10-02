@@ -367,5 +367,8 @@
  "res.list.none_here": "В {hotel} ничего не найдено. Возможно, это бронь другого отеля.",
  "res.list.search_all": "Искать во всех моих отелях",
  "res.list.channel_ref": "Собственный номер брони канала",
- "res.list.channel_ref_short": "Номер канала {ref}"
+ "res.list.channel_ref_short": "Номер канала {ref}",
+ "res.list.arriving_on": "Заезды {date}",
+ "res.list.departing_on": "Выезды {date}",
+ "res.list.day_clear": "Показать все даты"
 }

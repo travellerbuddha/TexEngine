@@ -147,5 +147,7 @@
  "dash.today": "Today",
  "dash.view": "Dashboard view",
  "dash.view.hotel": "This hotel",
- "dash.view.portfolio": "Portfolio"
+ "dash.view.portfolio": "Portfolio",
+ "dash.arrivals_open": "Today's arrivals: {count} — open the list",
+ "dash.departures_open": "Today's departures: {count} — open the list"
 }

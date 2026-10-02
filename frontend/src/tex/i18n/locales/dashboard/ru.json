@@ -175,5 +175,7 @@
  "dash.today": "Сегодня",
  "dash.view": "Вид панели",
  "dash.view.hotel": "Этот отель",
- "dash.view.portfolio": "Портфель"
+ "dash.view.portfolio": "Портфель",
+ "dash.arrivals_open": "Заезды сегодня: {count} — открыть список",
+ "dash.departures_open": "Выезды сегодня: {count} — открыть список"
 }

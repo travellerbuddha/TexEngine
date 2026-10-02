@@ -133,5 +133,7 @@
  "dash.today": "Bugün",
  "dash.view": "Pano görünümü",
  "dash.view.hotel": "Bu otel",
- "dash.view.portfolio": "Portföy"
+ "dash.view.portfolio": "Portföy",
+ "dash.arrivals_open": "Bugünkü girişler: {count} — listeyi aç",
+ "dash.departures_open": "Bugünkü çıkışlar: {count} — listeyi aç"
 }
