@@ -197,7 +197,8 @@ dead-lettering. Core reservation code never calls vendors directly.
   (job id `tex_pms_outbox`, deduplicated: a delivery still queued or running is not queued again; 300 s limit), so a
   worker of the default queue never runs it ahead of the 5-minute group. A deploy runs a worker for `long` next to
   the one for `short,default` (frappe_docker's `queue-long`; `deploy/tex-local` Procfile `worker_long`); System status
-  names a TEX queue no running worker listens on (`queue_unserved`), and the outbox's late messages stay watched.
+  names a TEX queue (`short`, `default`, `long`) no running worker listens on (`queue_unserved`), a delivery still waiting
+  in its queue past the job's limit (`job_waiting`, from the RQ job's own state), and the outbox's late messages.
 
 ## ADR-016 Payments: provider interface, no card data at rest
 **Decision.** `PaymentProvider` interface (`create_checkout`, `handle_callback`, `refund`,
@@ -989,8 +990,9 @@ of them stranded money a gateway had already captured:
 - *Two purposes.* `account_rule(acc, purpose)`:
   - `new` (start a charge, offer a method, save an enabled account) applies every rule;
   - `settle` (record a capture, re-verify, refund) skips only the certification rule. Settling
-    on an account that could not take new money is audited (`payment_account.settled_while_gated`), once per charge
-    and site day (Part 2K-4, LO-20: the re-verification job asks a Pending charge every 5 minutes);
+    on an account that could not take new money is audited (`payment_account.settled_while_gated`); a question about
+    a charge (a callback, a re-verification) once per charge and site day, a refund every time (Part 2K-4, LO-20: the
+    re-verification job asks a Pending charge every 5 minutes);
   - `keep` (save a disabled account) refuses only an unknown provider.
   A disabled account runs nothing, settling included: disabling is the hotel's stop switch.
   Patch p19 lists every gated account with its open charges; `accounts()` reports the reason.
@@ -2504,8 +2506,8 @@ was given access to a hotel; every payment outcome was recorded as coming from a
   that reached the hotel too (fix round 1 of Part 2I). The other events (grants, payments,
   bookings) keep the rule above. *Addendum (Part 2K-4, LO-28):* the hotel view leaves out the events of every record
   whose own trail would refuse its viewer, in its query (`admin._trail_caps`, one rule for both): payments without
-  `payment.view`, stays and bookings without `reservation.view`, a commercial policy without what its own API reads it
-  with, as well as cost. The
+  `payment.view`, stays and bookings without `reservation.view`, a guest's profile, loyalty ledger and abandoned
+  bookings without `crm.view`, a commercial policy without what its own API reads it with, as well as cost. The
   audit viewer's hotel filter includes the events that reached the hotel and returns `hotels`
   (the reached hotels the viewer may see) and `other_hotels` (a count), like the users screen
   shows a grant's foreign hotels only as a count.
@@ -9435,7 +9437,8 @@ the versions the roll superseded the state their contract's later publishes woul
 - The re-verify job (NEW-2) is first in the 5-minute group: a plain SELECT of askable Pending charges (enabled account,
   no live lease), 20 per tick by urgency — still holding rooms first (nearest deadline first), then holding none
   (`expires_at` NULL: oldest first), then past their deadline (latest first); an abandoned iyzico checkout stays Pending
-  for 2 hours and must not starve those that can still be saved; within an urgency the charge asked least recently
+  for 2 hours and must not starve those that can still be saved; a deadline before the next tick goes first (its last
+  chance: the expiry runs right after), the nearest first; within the other groups the charge asked least recently
   first, one never asked before any (`last_reverified_at`, written for each charge asked, p75; Part 2K-4, LO-22) — one
   charge per transaction, committed before the
   next gateway question (and between two questions of one charge when the first changed it). A request that committed a step (`_commit_step` counts it) is never run

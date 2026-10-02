@@ -1708,7 +1708,9 @@ C-05 (a documented limitation).
   worker for `short,default` and one for `long` (Procfile, `setup-local.sh`; frappe_docker has `queue-long`); System status
   names a TEX queue no running worker listens on (`queue_unserved`, six staff catalogs) (ADR-015 addendum) · unit
   `test_scheduler_queues` (three), `test_system_checks`, `test_scheduler_smoke` (the long worker stubbed: setup only),
-  `test_system_status`.
+  `test_system_status`. Review round 1: the delivery still waiting in its queue past its limit is `job_waiting` (the RQ
+  job's own state: no worker for `long`, or one busy with a long job); `short` is watched too (guest changes, refusal
+  audits); `queue_unserved` names any queue · unit `TestQueueProbe` (two), `test_a_queued_job_no_worker_takes_is_late`.
 - LO-10 **COMPLETE**: a claim reads only the first undelivered message of each reservation and connection that is due and
   free, oldest first, at most the round's cap (`NOT EXISTS` an earlier Pending or Failed one, index
   `tex_outbox_ref_order`, p74); order and the conditional claim are unchanged (ADR-015 addendum) ·
@@ -1718,7 +1720,8 @@ C-05 (a documented limitation).
   refuses the viewer: payments without `payment.view`, stays and bookings without `reservation.view`, a commercial policy
   without what its API reads it with, and cost as before (`admin._trail_caps`, one rule with `_require_trail`) ·
   `TestTrailByReference.test_a_hotels_trail_leaves_out_payments_stays_and_policies_its_viewer_may_not_read` (`limit=1`
-  still pages).
+  still pages). Review round 1: a guest's profile, loyalty ledger and abandoned bookings need `crm.view` (there and in the
+  record's own trail) · `test_a_hotels_trail_leaves_out_guest_records_without_crm_view`.
 - LO-39 **COMPLETE**: `fx_rates` names who entered a manual rate only to holders of `fx.manual_rate` or `settings.admin` at
   its hotel (a rate of every hotel: at one of theirs) and to platform administrators; the audit trail keeps it ·
   `TestManualBridge.test_who_entered_a_manual_rate_is_shown_only_to_who_manages_rates`.
@@ -1726,16 +1729,22 @@ C-05 (a documented limitation).
 - LO-22 **COMPLETE**: `TEX Payment Transaction.last_reverified_at` (p75, sync only) is written for each charge the job
   asks, whatever the answer; within an urgency the least recently asked goes first, one never asked before any (ADR-066
   addendum) · `TestPaymentsVerifiedByTheJob.test_more_candidates_than_a_tick_asks_are_each_asked_within_two_ticks`, the
-  urgency tests, `test_patches` p75.
+  urgency tests, `test_patches` p75. Review round 1: a charge whose deadline comes before the next tick is its own first
+  group, nearest first, however recently asked; the write is guarded like the question ·
+  `test_a_charge_whose_deadline_comes_before_the_next_tick_is_asked_first_however_recently_asked`.
 - LO-20 **COMPLETE** (verified first: the card was not re-verified): a gated account's `settled_while_gated` audit is
-  written once per charge and site day (ADR-042 addendum) ·
-  `TestGoLivePaymentsReview.test_a_gated_accounts_charge_the_job_keeps_asking_is_on_record_once_a_day`.
+  written once per charge and site day for a question about it (a callback, a re-verification: `provider_for(question=True)`);
+  a refund is written every time (review round 1) (ADR-042 addendum) ·
+  `TestGoLivePaymentsReview.test_a_gated_accounts_charge_the_job_keeps_asking_is_on_record_once_a_day`,
+  `test_a_refund_on_a_gated_account_is_on_record_however_often_its_charge_was_asked`.
 - LO-48 **COMPLETE**: stored counts are read as Decimal whole numbers (`money.whole_number`, as `loyalty.extra_units`): an
   old snapshot's extra quantity that is not whole is refused by name, never cut; the backfill leaves such a stay out and
   logs it ("TEX job extras backfill …"), the others still hold their units; the localised quote keeps a line's own text
-  when its nights are not whole · unit `test_whole_units` (five),
+  when its nights are not whole; a count of 18 digits or more is none (review round 1) · unit `test_whole_units` (six),
   `TestExtrasAdministration.test_a_stay_whose_old_snapshot_has_no_whole_quantity_is_left_out_of_the_backfill`.
-- **Not done:** the delivery job's own runs are not watched apart (the cron entry's runs, the queues' workers and the late
-  PMS messages are); other `long` jobs (Frappe backups, imports) can still delay the outbox on a one-`long`-worker deploy;
+- **Not done:** a delivery that a worker started but never finishes is not watched apart (RQ ends it at its 300 s limit;
+  the late PMS messages show it); other `long` jobs (Frappe backups, imports) can still delay the outbox on a
+  one-`long`-worker deploy (then `job_waiting` says so); a stay whose old quantity is not whole is logged on each daily
+  backfill until its check-out;
   a settle call without a charge is audited each time; staff re-verification does not write `last_reverified_at`; the
   GO_LIVE_READINESS worker setup is 2Z's docs refresh.
