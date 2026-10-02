@@ -34,6 +34,10 @@ READ_CAP = {"TEX Payment Provider Account": "payment.view", "TEX Payment Method 
             "TEX Integration Connection": "connect.admin",
             # markups and contract formulas are cost (G-11)
             "TEX Markup Rule": "price.view_cost", "TEX Pricing Policy": "price.view_cost"}
+# what a list shows of a record beyond its list-view fields (UX revision 2026-10): a promotion's
+# value, coupon trigger, markets, channels, rooms and dates, so the list says what each one covers
+LIST_EXTRA = {"TEX Promotion": ("trigger", "value_type", "value", "currency", "markets", "channels", "room_types",
+                                "sale_from", "sale_to", "stay_from", "stay_to")}
 PROTECTED = {"name", "owner", "creation", "modified", "modified_by", "docstatus", "tex_status", "active_from",
              "active_to", "revision_no", "revision_of", "times_redeemed", "doctype"}
 
@@ -103,6 +107,7 @@ def list_records(doctype: str, property: str | None = None, include_archived: in
 	                                                                        "revision_of", "active_from", "active_to")]
 	if meta.has_field("hotel_group"):
 		fields.append("hotel_group")
+	fields += [f for f in LIST_EXTRA.get(doctype, ()) if meta.has_field(f)]
 	rows = [api_fields(r, meta) for r in frappe.get_all(doctype, filters=filters, fields=list(dict.fromkeys(fields)),
 	                                                     order_by="modified desc", limit=500)]
 	allowed = scope.permitted_properties()
@@ -366,3 +371,74 @@ def add_manual_rate(base_currency: str, quote_currency: str, rate: str, rate_dat
 	      new={"pair": f"{doc.base_currency}{doc.quote_currency}", "rate": str(rate), "date": rate_date,
 	           "property": property}, reason=reason or None)
 	return {"name": doc.name}
+
+
+# ─── a promotion's effect on a price, before it is activated (UX revision 2026-10) ──────────
+
+
+@frappe.whitelist(methods=["POST"])
+def promotion_check(name: str, contract: str, room_type: str, board: str, check_in: str, check_out: str,
+                    adults: int = 2, children=None, rate_plan: str | None = None, market: str | None = None,
+                    channel: str = "DIRECT_WEB", sale_at: str | None = None):
+	"""What a promotion does to one stay, a draft one too (drafts are priced nowhere until they are
+	activated): the engine prices the stay on the contract's version on sale (else its latest
+	version) twice — without any revision of this promotion, and with this record as it is saved
+	now in place of its live revision — and answers both totals and this promotion's outcome
+	(applied, or why not, as the engine says it). Every other promotion, markup, FX and tax is the
+	one in force at ``sale_at`` (default now). Read-only: nothing is written or audited."""
+	from dataclasses import replace
+
+	from frappe.utils import get_datetime, getdate, now_datetime
+
+	from kamra.tex.api._util import as_int
+	from kamra.tex.commercial import context as ctxmod
+	from kamra.tex.commercial import contracts as svc
+	from kamra.tex.pricing import engine
+	from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
+
+	promo = frappe.get_doc("TEX Promotion", name)
+	c = frappe.db.get_value("TEX Contract", contract, ["name", "property"], as_dict=True)
+	if not c:
+		frappe.throw(_("{0} {1} not found").format(_("TEX Contract"), contract), frappe.DoesNotExistError)
+	_check("TEX Promotion", _prop_of("TEX Promotion", promo), write=False)
+	# the explanation names contract amounts: cost (G-11), as preview_price
+	scope.require("price.view_cost", c.property)
+	if promo.property and promo.property != c.property:
+		frappe.throw(_("This promotion belongs to another hotel."))
+	at = get_datetime(sale_at) if sale_at else now_datetime()
+	live = svc.active_version_header(contract, now_datetime())
+	try:
+		if live:
+			terms = svc.load_terms(live.version_id)
+		else:
+			latest = frappe.db.get_value("TEX Contract Version", {"contract": contract}, "name", order_by="version_no desc")
+			if not latest:
+				frappe.throw(_("This contract has no version yet."))
+			terms = svc.build_terms(frappe.get_doc("TEX Contract Version", latest), at=at)
+	except frappe.ValidationError as e:
+		return {"sellable": False, "reasons": [{"code": "BUILD", "message": str(e)}]}
+	kids = tuple(ChildSpec(age=as_int(a, 0, lo=0, hi=17)) for a in (parse(children, []) or []))
+	codes = (promo.code,) if promo.trigger == "Code" and promo.code else ()
+	req = StayRequest(property=c.property, room_type=room_type, board=board, rate_plan=rate_plan or None,
+	                  check_in=getdate(check_in), check_out=getdate(check_out), adults=as_int(adults, 2, lo=1, hi=12),
+	                  children=kids, sale_at=at, market=(market or terms.market).upper(), channel=channel,
+	                  sell_currency=terms.currency.upper(), promo_codes=codes)
+	root = promo.revision_of or promo.name
+	try:
+		ctx = ctxmod.build_context(terms, req)
+		others = tuple(p for p in ctx.promotions if p.promo_id != root)
+		without = engine.price_stay(replace(ctx, promotions=others), req)
+		with_ = engine.price_stay(replace(ctx, promotions=(*others, ctxmod.promotion_from_row(promo))), req)
+	except (Unsellable, PricingError) as e:
+		return {"sellable": False, "reasons": [{"code": getattr(e, "code", "PRICING_ERROR"), "message": str(e)}]}
+	mine = next((p.to_dict() for p in with_.promotions if p.promo_id == root), None)
+	return {
+		"sellable": bool(without.sellable and with_.sellable),
+		"reasons": with_.reasons or without.reasons,
+		"currency": with_.currency,
+		"version": terms.version_id,
+		"without": {k: v for k, v in without.to_dict(internal=True)["totals"].items() if k in ("accommodation", "discounts", "total")},
+		"with": {k: v for k, v in with_.to_dict(internal=True)["totals"].items() if k in ("accommodation", "discounts", "total")},
+		"outcome": mine,
+		"applied_others": [p.to_dict() for p in with_.promotions if p.applied and p.promo_id != root],
+	}
