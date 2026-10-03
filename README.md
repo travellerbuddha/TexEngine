@@ -160,6 +160,8 @@ npx vite build --outDir ../../tex-build/frontend
 npx vite build -c vite.widget.config.ts --outDir ../../tex-build/widget
 ```
 
+Ön yüz kaynağını değiştiren bir PR, `frontend/` içinde `npm ci && npm run build` çalıştırıp `kamra/public/frontend` ve `kamra/public/tex` altındaki derlenmiş dosyaları da commit eder: CI, commit edilen dosyaların kaynağın taze bir derlemesiyle aynı olduğunu denetler (ADR-073).
+
 Backend testleri kurulu bir Frappe bench'in Python ortamında çalıştırılır. Bench klasöründen:
 
 ```bash
