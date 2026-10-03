@@ -34,12 +34,17 @@ each until it is made readable or given a reviewed ``UNREADABLE`` entry with its
   operator (a filter from a parameter or a helper, a comprehension);
 * a ``frappe.qb.DocType(...)`` table whose doctype it cannot read, compared with ``<``/``<=``/``>``/``>=``.
 
+A call whose doctype is computed at run time (a parameter, a helper's return value) is listed too when its
+filters compare a field that is a nullable date in some DocType of the repository, with no ``is`` on it
+(LO-46); ``test_resolution_is_not_silently_empty`` checks that the scanner does resolve the known calls.
+Filters are read where Frappe takes them: ``filters=``/``or_filters=``, or positionally as
+``execute(fields, filters, or_filters)`` (the first two swapped when the second argument is filters-shaped).
+A query-builder null check exempts its column in its own statement only.
+
 What it does not cover (it cannot tell, so it says nothing):
 * raw SQL (``frappe.db.sql``): plain SQL semantics, NULL matches no comparison;
 * doctypes whose JSON is not in this repository (Frappe core: Error Log, Email Queue, …) and
   custom fields added to them at install;
-* a call whose doctype is computed at run time (a parameter, a helper's return value);
-  ``test_resolution_is_not_silently_empty`` checks that the scanner does resolve the known calls;
 * other APIs (``frappe.get_doc(dt, filters)``, reports), query-builder columns read by subscript
   (``T["field"]``) or through ``Field``/``Criterion`` objects, and tables passed in as arguments.
 """
@@ -365,18 +370,26 @@ class Scanner(ast.NodeVisitor):
 			self._call(api, node)
 		self.generic_visit(node)
 
+	def _groups(self, api: str, call: ast.Call) -> list:
+		"""The filters and or_filters of a call, as Frappe takes them: a list API's execute(fields, filters,
+		or_filters, …), the first two swapped when the second argument is filters-shaped (LO-46: the third
+		positional was not read); the others (get_value, count, …) take filters second."""
+		if api not in LIST_APIS:
+			return [_arg(call, 1, "filters", "dn", "name")]
+		filters = _arg(call, 999, "filters")
+		if filters is None and len(call.args) > 1:
+			if self._filters_shaped(call.args[1]):
+				filters = call.args[1]                 # get_all(dt, {…}) / get_all(dt, [[…]]) reads it as filters
+			elif len(call.args) > 2:
+				filters = call.args[2]                 # get_all(dt, fields, filters)
+		return [filters, _arg(call, 3, "or_filters")]
+
 	def _call(self, api: str, call: ast.Call):
 		doctype = self.scope.string(_arg(call, 0, "doctype", "dt", "table"))
+		groups = self._groups(api, call)
 		if doctype is None:
+			self._computed_doctype(api, call, groups)
 			return
-		if api in LIST_APIS:
-			filters = _arg(call, 999, "filters")
-			if filters is None and len(call.args) > 1 and self._filters_shaped(call.args[1]):
-				filters = call.args[1]                 # get_all(dt, {…}) / get_all(dt, [[…]]) reads it as filters
-			groups = [filters, _arg(call, 999, "or_filters")]
-		else:
-			filters = _arg(call, 1, "filters", "dn", "name")
-			groups = [filters]
 		rows: list[Cond] = []
 		for group in groups:
 			if group is None:
@@ -396,6 +409,29 @@ class Scanner(ast.NodeVisitor):
 			dt = c.doctype or doctype
 			if c.op in COMPARISONS and nullable_date(self.fields, dt, c.field) and (dt, c.field) not in explicit:
 				self.findings.append(Finding(self.path, self.function, call.lineno, api, dt, c.field, c.op))
+
+	def _computed_doctype(self, api: str, call: ast.Call, groups: list):
+		"""A doctype computed at run time (a parameter, a helper's return value), LO-46: it was left out
+		silently. The call is listed when its filters compare a field that is a nullable date in some
+		DocType of the repository (a ``[doctype, field, …]`` row: in that one) with no ``is`` on it, or when
+		they cannot be read while what builds them holds a comparison operator."""
+		what = f"{api}({ast.unparse(_arg(call, 0, 'doctype', 'dt', 'table'))})"
+		for group in groups:
+			if group is None:
+				continue
+			rows = conditions(group, self.scope)
+			if rows is None:
+				if self._holds_comparison(group):
+					self.unresolved.append(Unread(self.path, self.function, call.lineno, what))
+					return
+				continue
+			explicit = {c.field for c in rows if c.op == "is"}
+			for c in rows:
+				nullable = nullable_date(self.fields, c.doctype, c.field) if c.doctype else \
+					any(nullable_date(self.fields, dt, c.field) for dt in self.fields)
+				if c.op in COMPARISONS and nullable and c.field not in explicit:
+					self.unresolved.append(Unread(self.path, self.function, call.lineno, what))
+					return
 
 	def _holds_comparison(self, node, seen: frozenset = frozenset()) -> bool:
 		for sub in ast.walk(node):
@@ -417,10 +453,16 @@ class Scanner(ast.NodeVisitor):
 		return False
 
 	def _qb(self, fn):
-		"""Query-builder comparisons ``T.field <op> x`` on a ``frappe.qb.DocType`` table."""
+		"""Query-builder comparisons ``T.field <op> x`` on a ``frappe.qb.DocType`` table. A null check
+		exempts the column in its own statement only (LO-46: it exempted the column in the whole function,
+		another query's comparison included)."""
+		for own in _statements(fn):
+			self._qb_statement(own)
+
+	def _qb_statement(self, own: list):
 		checked = set()
 		compares = []
-		for node in ast.walk(fn):
+		for node in own:
 			if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
 					and node.func.attr in QB_NULL_CHECKS and isinstance(node.func.value, ast.Attribute) \
 					and isinstance(node.func.value.value, ast.Name):
@@ -448,6 +490,20 @@ class Scanner(ast.NodeVisitor):
 				if doctype and nullable_date(self.fields, doctype, side.attr) and key not in checked:
 					self.findings.append(Finding(self.path, self.function, node.lineno, "frappe.qb",
 					                             doctype, side.attr, QB_OPS[type(node.ops[0])]))
+
+
+def _statements(fn):
+	"""Each statement of ``fn``, nested ones too, as the expression nodes that are its own (not those of the
+	statements it holds)."""
+	for stmt in ast.walk(fn):
+		if not isinstance(stmt, ast.stmt) or stmt is fn:
+			continue
+		own, stack = [], [c for c in ast.iter_child_nodes(stmt) if not isinstance(c, ast.stmt)]
+		while stack:
+			node = stack.pop()
+			own.append(node)
+			stack.extend(c for c in ast.iter_child_nodes(node) if not isinstance(c, ast.stmt))
+		yield own
 
 
 def scan() -> tuple[list[Finding], int, list[Unread]]:
@@ -542,6 +598,37 @@ def qb_unknown(doctype, now):
 		self.assertEqual(sorted((u.function, u.what) for u in scanner.unresolved),
 		                 [("qb_unknown", "frappe.qb.DocType(doctype)"), ("unreadable", "frappe.get_all(DT)")])
 
+
+	def test_the_scanner_reads_what_it_skipped(self):
+		# LO-46: filters as the third positional argument (Frappe's get_all(dt, fields, filters, or_filters)), a
+		# column's null check in another statement of the function (it exempted the column function-wide), and a
+		# doctype the call computes (it was left out silently)
+		src = '''
+import frappe
+DT = "TEX Contract Version"
+def third(now):
+	return frappe.get_all(DT, ["name"], {"active_to": ("<=", now)})
+def third_or(now):
+	return frappe.get_all(DT, ["name"], {"status": "Published"}, [["active_to", "<", now]])
+def apart(now):
+	v = frappe.qb.DocType("TEX Contract Version")
+	open_ended = frappe.qb.from_(v).select(v.name).where(v.active_to.isnull())
+	return open_ended, frappe.qb.from_(v).select(v.name).where(v.active_to < now)
+def together(now):
+	v = frappe.qb.DocType("TEX Contract Version")
+	return frappe.qb.from_(v).select(v.name).where(v.active_to.isnull() | (v.active_to < now))
+def computed(doctype, now):
+	return frappe.get_all(doctype, filters={"active_to": ("<", now)})
+def computed_plain(doctype, now):
+	return frappe.get_all(doctype, filters={"status": "Published", "creation": ("<", now)})
+'''
+		tree = ast.parse(src)
+		scanner = Scanner("probe.py", tree, doctype_fields())
+		scanner.visit(tree)
+		self.assertEqual(sorted((f.function, f.field, f.op) for f in scanner.findings),
+		                 [("apart", "active_to", "<"), ("third", "active_to", "<="), ("third_or", "active_to", "<")])
+		self.assertEqual(sorted((u.function, u.what) for u in scanner.unresolved),
+		                 [("computed", "frappe.get_all(doctype)")])
 
 if __name__ == "__main__":
 	unittest.main()
