@@ -10,7 +10,7 @@ base branch, never rebase or force-push a shared branch.
 
 Recover state in this order (CLAUDE.md): `CLAUDE.md` → this file → `IMPLEMENTATION_STATUS.md` (§6 sections, newest
 last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-077) → `PRODUCT_SPEC.md` → `git log` and
-the descriptions of PRs #3–#32 and 2N-1's (each has its items, fail-first evidence, review rounds and "Kalanlar").
+the descriptions of PRs #3–#33 (each has its items, fail-first evidence, review rounds and "Kalanlar").
 
 ## 1. Where things stand
 
@@ -48,7 +48,7 @@ the descriptions of PRs #3–#32 and 2N-1's (each has its items, fail-first evid
 | 2Z-F Frappe v16.36.1 | #30 | Frappe v16.36.1 + payments `version-16`, pip-audit list 61 → 29, the sign-in contract of an expired password (§6ZF, ADR-074) |
 | 2L LOW leftovers | #31 | G-99 (the payload digest only with cost, also in Desk / REST and the trail), overlays hidden until a pass after they open, D-14 recorded (§6L, ADR-075) |
 | 2M owner decisions | #32 | C-12 ŞEKER is SEKER, C-02 a price set by hand only with `price.override`, C-03 SMS / WhatsApp-only guests listed with the phone, C-01 a no-show keeps the points (§6M, ADR-076) |
-| 2N-1 members-only prices (call centre) | 2N-1 | C-04: `TEX Loyalty Member`, who a member is, staff join / leave, members-only promotions live, the Call Center prices the caller as a member, a member's price books for a member only (§6N1, ADR-077) |
+| 2N-1 members-only prices (call centre) | #33 | C-04: `TEX Loyalty Member`, who a member is, staff join / leave, members-only promotions live, the Call Center prices the caller as a member, a member's price books for a member only (§6N1, ADR-077) |
 
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
@@ -69,8 +69,8 @@ Nothing planned remains. In order of likely need:
 | 3 | PMS adapters, SMS/WhatsApp providers, inbound PMS events (G-69r) | **D-15**: which PMS runs each go-live hotel? | C-07 |
 | 4 | O-6 deadlines in hotel-local time for UTC+7 hotels; LO-37 (the `fx_bridged` WARN of a MANUAL-mode pair) | D-13 answered **no** for wave 1; ask again when Cam Ranh / Phuket are planned | C-05, LO-37 |
 | 5 | ~~Points policy for No Show~~ **answered** (PR #32, C-01): a no-show keeps the points the stay was paid with; who charges a no-show fee stays with D-15 | none | §6M, ADR-076 |
-| 6 | Smaller owner questions with defaults: C-02, C-03, C-12 **done** (PR #32); C-04 **answered**, its call-centre half done (2N-1); C-08 … C-11, C-13 … C-15 open (C-16 accepted) | owner | `HANDOFF_LEFTOVERS.md` §3 |
-| 6a | **2N-2, next batch** (C-04's web half, after 2N-1 is merged): sign-in and join on the booking site by a one-time e-mail link, a member's session, the "Member price" teaser for a guest not signed in, a guest refusal code for a member's price booked by a non-member, the booking app's six languages | none (answered) | §6N1 "Not done", ADR-077 |
+| 6 | Smaller owner questions with defaults: C-02, C-03, C-12 **done** (PR #32); C-04 **answered**, its call-centre half done (2N-1, PR #33); C-08 … C-11, C-13 … C-15 open (C-16 accepted) | owner | `HANDOFF_LEFTOVERS.md` §3 |
+| 6a | **2N-2, next batch** (C-04's web half, after PR #33 is merged): sign-in and join on the booking site by a one-time e-mail link, a member's session, the "Member price" teaser for a guest not signed in, a guest refusal code for a member's price booked by a non-member, the booking app's six languages | none (answered) | §6N1 "Not done", ADR-077 |
 | 7 | CLP and ISK: the server keeps them in 2 decimals (`money.MINOR_UNITS`), ISO 4217 says 0; the screens now follow the server (2K-6) | owner: a money-engine rounding change | §6K6 "Not done" |
 | 8 | ~~G-99: `get_contract` returns `payload_hash` to `price.view` callers~~ **done** (PR #31) | none | §6L, ADR-075 |
 | 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays keep their content hidden until a pass after they open | none | §6L, ADR-075 |
