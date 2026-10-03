@@ -60,6 +60,18 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 	return res
 
 
+def _without_digest(answer: dict, prop: str) -> dict:
+	"""A quote answer (``create_quote``, or ``create_quotes``' rooms) for who does not see cost: without the
+	contract payload's digest, which confirms a guess of its rates offline (G-99, ADR-075)."""
+	if scope.has_capability("price.view_cost", prop):
+		return answer
+	for a in [answer, *(answer.get("rooms") or [])]:
+		q = a.get("quote") if isinstance(a, dict) else None
+		if isinstance(q, dict) and isinstance(q.get("contract"), dict):
+			q["contract"].pop("payload_hash", None)
+	return answer
+
+
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def quote(offer_key: str, extras=None, promo_codes=None):
@@ -67,7 +79,8 @@ def quote(offer_key: str, extras=None, promo_codes=None):
 	scope.require("reservation.create", offer["property"])
 	# the signed offer names its channel: a Booking Engine or OTA offer is not the agent's to sell
 	scope.require_channel(offer.get("channel"), offer["property"])
-	return quoting.create_quote(offer_key, extras=parse(extras, []), promo_codes=parse(promo_codes, None))
+	return _without_digest(quoting.create_quote(offer_key, extras=parse(extras, []), promo_codes=parse(promo_codes, None)),
+	                       offer["property"])
 
 
 @frappe.whitelist(methods=["POST"])
@@ -81,7 +94,8 @@ def quote_rooms(rooms, promo_codes=None):
 		scope.require("reservation.create", offer["property"])
 		# a Booking Engine or OTA offer is not the agent's to sell (ADR-050)
 		scope.require_channel(offer.get("channel"), offer["property"])
-	return quoting.create_quotes(items, promo_codes=parse(promo_codes, None))
+	# the rooms of one search: one hotel (create_quotes refuses another)
+	return _without_digest(quoting.create_quotes(items, promo_codes=parse(promo_codes, None)), offer["property"])
 
 
 @frappe.whitelist(methods=["POST"])

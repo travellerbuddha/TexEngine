@@ -104,9 +104,11 @@ def get_contract(name: str):
 	                          fields=["name", "version_no", "status", "effective_from", "active_to", "published_at",
 	                                  "published_by", "change_note", "payload_hash", "based_on"],
 	                          order_by="version_no desc")
-	if not _sees_cost(c.property):
+	if not scope.has_capability("price.view_cost", c.property):
+		# the frozen payload's digest confirms a guess of its rates offline (G-99): price.view_cost alone, as
+		# strip_internal and Desk / REST (an editor without cost is not shown inherited rules either)
 		for v in versions:
-			v.pop("payload_hash")   # the frozen payload's digest: confirms a guess of its cost offline (G-99)
+			v.pop("payload_hash")
 	can_publish = scope.has_capability("contract.publish", c.property)
 	published = any(v.status != "Draft" for v in versions)
 	now = now_datetime()
@@ -493,9 +495,13 @@ def publish_version(name: str, effective_from: str | None = None, change_note: s
 	``price.view_cost``, nothing that depends on a pricing policy's formulas (S16 re-review 4); without
 	``contract.edit`` either, None (S16 re-review 5). A refused publish names to a caller without
 	``price.view_cost`` only the errors its own live check shows (S16 re-review 5). Security fixes,
-	for every caller."""
-	return svc.publish(name, effective_from=effective_from or None, change_note=text(change_note, 500),
-	                   workspace=_workspace(workspace))
+	for every caller. The published payload's digest only with ``price.view_cost`` (G-99, ADR-075)."""
+	out = svc.publish(name, effective_from=effective_from or None, change_note=text(change_note, 500),
+	                  workspace=_workspace(workspace))
+	if isinstance(out, dict) and not scope.has_capability("price.view_cost",
+	                                                      scope.property_of("TEX Contract Version", name)):
+		out.pop("payload_hash", None)
+	return out
 
 
 @frappe.whitelist(methods=["POST"])

@@ -903,8 +903,9 @@ def load_terms(version_name: str, *, expected_hash: str | None = None) -> Contra
 		terms = serialize.terms_from_payload(payload, row.payload_hash)
 		_TERMS[version_name] = terms
 	if expected_hash and terms.payload_hash != expected_hash:
-		detail = _("Contract version {0} is not the terms it was sold on: its payload hash is {1}…, the sale recorded "
-		           "{2}….").format(version_name, terms.payload_hash[:12], expected_hash[:12])
+		# no digest in the text: it confirms a guess of the rates offline (G-99); the audit records both
+		detail = _("Contract version {0} is not the terms it was sold on: its payload changed after the sale.").format(
+			version_name)
 		frappe.throw(unavailable if guest else detail,
 		             PayloadMismatch(version=version_name, found_hash=terms.payload_hash, detail=detail))
 	return terms

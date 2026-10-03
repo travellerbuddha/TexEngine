@@ -743,7 +743,7 @@ def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 		q["promotions"] = [pr for pr in q["promotions"] if not _cost_stage(pr, cost_stage)]
 	q.pop("explanation", None)
 	if isinstance(q.get("contract"), dict):
-		q["contract"].pop("payload_hash", None)   # the frozen payload's digest: confirms a guess of its cost (G-99)
+		q["contract"].pop("payload_hash", None)   # the frozen payload's digest: confirms a guess of its rates (G-99)
 	q.pop("fx", None)
 	q.pop("fx_rates", None)                       # rates, providers and FX margins (G-56)
 	q.pop("original_fx_rates", None)

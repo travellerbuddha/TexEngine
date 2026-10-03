@@ -71,8 +71,8 @@ INTERNAL = {
 
 
 P40 = "p40_crm_privacy_review"
-# G-99: the payload's digest (sha256 of the frozen payload, cost and markups included) lets a viewer without
-# cost confirm a guess of the hidden values offline: withheld as the payload is
+# G-99: the payload's digest (sha256 of the frozen payload: rates, offers, inherited policy rules) lets a viewer
+# without cost confirm a guess of the hidden values offline: withheld as the payload is
 G99_HASHES = {"Reservation": "tex_payload_hash", "TEX Quote": "payload_hash"}
 
 
@@ -808,12 +808,22 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 			for label, call in {
 				"frappe.client.get": lambda: frappe.client.get(doctype, name),
 				"GET /api/resource (v1)": lambda: frappe.api.v1.read_doc(doctype, name),
+				"GET /api/v2/document": lambda: frappe.api.v2.read_doc(doctype, name),
+				"Desk form": lambda: self.desk_form(doctype, name)[0],
+				"get_value": lambda: frappe.client.get_value(doctype, json.dumps(["name", field]), name),
 				"get_list(*)": lambda: frappe.client.get_list(doctype, fields=["*"], filters={"name": name}),
 			}.items():
 				out = self.refused_or(call)
 				for r in out if isinstance(out, list) else [out]:
 					d = r.as_dict() if isinstance(r, BaseDocument) else dict(r)
 					self.assertIn(d.get(field), (None, ""), f"{doctype} {label}")
+		# the guess itself: no filter on the digest (Frappe refuses a filter on a withheld field)
+		as_user("Administrator")
+		digest = frappe.db.get_value("Reservation", self.res, "tex_payload_hash")
+		as_user(self.clerk)
+		with self.assertRaises(frappe.PermissionError):
+			frappe.client.get_list("Reservation", fields=["name"], filters={"tex_payload_hash": digest})
+		frappe.clear_messages()
 		as_user("Administrator")
 		for doctype, field in G99_HASHES.items():                   # withheld as the payload is (permlevel 1)
 			self.assertIn(field, internals.INTERNAL_FIELDS[doctype], doctype)
@@ -831,16 +841,67 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 		self.assertEqual(row[1:3], ["*****", "*****"])
 
 	def test_g99_the_tex_api_names_the_payload_hash_only_to_who_sees_cost(self):
-		contract = frappe.db.get_value("Reservation", self.res, "tex_contract")
 		as_user(self.clerk)
 		self.assertTrue(scope.has_capability("price.view", fx.PROPERTY))
 		self.assertNotIn("payload_hash", crs_api.reservation(self.res)["pricing"]["contract"])
+		as_user(self.revenue)
+		self.assertTrue(crs_api.reservation(self.res)["pricing"]["contract"]["payload_hash"])
+
+	def test_g99_a_contract_names_its_versions_digests_only_to_who_sees_cost(self):
+		contract = frappe.db.get_value("Reservation", self.res, "tex_contract")
+		as_user(self.clerk)
 		versions = contracts_api.get_contract(contract)["versions"]
 		self.assertTrue(versions)
 		self.assertEqual([v.name for v in versions if "payload_hash" in v], [])
 		as_user(self.revenue)
-		self.assertTrue(crs_api.reservation(self.res)["pricing"]["contract"]["payload_hash"])
 		self.assertTrue(any(v.get("payload_hash") for v in contracts_api.get_contract(contract)["versions"]))
+
+	def test_g99_the_trail_and_a_refusal_name_no_digest_without_cost(self):
+		"""Review round 1 (2L): a refused reprice records both digests in a hotel-level event, and its message
+		named their first 12 hex digits."""
+		from kamra.tex.commercial import contracts as contracts_svc
+		from kamra.tex.security.audit import audit
+
+		digest = frappe.db.get_value("Reservation", self.res, "tex_payload_hash")
+		version = frappe.db.get_value("Reservation", self.res, "tex_contract_version")
+		audit("reservation.reprice_refused", reference_doctype="Reservation", reference_name=self.res,
+		      property=fx.PROPERTY, new={"use": "simulate", "version": version, "recorded_hash": digest,
+		                                 "found_hash": digest})
+		trail = lambda: admin_api.audit_log(reference_doctype="Reservation", reference_name=self.res,  # noqa: E731
+		                                    action="reservation.reprice_refused", limit=10)
+		as_user(self.clerk)
+		[row] = trail()
+		self.assertEqual((row["new_value"]["recorded_hash"], row["new_value"]["found_hash"]), ("*****", "*****"))
+		self.assertNotIn(digest, json.dumps(row, default=str))
+		as_user(self.revenue)
+		[row] = trail()
+		self.assertEqual(row["new_value"]["found_hash"], digest)                 # who sees cost reads it
+		with self.assertRaises(contracts_svc.PayloadMismatch) as cm:
+			contracts_svc.load_terms(version, expected_hash="0" * 64)
+		self.assertIn(version, str(cm.exception))                               # the version, as before
+		self.assertNotIn(digest[:12], str(cm.exception))
+		self.assertNotIn("0" * 12, str(cm.exception))
+
+	def test_g99_staff_quotes_simulations_and_proposals_carry_no_digest_without_cost(self):
+		"""Review round 1 (2L): the CRS quote answers, a simulation and a proposed change named the digest too."""
+		def answers() -> dict:
+			found = crs_api.search(check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+			                       rooms=[{"adults": 2, "children": []}], market="DE", channel="CALL_CENTER",
+			                       properties=[fx.PROPERTY])
+			offer = found["properties"][0]["offers"][0]["rooms"][0]["offer_key"]
+			return {"quote": crs_api.quote(offer_key=offer), "quote_rooms": crs_api.quote_rooms(rooms=[{"offer_key": offer}]),
+			        "simulate": crs_api.simulate(self.res, sale_at=str(now_datetime())),
+			        "propose": crs_api.propose_modification(self.res, {"check_out": str(fx.d(6, 14))})}
+
+		digest = frappe.db.get_value("Reservation", self.res, "tex_payload_hash")
+		as_user(self.clerk)
+		self.assertFalse(scope.has_capability("price.view_cost", fx.PROPERTY))
+		leaks = [label for label, out in answers().items()
+		         if "payload_hash" in json.dumps(out, default=str) or digest in json.dumps(out, default=str)]
+		self.assertEqual(leaks, [])
+		as_user(self.revenue)
+		kept = [label for label, out in answers().items() if "payload_hash" in json.dumps(out, default=str)]
+		self.assertEqual(kept, ["quote", "quote_rooms", "simulate", "propose"])   # who sees cost keeps it
 
 
 # ─── withheld fields on customised role permissions (review follow-up) ───
