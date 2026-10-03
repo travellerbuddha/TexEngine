@@ -9,14 +9,34 @@ Reported for the owner (audited once, G-76): a promotion changed by this run who
 draft or live promotion of the same hotel scope (a different record) already has,
 ``promotion.code_clash``: the save refuses such a pair, so one of them needs another code. A second run
 changes nothing and reports nothing.
+
+The key is O-31's, as this patch was written (``o31_key``): C-12 (2026-10-03) later made Ş, Ğ, Ü, Ö, Ç
+S, G, U, O, C in ``promotions.code_key``. A stored code is keyed again on every read (the engine, the
+contract's offers, a promotion's save and its clash check), so a code this patch stored as KIŞ matches KIS.
 """
+
+import unicodedata
 
 import frappe
 
-from kamra.tex.pricing.promotions import code_key
 from kamra.tex.security.audit import audit, recorded
 
 OPEN = ("Draft", "Active")
+
+
+def o31_key(code: str | None) -> str | None:
+	"""``promotions.code_key`` as O-31 made it: the Turkish dotted and dotless i as I, upper-cased, a
+	combining dot above an I dropped, to a fixed point; Ş, Ğ, Ü, Ö, Ç kept (before C-12)."""
+	if code is None:
+		return None
+	key = unicodedata.normalize("NFC", str(code).strip())
+	for _pass in range(len(key) + 2):
+		step = unicodedata.normalize(
+			"NFC", key.replace("\u0130", "I").replace("\u0131", "I").upper().replace("I\u0307", "I"))
+		if step == key:
+			break
+		key = step
+	return key or None
 
 
 def execute():
@@ -24,7 +44,7 @@ def execute():
 	                      fields=["name", "code", "tex_status", "property", "revision_of"], order_by="name asc")
 	changed = []
 	for r in rows:
-		key = code_key(r.code)
+		key = o31_key(r.code)
 		if r.code and key and key != r.code:
 			frappe.db.set_value("TEX Promotion", r.name, "code", key, update_modified=False)
 			r.code = key
