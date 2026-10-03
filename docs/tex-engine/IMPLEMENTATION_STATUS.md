@@ -1847,9 +1847,10 @@ one PR. Each card was verified in code first.
   text, as before (ADR-068 addendum) · unit `test_promotions_extras`; `test_main_parity` unchanged (8/8).
 - LO-42(b) **COMPLETE** (was not re-verified; each nit verified in code; ADR-068 addendum):
   - archiving a scheduled markup revision that hands a window back to the revision it replaced runs the tie check
-    (the reopened markup's window grows) and is refused naming the revision, the markup it would reopen and the one
-    it would tie with; archive takes activation's serialising lock · integration `test_commercial_flows.TestMarkupTies`
-    (red: the archive went through);
+    on that window only (from the reopened markup's old end to its new one; review S1: not its whole window,
+    open-ended) and is refused naming the revision, the markup it would reopen and the one it would tie with;
+    archive takes activation's serialising lock · integration `test_commercial_flows.TestMarkupTies` (red: the
+    archive went through; review S1: red, a markup scheduled after the new end was taken for a tie);
   - the tie check's locking read matches the hotel as is (blank: NULL or '') and reads in no order, so it is a range
     of `tex_markup_prop_status` (property, tex_status) and locks that hotel's markups only (`tie_candidates`) · EXPLAIN
     test, for a hotel and for none (red: PRIMARY, no possible key);

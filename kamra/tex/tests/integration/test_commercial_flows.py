@@ -2087,6 +2087,25 @@ class TestMarkupTies(TexTestCase):
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", first, "tex_status"), "Superseded")
 
+	def test_archiving_checks_only_the_window_it_hands_back(self):
+		"""2K-6 review S1: the archive's check covers the window the reopened revision gets back, from its old end to
+		its new one, not its whole window open-ended: a markup scheduled after that new end ties with nothing."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		t2 = add_to_date(now_datetime(), days=2)
+		t3 = add_to_date(now_datetime(), days=4)
+		second = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.activate("TEX Markup Rule", second, at=str(t2))        # the first ends at t2
+		third = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": third, "priority": 6})
+		policy_api.activate("TEX Markup Rule", third, at=str(t3))         # the second ends at t3
+		other = self.markup(value=9)
+		policy_api.activate("TEX Markup Rule", other, at=str(add_to_date(t3, days=1)))   # only the third is live then
+		policy_api.archive("TEX Markup Rule", second, reason="2K-6 review S1")   # the first is back until t3 only
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", second, "tex_status"), "Archived")
+		back = frappe.db.get_value("TEX Markup Rule", first, ["tex_status", "active_to"], as_dict=True)
+		self.assertEqual((back.tex_status, back.active_to), ("Superseded", t3))
+
 
 	def test_a_scheduled_markup_ties_inside_a_live_markups_window_only(self):
 		"""LO-42 (b3): the check compares the new markup's own start (``at``), not now: scheduled inside a live

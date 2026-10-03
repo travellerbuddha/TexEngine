@@ -9520,8 +9520,8 @@ the versions the roll superseded the state their contract's later publishes woul
 - New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.
 - *Addendum (Part 2K-6, LO-41, LO-42b).* The group rule's "lowest id" compares a `PRM-` id by its number (PRM-99999
   before PRM-100000); a contract offer's code stays text order. Markup ties: archiving a scheduled revision that hands
-  its window back is a transition like activation (same serialising lock, tie check on the reopened markup's grown
-  window, refused by name); the check's locking read matches the hotel as stored (blank is NULL or '') with no ORDER BY,
+  its window back is a transition like activation (same serialising lock, tie check on the window the reopened
+  markup gets back, from its old end to its new one, refused by name); the check's locking read matches the hotel as stored (blank is NULL or '') with no ORDER BY,
   so it locks one hotel's range of `tex_markup_prop_status`; the contract page's publish check has its own per-user
   budget (`HEAVY_LIMITS["publish"]`), chosen by `purpose="publish"` only when no unsaved data is sent. ENGINE_VERSION,
   schema unchanged.
