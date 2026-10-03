@@ -198,6 +198,8 @@ jobs:
           assert os.path.exists(frappe.get_app_path("kamra","www","kamra.py")), "SPA boot page missing"
           rules = str(frappe.get_hooks("website_route_rules"))
           assert "/kamra/<path:app_path>" in rules, "/kamra route rule missing"
+          # Frappe's OAuth provider registers no client for a guest on a TEX site (ADR-073)
+          assert not frappe.get_single("OAuth Settings").enable_dynamic_client_registration, "OAuth dynamic client registration is on"
           print("FRESH-INSTALL CHECKS PASSED")
           PY
           printf 'exec(open("/tmp/fresh_check.py").read())\nexit\n' \

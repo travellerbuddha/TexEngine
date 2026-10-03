@@ -127,6 +127,7 @@ BEHAVIOUR = {
 	"p73_ledger_booking_index": "test_patches.TestP03Indexes.test_p73_creates_the_ledger_booking_index",
 	"p74_outbox_order_index": "test_patches.TestP03Indexes.test_p74_creates_the_outbox_order_index",
 	"p75_payment_last_reverified": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p76_oauth_registration_off": "test_patches.TestSmallPatches.test_p76_switches_frappe_oauth_registration_off_once",
 }
 
 
@@ -1478,6 +1479,32 @@ class TestSmallPatches(PatchCase):
 		frappe.db.set_value("TEX Market", "TR", "residency_required", 0)
 		self.assertRerunChangesNothing("p71_market_integrity")
 		self.assertEqual(frappe.db.get_value("TEX Market", "TR", "residency_required"), 0)
+
+	def test_p76_switches_frappe_oauth_registration_off_once(self):
+		"""2Z (ADR-073): Frappe's OAuth dynamic client registration is switched off, once, with the Single's other
+		settings kept; the clients a guest registered are counted for review, never named or deleted; an
+		administrator who switches it on again afterwards is not overruled by a forced re-run."""
+		settings = frappe.get_single("OAuth Settings")
+		settings.enable_dynamic_client_registration = 1
+		settings.save(ignore_permissions=True)
+		kept = {f: settings.get(f) for f in ("show_auth_server_metadata", "show_protected_resource_metadata",
+		                                     "resource_name", "skip_authorization")}
+		guests = frappe.db.count("OAuth Client", {"owner": "Guest"})
+		put("OAuth Client", app_name="p76-probe-client", owner="Guest")
+		clients = frappe.db.count("OAuth Client")
+		seen = self.first_run("p76_oauth_registration_off")             # (b): a second run changes nothing
+		after = frappe.get_single("OAuth Settings")
+		self.assertEqual(after.enable_dynamic_client_registration, 0)
+		self.assertEqual({f: after.get(f) for f in kept}, kept)
+		printed = str(seen["print"].call_args_list)
+		self.assertIn(f"p76: {guests + 1} OAuth Client(s) registered by a guest", printed)
+		self.assertNotIn("p76-probe-client", printed)                  # a count, never a name
+		self.assertEqual(frappe.db.count("OAuth Client"), clients)    # nothing deleted
+		# an administrator switches it on again for a reviewed integration: a forced re-run keeps it on
+		after.enable_dynamic_client_registration = 1
+		after.save(ignore_permissions=True)
+		self.assertRerunChangesNothing("p76_oauth_registration_off")
+		self.assertEqual(frappe.get_single("OAuth Settings").enable_dynamic_client_registration, 1)
 
 	def test_p62_flags_holds_that_expired_before_the_flag(self):
 		"""O-24 (audit Part 2H-2, ADR-059): a cancelled reservation with the expiry note that nobody cancelled

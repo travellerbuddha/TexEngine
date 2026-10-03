@@ -647,3 +647,27 @@ class TestAnalyticsIdsG62(G83Setup):
 		site.gtm_container_id = "GTM-new'bad"
 		with self.assertRaises(frappe.ValidationError):
 			site.save(ignore_permissions=True)
+
+
+class TestFrappeOAuthRegistrationClosed(TexTestCase):
+	"""2Z (ADR-073): Frappe's OAuth provider registers no client for a guest on a TEX site. Its dynamic client
+	registration is on by default (OAuth Settings), and ``register_client`` is a guest endpoint with no rate limit:
+	anyone could create an OAuth Client with scope "all" and an https redirect of their own, and a staff member who
+	clicked "Allow" on its authorize link would hand that client a bearer token. TEX uses no Frappe OAuth client;
+	install and p76 switch registration off."""
+
+	def test_a_guest_registers_no_oauth_client_and_none_is_advertised(self):
+		from frappe.integrations import oauth2
+		from werkzeug.exceptions import NotFound
+
+		clients = frappe.db.count("OAuth Client")
+		env = EnvironBuilder(method="POST", base_url="https://book.example.test",
+		                     path="/api/method/frappe.integrations.oauth2.register_client",
+		                     json={"client_name": "2z-probe", "redirect_uris": ["https://example.com/cb"]}).get_environ()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- test context switch
+		with mock.patch.object(frappe.local, "request", Request(env), create=True):
+			with self.assertRaises(NotFound):
+				oauth2.register_client()
+			metadata = oauth2._get_authorization_server_metadata()
+		self.assertEqual(frappe.db.count("OAuth Client"), clients)
+		self.assertNotIn("registration_endpoint", metadata)
