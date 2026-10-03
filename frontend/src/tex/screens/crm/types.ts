@@ -199,6 +199,10 @@ export interface LoyaltyProgramInfo {
   program_name: string
   currency: string | null
   property: string
+  /** the program's own hotel; null for a hotel group's program */
+  program_property?: string | null
+  /** the program's hotels the user sees the guest through */
+  hotels?: string[]
   min_redeem_points: number
   max_redeem_percent: string
 }

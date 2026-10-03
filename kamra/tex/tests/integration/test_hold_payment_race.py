@@ -1950,7 +1950,9 @@ class TestDeadlockRetries(HoldCase):
 		           payments_api.record_manual, payments_api.create_link, payments_api.cancel_link,
 		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests,
 		           # 2F-1 (P1-4): the endpoints that lock a booking and then its rooms or its guest
-		           crs.resend_confirmation, crs.acknowledge_guest_change, crm_api.loyalty_adjust):
+		           crs.resend_confirmation, crs.acknowledge_guest_change, crm_api.loyalty_adjust,
+		           # C-04: a membership's join and leave lock the profile, then its membership
+		           crm_api.loyalty_join, crm_api.loyalty_leave):
 			self.assertTrue(retried(fn), fn.__name__)
 
 	def test_the_quote_endpoints_run_again_on_a_deadlock(self):

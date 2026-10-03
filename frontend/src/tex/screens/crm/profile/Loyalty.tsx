@@ -48,7 +48,13 @@ export function LoyaltyPanel({
   const closeAdjust = useEvent(() => setAdjust(null))
   const closeRedeem = useEvent(() => setRedeem(false))
   const closeMembership = useEvent(() => setMembership(null))
-  const programHotels = Object.fromEntries((programs.data ?? []).map((p) => [p.program, p.property]))
+  // the hotels a membership or an adjustment can be made for: the program's own, or its hotels the user sees the guest
+  // through (a hotel group's program; C-04 review round 1)
+  const programHotels: ProgramHotels = Object.fromEntries(
+    (programs.data ?? []).map((p) => [p.program, { own: p.program_property ?? null, hotels: p.hotels ?? [p.property] }]),
+  )
+  // memberships of the programs the guest can collect in now (enabled; a disabled one has no member prices)
+  const memberPrograms = (programs.data ?? []).map((p) => ({ value: p.program, label: p.program_name }))
 
   const actions = (
     <div className="flex flex-wrap gap-2">
@@ -67,8 +73,8 @@ export function LoyaltyPanel({
 
   return (
     <div className="space-y-4">
-      {programOptions.length > 0 && (
-        <Memberships programs={programOptions} accounts={accounts} canEdit={canEdit} onAct={(program, mode) => setMembership({ program, mode })} />
+      {memberPrograms.length > 0 && (
+        <Memberships programs={memberPrograms} accounts={accounts} canEdit={canEdit} onAct={(program, mode) => setMembership({ program, mode })} />
       )}
       {!accounts.length ? (
         <EmptyState
@@ -177,7 +183,7 @@ export function LoyaltyPanel({
         open={membership !== null}
         mode={membership?.mode ?? "join"}
         program={membership?.program ?? ""}
-        programName={programOptions.find((p) => p.value === membership?.program)?.label ?? ""}
+        programName={memberPrograms.find((p) => p.value === membership?.program)?.label ?? ""}
         programHotels={programHotels}
         hotels={hotels.filter((h) => can("crm.edit", h))}
         defaultHotel={current}
@@ -196,6 +202,17 @@ export function LoyaltyPanel({
       />
     </div>
   )
+}
+
+/** program → its own hotel (none for a hotel group's program) and its hotels the user sees the guest through */
+type ProgramHotels = Record<string, { own: string | null; hotels: string[] }>
+
+/** The hotels a membership or an adjustment of `program` can be made for: the program's own hotel, else those of
+ * its hotels where the user may edit the guest (`editable`). Not listed (loading): every hotel the user may edit. */
+function hotelChoices(programHotels: ProgramHotels, program: string, editable: string[]): string[] {
+  const p = programHotels[program]
+  if (!p) return editable
+  return p.own ? [p.own] : p.hotels.filter((h) => editable.includes(h))
 }
 
 /** The guest's membership of each program (C-04, ADR-077): a member gets its members-only prices. Staff who may
@@ -279,8 +296,7 @@ function MembershipDialog({
   mode: "join" | "leave"
   program: string
   programName: string
-  /** program → the hotel it is offered through */
-  programHotels: Record<string, string | null | undefined>
+  programHotels: ProgramHotels
   /** the hotels through which the user may edit this guest */
   hotels: string[]
   defaultHotel: string | null | undefined
@@ -293,8 +309,7 @@ function MembershipDialog({
   const [reason, setReason] = useState("")
   const [hotel, setHotel] = useState("")
   // a membership is made at one hotel of the program, whose staff read it in full (as an adjustment, ADR-056)
-  const own = programHotels[program]
-  const hotelOptions = own ? [own] : hotels
+  const hotelOptions = hotelChoices(programHotels, program, hotels)
   const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
   const m = useTexMutation<{ guest: string; program: string; reason?: string; property?: string }, { name: string; status: string }>(
     "crm",
@@ -377,8 +392,7 @@ function AdjustDialog({
   open: boolean
   program: string
   programs: { value: string; label: string }[]
-  /** program → its hotel (empty for a hotel group's program) */
-  programHotels: Record<string, string | null | undefined>
+  programHotels: ProgramHotels
   /** the hotels through which the user may edit this guest */
   hotels: string[]
   defaultHotel: string | null | undefined
@@ -394,8 +408,7 @@ function AdjustDialog({
   const [points, setPoints] = useState("")
   const [reason, setReason] = useState("")
   // an adjustment belongs to one hotel of the program, whose staff see its reason (ADR-056 second review)
-  const own = programHotels[program]
-  const hotelOptions = own ? [own] : hotels
+  const hotelOptions = hotelChoices(programHotels, program, hotels)
   const [hotel, setHotel] = useState("")
   const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
   const m = useTexMutation<{ guest: string; program: string; points: number; reason: string; property?: string }, { name: string }>(

@@ -2,7 +2,11 @@
 now, on the web next) or who stayed and earned points in it (a matured earning); a guest who left is not one,
 whatever they earned. Members get the program's members-only prices."""
 
+import threading
+from unittest import mock
+
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from kamra.tex.api import crm as crm_api
@@ -132,6 +136,14 @@ class TestMembership(MembershipCase):
 		self.assertTrue(account["member"])
 		self.assertEqual((account["membership"]["status"], account["membership"]["other_hotel"]), ("Active", True))
 		self.assertRegex(account["membership"]["joined_at"], r"^\d{4}-\d{2}$")
+		# review round 1: the program's own hotel (none: a group's) and its hotels the user sees the guest through,
+		# so the CRM makes a membership for one of them, never the first hotel the user sees the guest at
+		from kamra.tex.api import ui_backoffice_crm_payments as ui_crm
+
+		frappe.set_user("c04-sister@example.com")  # nosemgrep: frappe-setuser -- the sister's staff
+		[info] = ui_crm.loyalty_programs(self.guest)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertEqual((info["program"], info["program_property"], info["hotels"]), (shared, None, [sister]))
 
 	def test_c04_the_guests_summary_shows_the_membership(self):
 		self.join(self.guest)
@@ -188,12 +200,65 @@ class TestMembership(MembershipCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
 		self.assertEqual(frappe.get_all("TEX Loyalty Member", filters={"guest": other}, pluck="name"), [moved])
 
+	def test_c04_r1_a_merge_keeps_the_membership_changed_last(self):
+		"""Review round 1: where both profiles have a membership of the program, the person's last word decides:
+		a newer Left on the duplicate ends the older Active of the profile that stays, and the other way round."""
+		for last in ("Left", "Active"):
+			with self.subTest(last=last):
+				kept, dup = self.profile(f"k{last}"), self.profile(f"d{last}")
+				mine, theirs = self.join(kept)["name"], self.join(dup)["name"]
+				older, newer = (mine, theirs) if last == "Left" else (theirs, mine)
+				frappe.db.set_value("TEX Loyalty Member", theirs, {"status": "Left", "left_reason": "moved away"})
+				frappe.db.set_value("TEX Loyalty Member", older, "modified", "2026-01-01 10:00:00", update_modified=False)
+				frappe.db.set_value("TEX Loyalty Member", newer, "modified", "2026-06-01 10:00:00", update_modified=False)
+				frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff merge the duplicate
+				out = crm_api.merge_guests(source=dup, target=kept)
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+				self.assertEqual(frappe.get_all("TEX Loyalty Member", filters={"guest": kept}, pluck="status"), [last])
+				self.assertEqual(loyalty.is_member(kept, fx.PROPERTY), last == "Active")
+				self.assertEqual(frappe.get_all("TEX Loyalty Member", filters={"guest": dup}), [])
+				self.assertEqual(out["memberships_dropped"], [theirs])                    # named in the audit
+
 	def test_c04_an_erased_guest_is_no_member(self):
 		name = self.join(self.guest)["name"]
 		crm.erase_traces(self.guest, "Erased guest", emails=(), audit_event=False)
 		row = frappe.db.get_value("TEX Loyalty Member", name, ["status", "left_reason"], as_dict=True)
 		self.assertEqual((row.status, row.left_reason), ("Left", "erased"))
 		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
+
+	def test_c04_r1_an_erased_guest_is_no_member_by_their_stays_either(self):
+		"""Review round 1: erasure ended Active memberships only; a member by their stays stayed one."""
+		self.earn(self.guest, "Available")
+		self.assertTrue(loyalty.is_member(self.guest, fx.PROPERTY))
+		frappe.db.set_value("Guest", self.guest, "tex_erased_at", now_datetime())
+		crm.erase_traces(self.guest, "Erased guest", emails=(), audit_event=False)
+		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
+		with self.assertRaises(frappe.ValidationError):
+			self.join(self.guest)                                                     # nor joined again
+
+	def test_c04_r1_staff_join_only_to_a_program_of_the_guests_hotels(self):
+		"""Review round 1: staff who may edit guests in two enterprises never join one's guest to the other's program
+		(nor adjust its points there)."""
+		ent = frappe.db.get_value("Property", OTHER, "tex_enterprise")
+		theirs = frappe.get_doc({"doctype": "Guest", "first_name": "Far", "last_name": "Away",
+		                         "email": f"c04-far-{frappe.generate_hash(length=6)}@example.com",
+		                         "tex_enterprise": ent}).insert(ignore_permissions=True).name
+		both = agent("c04-both@example.com", fx.PROPERTY)
+		fx.ensure("TEX Access Grant", {"user": both, "property": OTHER},
+		          {"user": both, "scope_level": "Hotel", "property": OTHER, "permission_profile": "Reservations Agent"})
+		from kamra.tex.security import scope
+
+		scope.clear_cache()
+		for call in (lambda: self.join(theirs, user=both),
+		             lambda: crm_api.loyalty_adjust(guest=theirs, program=self.club, points=10, reason="goodwill")):
+			frappe.set_user(both)  # nosemgrep: frappe-setuser -- an agent of both enterprises
+			try:
+				with self.assertRaises((frappe.PermissionError, frappe.DoesNotExistError)):
+					call()
+			finally:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertFalse(frappe.db.exists("TEX Loyalty Member", {"guest": theirs}))
+		self.assertFalse(frappe.db.exists("TEX Loyalty Ledger", {"guest": theirs}))
 
 	def test_c04_now_is_recorded_when_staff_join(self):
 		before = now_datetime()
@@ -316,8 +381,104 @@ class TestMemberPrices(MembershipCase):
 		self.assertFalse(loyalty.is_member(theirs.name, fx.PROPERTY))
 
 	def test_c04_a_member_is_priced_as_one_at_their_programs_hotels_only(self):
+		"""A hotel of the same enterprise without the program (the agent sees the guest there) is no member's."""
 		self.join(self.guest)
-		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a group search across two hotels
-		res = crs_api.search(**STAY, properties=[fx.PROPERTY, OTHER], guest=self.guest)
+		sister = fx.ensure("Property", {"property_name": "TEX C04 Sister"},
+		                   {"property_name": "TEX C04 Sister", "city": "Kemer", "country": "Turkey", "currency": "EUR"})
+		frappe.db.set_value("Property", sister, {"tex_hotel_group": None, "tex_enterprise": frappe.db.get_value(
+			"Property", fx.PROPERTY, "tex_enterprise")})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a group search across hotels
+		res = crs_api.search(**STAY, properties=[fx.PROPERTY, sister, OTHER], guest=self.guest)
 		member = {p["property"]: p["member"] for p in res["properties"]}
-		self.assertEqual(member, {fx.PROPERTY: True, OTHER: False})
+		self.assertEqual(member, {fx.PROPERTY: True, sister: False, OTHER: False})
+
+	def change(self, reservation: str, nights: int = 5) -> dict:
+		from kamra.tex.services import modification
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a revenue manager prices the change
+		return modification.propose(reservation, {"check_out": str(fx.d(6, 10 + nights))}, basis="CURRENT")
+
+	def members_price_in(self, proposal: dict) -> bool:
+		return any(p.get("applied") and p.get("member_only") for p in proposal["proposed"]["promotions"])
+
+	def test_c04_r1_a_change_prices_a_member_only_for_a_member(self):
+		"""Review round 1 (BLOCKER): a member's search signs every offer as a member's; an offer that no members-only
+		promotion priced books for anyone. Its stay kept the member's flag, and a change gave a non-member the
+		member's price. A change prices the stay as a member's when it was sold at a member's price, or for a
+		booker who is a member now."""
+		policy_api.archive("TEX Promotion", self.members_ten, reason="a long-stay one instead")
+		self.promotion(promotion_name="Members long stay", min_nights=5)           # not on a 3-night stay
+		self.join(self.guest)
+		offer = self.flex(self.search(self.guest))
+		self.assertFalse(offer["member_price"])
+		stranger = self.book(offer, {"first_name": "Otto", "last_name": "Other", "email": "c04-otto3@example.com",
+		                             "country": "Germany"})
+		mine = self.book(self.flex(self.search(self.guest)), self.contact(self.guest))
+		theirs_res = frappe.db.get_value("Reservation", {"tex_booking": stranger["booking"]}, "name")
+		mine_res = frappe.db.get_value("Reservation", {"tex_booking": mine["booking"]}, "name")
+		self.assertFalse(self.members_price_in(self.change(theirs_res)))           # five nights, no member's price
+		self.assertTrue(self.members_price_in(self.change(mine_res)))              # the member gets it
+
+	def test_c04_r1_the_booking_checks_the_membership_again_with_a_locking_read(self):
+		"""Review round 1: the second check runs once the profile is locked, with a locking read (a plain read sees
+		this request's old view, not a leave committed meanwhile)."""
+		self.join(self.guest)
+		offer = self.flex(self.search(self.guest))
+		calls = []
+		real = loyalty.is_member
+
+		def spy(guest, property, **kw):
+			calls.append(kw.get("lock", False))
+			return real(guest, property, **kw)
+
+		with mock.patch.object(loyalty, "is_member", side_effect=spy):
+			self.book(offer, self.contact(self.guest))
+		self.assertEqual(calls, [False, True])                                      # before any lock; then locked
+
+
+class TestMembershipReadsAreCurrent(IntegrationTestCase):
+	"""Review round 1: a locking read of the membership sees a leave another request committed after this one's
+	read view opened; a plain read does not. The booking's second check reads so (above). Commits its fixtures
+	(another connection must see them) and removes them."""
+
+	def test_c04_r1_a_locking_read_sees_a_leave_committed_meanwhile(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		fx.base_setup()
+		program = guest = None
+		try:
+			program = loyalty_api.save_program({**CLUB, "enabled": 0, "property": fx.PROPERTY,
+			                                    "program_name": f"C04 race {frappe.generate_hash(length=6)}"})["name"]
+			guest = frappe.get_doc({"doctype": "Guest", "first_name": "Race", "last_name": "Member",
+			                        "email": f"c04-race-{frappe.generate_hash(length=6)}@example.com"}
+			                       ).insert(ignore_permissions=True).name
+			frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest, "status": "Active",
+			                "source": "Staff", "property": fx.PROPERTY}).insert(ignore_permissions=True)
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection reads them
+			self.assertTrue(loyalty.member_of(guest, program))                     # this request's read view opens
+			site, sites_path = frappe.local.site, frappe.local.sites_path
+
+			def staff_end_it():                                                    # another request, its own connection
+				frappe.init(site=site, sites_path=sites_path)
+				frappe.connect()
+				try:
+					frappe.db.set_value("TEX Loyalty Member", {"guest": guest, "program": program}, "status", "Left")
+					frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its own request
+				finally:
+					frappe.destroy()
+
+			other = threading.Thread(target=staff_end_it)
+			other.start()
+			other.join(timeout=30)
+			self.assertTrue(loyalty.member_of(guest, program))                     # a plain read: the old view
+			self.assertFalse(loyalty.member_of(guest, program, lock=True))         # a locking read: as committed now
+		finally:
+			frappe.db.rollback()
+			if guest:
+				frappe.db.delete("TEX Loyalty Member", {"guest": guest})
+				frappe.db.delete("Guest", {"name": guest})
+			if program:
+				frappe.db.delete("TEX Loyalty Program", {"name": program})
+				for child in ("TEX Loyalty Earn Rule", "TEX Loyalty Tier", "TEX Loyalty Blackout"):
+					if frappe.db.table_exists(child):
+						frappe.db.delete(child, {"parent": program})
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections

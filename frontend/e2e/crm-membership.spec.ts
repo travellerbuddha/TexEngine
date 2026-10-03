@@ -185,11 +185,19 @@ test("a member joined in CRM gets the member price in the Call Center; the membe
       await expect(offers.getByText("caller is a member: member prices").first()).toBeVisible()
       await expect(offers.getByText("Member price", { exact: true }).first()).toBeVisible()
 
-      // no caller: the offers are priced again for nobody
+      // no caller: the last search is priced again for nobody, with its own dates, never the form as edited since
+      const later = stayDates(140, 2).checkIn
+      await byLabel(agent, "Check-in").focus()
+      await agent.keyboard.type(mdy(later))
+      await expect(byLabel(agent, "Check-in")).toHaveValue(later)
       const [again] = await Promise.all([
         agent.waitForResponse((r) => r.url().includes("ui_crs.search") && r.ok()),
         agent.getByRole("button", { name: "Clear caller" }).click(),
       ])
+      const sent = again.request().postData() ?? ""
+      expect(sent, "the last search's check-in").toContain(checkIn)
+      expect(sent, "not the edited one").not.toContain(later)
+      expect(sent, "no caller").not.toContain(guest)
       const plain = ((await again.json()) as { message: StaffSearch }).message
       expect(plain.properties.some((p) => p.member || p.offers.some((o) => o.member_price))).toBe(false)
       await expect(offers.getByText("Member price", { exact: true })).toHaveCount(0)

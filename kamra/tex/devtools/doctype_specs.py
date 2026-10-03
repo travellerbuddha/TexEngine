@@ -1341,11 +1341,12 @@ CRM_SPECS = [
 		F("member_column_1", "Column Break"),         # named: a counted break would renumber the specs after it
 		F("joined_at", "Datetime", "Joined at"),
 		F("joined_by", "Link", "Joined by", "User", description="The staff member who joined the guest"),
-		F("property", "Link", "Joined at hotel", "Property"),
+		F("property", "Link", "Hotel", "Property",
+		  description="The hotel the membership was made at (for a member by their stays who left: where it ended)"),
 		F("left_at", "Datetime", "Left at"),
 		F("left_reason", "Small Text", "Why the membership ended"),
 	], perms=READONLY_AUDIT, autoname="hash", naming_rule="Random", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-10-03 20:00:00.000000"}),
+	   extra={"modified": "2026-10-03 23:00:00.000000"}),
 ]
 
 # ═══ TEX Connect ══════════════════════════════════════════════════════════

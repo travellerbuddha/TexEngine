@@ -352,25 +352,11 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   }, [])
 
   // ── search ──
-  const runSearch = useCallback(
-    /** The result; null when the search was refused (the form, or the server: the caller may point at
-     * the field); undefined when a newer search took over (nothing to do, O-29). */
-    async (override?: Partial<SearchFormState>, keepSelection = false): Promise<SearchResult | null | undefined> => {
-      const f = { ...form, ...override }
-      const errs = validateSearch(f)
-      setFormErrors(errs)
-      if (Object.keys(errs).length) return null
-      const args: SearchArgs = {
-        check_in: f.check_in,
-        check_out: f.check_out,
-        rooms: f.rooms.map(partyToApi),
-        market: f.market,
-        channel: f.channel,
-        currency: f.currency || undefined,
-        promo_codes: f.promo.length ? f.promo : undefined,
-        properties: f.properties,
-        guest: priceFor.current,
-      }
+  /** One search with `args` (and its promotion codes `promo`): the result, null when the server refused it,
+   * undefined when a newer search took over (O-29). `keepSelection`: the rooms picked stay when the new answer
+   * still has them. */
+  const execute = useCallback(
+    async (args: SearchArgs, promo: string[], keepSelection: boolean): Promise<SearchResult | null | undefined> => {
       const prevSelection = selection
       const seq = ++searchSeq.current
       setSearching(true)
@@ -393,7 +379,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
           )
         const oldExtras = extras
         clearDownstream()
-        setQuotePromo(f.promo)
+        setQuotePromo(promo)
         if (keep && prevSelection) {
           setSelection(prevSelection)
           setExtras(fitExtras(oldExtras, { check_in: r.check_in, check_out: r.check_out }))
@@ -409,7 +395,43 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         if (seq === searchSeq.current) setSearching(false)
       }
     },
-    [form, validateSearch, selection, extras, clearDownstream],
+    [selection, extras, clearDownstream],
+  )
+
+  const runSearch = useCallback(
+    /** The result; null when the search was refused (the form, or the server: the caller may point at
+     * the field); undefined when a newer search took over (nothing to do, O-29). */
+    async (override?: Partial<SearchFormState>, keepSelection = false): Promise<SearchResult | null | undefined> => {
+      const f = { ...form, ...override }
+      const errs = validateSearch(f)
+      setFormErrors(errs)
+      if (Object.keys(errs).length) return null
+      const args: SearchArgs = {
+        check_in: f.check_in,
+        check_out: f.check_out,
+        rooms: f.rooms.map(partyToApi),
+        market: f.market,
+        channel: f.channel,
+        currency: f.currency || undefined,
+        promo_codes: f.promo.length ? f.promo : undefined,
+        properties: f.properties,
+        guest: priceFor.current,
+      }
+      return execute(args, f.promo, keepSelection)
+    },
+    [form, validateSearch, execute],
+  )
+
+  /** Name the caller the offers are priced for (the Call Center, C-04) and price the offers shown again for them:
+   * the last search's own request with the new caller, never the form as edited since (review round 1), keeping
+   * the rooms picked. Nothing to price again before a search, or once the booking is made. */
+  const repriceFor = useCallback(
+    async (guest?: string | null): Promise<SearchResult | null | undefined> => {
+      priceFor.current = guest || undefined
+      if (!lastArgs || !result || booking) return undefined
+      return execute({ ...lastArgs, guest: priceFor.current }, lastArgs.promo_codes ?? [], true)
+    },
+    [lastArgs, result, booking, execute],
   )
 
   // ── room builder ──
@@ -775,6 +797,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     searchError,
     runSearch,
     setPriceFor,
+    repriceFor,
     propertyResult,
     findOffer,
     roomCandidates,

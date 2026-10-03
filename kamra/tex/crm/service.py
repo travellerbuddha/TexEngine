@@ -1211,7 +1211,7 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 	if len(ents) > 1:
 		frappe.throw(_("Profiles of different enterprises cannot be merged."))
 	before = {g.name: {f: bool(g.get(f)) for f in CONSENT} for g in (src, dst)}
-	loyalty.merge_memberships(source, target)          # one membership per program (C-04); the rest move below
+	dropped = loyalty.merge_memberships(source, target)   # one membership per program (C-04); the rest move below
 	moved = _repoint(source, target, links, dynamic)
 	filled = [f for f in MERGE_FILL if not dst.get(f) and src.get(f)]
 	for f in filled:
@@ -1263,9 +1263,9 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 	      enterprise=next(iter(ents)) if ents else None,
 	      old={"source": source, "consent": before},
 	      new={"moved": counts, "records": records, "filled": sorted(filled), "consent": consent, "copy": copy,
-	           "copy_kept_days": MERGE_COPY_DAYS})
+	           "copy_kept_days": MERGE_COPY_DAYS, "memberships_dropped": dropped})
 	return {"target": target, "source": source, "moved": counts, "records": records, "filled": sorted(filled),
-	        "consent": consent}
+	        "consent": consent, "memberships_dropped": dropped}
 
 
 def _drop_merge_copies(sources) -> int:

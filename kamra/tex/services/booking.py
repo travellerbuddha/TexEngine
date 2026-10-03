@@ -213,11 +213,12 @@ def member_priced(result: dict) -> bool:
 	return any(p.get("applied") and p.get("member_only") for p in result.get("promotions") or [])
 
 
-def require_member(profile: str | None, property: str) -> None:
-	"""A member's price is booked for a member of the hotel's program only (C-04, ADR-077)."""
+def require_member(profile: str | None, property: str, *, lock: bool = False) -> None:
+	"""A member's price is booked for a member of the hotel's program only (C-04, ADR-077). ``lock``: read as
+	committed now (``loyalty.member_of``)."""
 	from kamra.tex.crm import loyalty
 
-	if not (profile and loyalty.is_member(profile, property)):
+	if not (profile and loyalty.is_member(profile, property, lock=lock)):
 		frappe.throw(_("This price is for members of the hotel's loyalty program, and this guest is not a member. "
 		               "Search again for this guest, or join them to the program first."), refusal("SEARCH_AGAIN"))
 
@@ -822,7 +823,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
 	                                                               language=language, staff=staff)
 	if members_price:
-		require_member(guest_name, property)              # the profile is locked: a leave meanwhile is seen
+		# the profile is locked; its membership read with locking reads, so a leave committed meanwhile is seen
+		# (this request's plain reads still see its old read view: review round 1)
+		require_member(guest_name, property, lock=True)
 	booker = booker or {}
 	token, token_digest = new_manage_token()
 	manage_days = int(frappe.db.get_single_value("TEX Settings", "manage_link_days") or 365)

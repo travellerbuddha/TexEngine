@@ -2077,11 +2077,26 @@ Split in two batches: 2N-1 (this) the membership, the call centre and staff; 2N-
   the caller picked (picking or clearing one prices the offers shown again), an offer says "Member price" and the
   hotel that the caller is a member; the promotion editor always offers "Members only" with its new help (six
   languages). Test: e2e `crm-membership.spec`.
+- Review round 1 **COMPLETE** (1 BLOCKER, 5 SHOULD, NITs; all fixed): a change prices a stay as a member's only when it
+  was sold at a member's price or its booker is a member now (a non-member booked from a member's search kept the
+  member's flag); the booking's second check reads the membership with locking reads; a merge and an erasure read
+  memberships with locks and the merge's audit names those it removed; the CRM makes a membership (or an adjustment)
+  for the program's own hotel or a group program's hotel where the user edits the guest; the Call Center prices the
+  last search again for a caller picked or cleared (never the form as edited); an erased profile is nobody's member and
+  never joins; a disabled program shows no member; join, leave and adjust act only on a program of the guest's
+  hotels; join / leave in the deadlock-retry registry; the hotel field is "Hotel". Tests: `TestMembership` and
+  `TestMemberPrices` (+6), `TestMembershipReadsAreCurrent` (a second connection commits a leave), e2e
+  `crm-membership.spec` (the last search's dates). Red: the change test (a non-member got the members-only promotion),
+  `[False, False] != [False, True]` (the second check read without a lock), `TypeError: member_of() got an unexpected
+  keyword argument 'lock'`, `KeyError: 'memberships_dropped'`, `KeyError: 'program_property'`, the cross-enterprise
+  join and adjust not refused, the erased member still one, and the e2e (the re-search sent the edited check-in).
 - **Not done:**
   - 2N-2 (next batch, after this one is merged): the web — sign-in and join by a one-time e-mail link, a member's
     session on the booking site, the "Member price" teaser for a guest who is not signed in, a guest refusal code for a
     member's price booked by a non-member (`SEARCH_AGAIN` until then), the booking app's six languages;
   - a change of a stay sold at a member's price re-prices it as a member's whatever the guest's membership is now
     (the sale's terms; ADR-077);
+  - the CRM's redemption hint picks a group program's account by the first hotel the user sees the guest at (LOW,
+    hint only: the server redeems from the right program);
   - the CRS reservations page names no caller (the owner chose web and call centre);
   - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.

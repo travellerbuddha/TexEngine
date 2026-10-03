@@ -257,14 +257,8 @@ export default function CallCenterPage() {
   }, [flow, t])
 
   // the offers shown are priced for the caller named (a member's price where they are one, C-04): naming
-  // another caller, or none, prices them again for that caller, keeping the rooms picked
-  const repriceFor = useCallback(
-    (g: GuestRow | null) => {
-      flow.setPriceFor(g?.name)
-      if (flow.result) void flow.runSearch(undefined, true)
-    },
-    [flow],
-  )
+  // another caller, or none, prices the last search again for that caller, keeping the rooms picked
+  const repriceFor = useCallback((g: GuestRow | null) => void flow.repriceFor(g?.name), [flow])
 
   const pickCaller = useCallback(
     (g: GuestRow) => {

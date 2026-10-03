@@ -67,7 +67,8 @@ export function OfferBadges({ offer, rooms, showAvailability = true }: { offer: 
       {/* the caller's member price (C-04): it books for that member only */}
       {offer.member_price && (
         <Badge tone="success" title={t("crs.offer.member_price_hint")}>
-          {t("crs.offer.member_price")}
+          <span>{t("crs.offer.member_price")}</span>
+          <span className="sr-only"> — {t("crs.offer.member_price_hint")}</span>
         </Badge>
       )}
       {applied.map((p) => (

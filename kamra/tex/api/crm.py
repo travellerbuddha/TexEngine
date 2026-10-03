@@ -107,10 +107,18 @@ def loyalty_summary(guest: str):
 	return loyalty.summary(guest, loyalty.visible_programs(via), hotels=via)     # this tenant's programs only
 
 
+def _guests_program(guest: str, program: str) -> None:
+	"""Staff who may edit the guest act on a program of the hotels they edit the guest through: never another
+	enterprise's, even where they may edit guests there too (C-04 review round 1)."""
+	via = crm.require_guest(guest, "crm.edit")
+	if program not in loyalty.visible_programs(via):
+		frappe.throw(frappe._("Program not found."), frappe.DoesNotExistError)
+
+
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def loyalty_adjust(guest: str, program: str, points, reason: str, property: str | None = None):
-	crm.require_guest(guest, "crm.edit")
+	_guests_program(guest, program)
 	return {"name": loyalty.adjust(guest, program, as_int(points, 0), text(reason, 500) or "",
 	                               property=text(property, 140) or None)}
 
@@ -118,14 +126,14 @@ def loyalty_adjust(guest: str, program: str, points, reason: str, property: str 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def loyalty_join(guest: str, program: str, property: str | None = None):
-	crm.require_guest(guest, "crm.edit")
+	_guests_program(guest, program)
 	return loyalty.join(guest, program, property=text(property, 140) or None)
 
 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def loyalty_leave(guest: str, program: str, reason: str, property: str | None = None):
-	crm.require_guest(guest, "crm.edit")
+	_guests_program(guest, program)
 	return loyalty.leave(guest, program, reason=text(reason, 500) or "", property=text(property, 140) or None)
 
 

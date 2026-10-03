@@ -69,8 +69,9 @@
   {
    "fieldname": "property",
    "fieldtype": "Link",
-   "label": "Joined at hotel",
-   "options": "Property"
+   "label": "Hotel",
+   "options": "Property",
+   "description": "The hotel the membership was made at (for a member by their stays who left: where it ended)"
   },
   {
    "fieldname": "left_at",
@@ -84,7 +85,7 @@
   }
  ],
  "links": [],
- "modified": "2026-10-03 20:00:00.000000",
+ "modified": "2026-10-03 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Loyalty Member",

@@ -143,6 +143,15 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 			base[k] = v or None
 		elif k != "drop_addons":
 			base[k] = v
+	if base.get("member") and not booking_svc.member_priced(snap):
+		# a member's search signs every offer as a member's, and an offer no members-only promotion priced books for
+		# anyone: a change prices the stay as a member's only when it was sold at a member's price, or for a booker
+		# who is a member of the hotel's program now (C-04 review round 1)
+		from kamra.tex.crm import loyalty
+
+		booker = (frappe.db.get_value("TEX Booking", res.tex_booking, "booker_guest") if res.tex_booking
+		          else None) or res.guest
+		base["member"] = loyalty.is_member(booker, res.property)
 	base["sale_at"] = sale_at.isoformat()
 	return serialize.request_from_dict(base), snap
 

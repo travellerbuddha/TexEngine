@@ -9887,21 +9887,26 @@ one-time link sent by e-mail. 2N-1 (this ADR) delivers the membership, the call 
   member of a program when their membership is Active or, with no membership record, when they have a matured
   earning in it (an Earn entry Available, Used or Expired: a stay that happened, never one Pending or Reversed). A
   Left membership overrides earnings: a guest who asked to leave is no member, whatever they earned (their points
-  stay theirs). `is_member(guest, property)` asks the hotel's program (its own, else its group's, `program_for`);
-  no program, or a disabled one, has no members.
+  stay theirs); an erased profile is nobody's member. `is_member(guest, property)` asks the hotel's program (its own,
+  else its group's, `program_for`); no program, or a disabled one, has no members (the CRM says so too).
 - *Joining and leaving* (`crm.loyalty_join` / `loyalty_leave`). Staff who may edit the guest (`crm.edit` on the
   profile) and at a hotel of the program (`_staff_hotel`, as an adjustment) join them with the guest's word, as
   consent taken by staff (ADR-046): they are recorded (`joined_by`) and the join is audited
   (`loyalty.member_join`). Leaving needs a reason and is audited (`loyalty.member_leave`). A rejoin makes the same
   record Active; a guest who is a member by their stays and leaves gets a record that says so. The profile is locked
   first, as for every write of its records; the controller refuses a second record for the same guest and program.
+  Join, leave (and a points adjustment) act only on a program of the hotels the staff member edits the guest
+  through: never another enterprise's, even where they may edit guests there too. An erased profile never joins.
+  The CRM makes a membership for the program's own hotel, or for one of a group program's hotels where the staff
+  member edits the guest (review round 1).
 - *Tenancy.* A membership belongs to the hotel it was made at, as a ledger entry (ADR-056 second review):
   `perm.LOYALTY_DOCTYPES` scopes Desk and REST reads by `property`, else the program's hotel; the audit trail reads
   it with `crm.view`. In the CRM, staff of a sister hotel of a group program see that the guest is a member and when
   they joined by month only (`membership_view`).
 - *Merges, erasure, programs.* A merge keeps one membership per program: where both profiles have one, the one changed
-  last (the person's last word) stays on the profile that stays; the rest move. Erasure ends every membership
-  (`left_reason` "erased"). A program with members never moves to another hotel or group (its members would get
+  last (the person's last word) stays on the profile that stays; the rest move. Both profiles' memberships are read
+  with locks (a join committed after the merge request began is seen); the merge's audit names the memberships it
+  removed. Erasure ends every membership (`left_reason` "erased"). A program with members never moves to another hotel or group (its members would get
   member prices elsewhere), as a program with points.
 - *Members-only promotions.* G-57's refusal is gone: a members-only promotion is saved and goes live (two base tests
   that pinned the refusal are reversed by this decision). The engine already refused one for a non-member
@@ -9911,15 +9916,21 @@ one-time link sent by e-mail. 2N-1 (this ADR) delivers the membership, the call 
   (`crm.require_guest`, `crm.view`). At each hotel where the agent sees the guest and the guest is a member, the
   offers are a member's (`quoting.search(member=set of hotels)`): the offer key signs `member: true`, so its quote
   is priced as a member's; each hotel says `member` and each offer `member_price` (a members-only promotion
-  applied). The Call Center names the caller picked; picking or clearing one prices the offers shown again.
+  applied). The Call Center names the caller picked; picking or clearing one prices the last search again for that
+  caller (its own request, never the form as edited since), keeping the rooms picked.
 - *Booking a member's price.* `create_booking` books a room priced with a members-only promotion only for a member
   of the hotel's program: the profile the booking will join is read before anything is locked or written and must
-  be a member; once `resolve_guest` has locked it, it is checked again (a leave committed meanwhile is seen). Anyone
+  be a member; once `resolve_guest` has locked it, it is checked again with locking reads (the membership row, and the
+  ledger with a share lock), so a leave committed meanwhile is seen (a plain read sees the request's old read view:
+  review round 1). Anyone
   else is refused (`SEARCH_AGAIN` until 2N-2 gives the web its own code), and nothing is written. A quote priced as a
   member's without a members-only promotion books for anyone: its price is anyone's.
-- *What it does not do (yet).* A change of a stay sold at a member's price re-prices it as a member's (the sale's
-  terms, as a promotion code's), whether or not the guest is still a member. The web search, quote and booking never
-  price a member until 2N-2. The CRS reservations page does not name a caller (the owner chose web and call centre).
-- *Schema.* New DocType `TEX Loyalty Member` (fresh installs: the model sync makes it, D-14); p77 creates its
+- *A change of a stay* prices it as a member's when it was sold at a member's price (the sale's terms, as a promotion
+  code's), or when its offer was a member's and the booker is a member of the hotel's program now. A member's search
+  signs every offer as a member's and an offer no members-only promotion priced books for anyone, so a non-member
+  booked from it never gets a member's price on a change (review round 1, BLOCKER).
+- *What it does not do (yet).* The web search, quote and booking never price a member until 2N-2. The CRS reservations page does not name a caller (the owner chose web and call centre).
+- *Schema.* New DocType `TEX Loyalty Member` (its `property`, "Hotel", is where it was made; fresh installs: the model
+  sync makes it, D-14); p77 creates its
   `(guest, program)` index (`tex_member_guest_program`), so a member-priced search and a merge read a profile's
   memberships by index.

@@ -440,7 +440,8 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 		# earned, never money (LO-25)
 		m = membership(guest, p)
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
-		            "member": member_of(guest, p),
+		            # a disabled program has no members, and no member prices (review round 1)
+		            "enabled": bool(prog.enabled), "member": bool(prog.enabled) and member_of(guest, p),
 		            "membership": membership_view(m, hotels, prog.property) if m else None,
 		            "debt": max(0, -b["available"]),
 		            "value": to_str(quantize(db_dec(prog.point_value) * max(0, b["available"]), prog.currency or "EUR")),
@@ -505,22 +506,34 @@ def membership(guest: str | None, program: str | None, *, lock: bool = False) ->
 	                           as_dict=True, for_update=lock)
 
 
-def member_of(guest: str | None, program: str | None) -> bool:
+# a matured earning of the guest in the program: read with a share lock when ``lock`` (as committed now)
+MATURED_EARNING = """SELECT name FROM `tabTEX Loyalty Ledger` WHERE guest=%(g)s AND program=%(p)s AND entry_type='Earn'
+                     AND status IN %(s)s LIMIT 1 LOCK IN SHARE MODE"""
+
+
+def member_of(guest: str | None, program: str | None, *, lock: bool = False) -> bool:
 	"""A member of ``program``: one who joined it and has not left, or, with no membership record, one who stayed
 	and earned points in it (an earning that matured: Available, Used or Expired, never Pending or Reversed). A
-	guest who left is not one, whatever they earned."""
+	guest who left is not one, whatever they earned; an erased profile is nobody's (review round 1). ``lock``:
+	locking reads, which see what is committed now (a plain read sees this request's read view: a leave committed
+	meanwhile is not in it)."""
 	if not (guest and program):
 		return False
-	m = membership(guest, program)
+	if frappe.db.get_value("Guest", guest, "tex_erased_at"):
+		return False
+	m = membership(guest, program, lock=lock)
 	if m:
 		return m.status == "Active"
+	if lock:
+		return bool(frappe.db.sql(MATURED_EARNING, {"g": guest, "p": program, "s": FINAL}))
 	return bool(frappe.db.exists("TEX Loyalty Ledger", {"guest": guest, "program": program, "entry_type": "Earn",
 	                                                    "status": ("in", list(FINAL))}))
 
 
-def is_member(guest: str | None, property: str) -> bool:
-	"""A member of the hotel's program (its own, else its group's): who the program's members-only prices are for."""
-	return member_of(guest, program_for(property)) if guest else False
+def is_member(guest: str | None, property: str, *, lock: bool = False) -> bool:
+	"""A member of the hotel's program (its own, else its group's): who the program's members-only prices are for.
+	``lock``: as ``member_of``."""
+	return member_of(guest, program_for(property), lock=lock) if guest else False
 
 
 def join(guest: str, program: str, *, property: str | None = None) -> dict:
@@ -534,6 +547,8 @@ def join(guest: str, program: str, *, property: str | None = None) -> dict:
 	if not prog.enabled:
 		frappe.throw(_("This program is not enabled."))
 	require_live_guest(guest)                          # the profile locked first, as every write of its records
+	if frappe.db.get_value("Guest", guest, "tex_erased_at"):
+		frappe.throw(_("An erased profile cannot join a program."))
 	m = membership(guest, program, lock=True)
 	if m and m.status == "Active":
 		return {"name": m.name, "status": m.status}
@@ -574,13 +589,19 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None)
 	return {"name": name, "status": "Left"}
 
 
-def merge_memberships(source: str, target: str) -> None:
+# a profile's memberships, read with a lock (what is committed now: a join committed after this request began
+# included), by the (guest, program) index (p77)
+MEMBERSHIPS_OF = """SELECT name, program, modified FROM `tabTEX Loyalty Member` WHERE guest=%(g)s
+                    ORDER BY name FOR UPDATE"""
+
+
+def merge_memberships(source: str, target: str) -> list[str]:
 	"""A merge (both profiles locked): where both have a membership of a program, the one changed last decides (the
 	same person's last word: joined, or left) and stays on ``target``; the other goes. The rest move with the
-	other links."""
-	mine = {m.program: m for m in frappe.get_all("TEX Loyalty Member", filters={"guest": target},
-	                                             fields=["name", "program", "modified"])}
-	for m in frappe.get_all("TEX Loyalty Member", filters={"guest": source}, fields=["name", "program", "modified"]):
+	other links. Locking reads (review round 1). → the memberships removed (the merge's audit names them)."""
+	mine = {m.program: m for m in frappe.db.sql(MEMBERSHIPS_OF, {"g": target}, as_dict=True)}
+	dropped = []
+	for m in frappe.db.sql(MEMBERSHIPS_OF, {"g": source}, as_dict=True):
 		kept = mine.get(m.program)
 		if not kept:
 			continue
@@ -589,11 +610,15 @@ def merge_memberships(source: str, target: str) -> None:
 			frappe.db.set_value("TEX Loyalty Member", kept.name,
 			                    frappe.db.get_value("TEX Loyalty Member", m.name, fields, as_dict=True))
 		frappe.db.delete("TEX Loyalty Member", {"name": m.name})
+		dropped.append(m.name)
+	return dropped
 
 
 def end_memberships(guest: str, reason: str) -> int:
-	"""Right to erasure: the guest's memberships end (their records stay, naming the blanked profile)."""
-	names = frappe.get_all("TEX Loyalty Member", filters={"guest": guest, "status": "Active"}, pluck="name")
+	"""Right to erasure: the guest's memberships end (their records stay, naming the blanked profile). A member by
+	their stays only is no member once erased either (``member_of``). Locking reads, as a merge's."""
+	names = frappe.db.sql("""SELECT name FROM `tabTEX Loyalty Member` WHERE guest=%(g)s AND status='Active'
+	                         ORDER BY name FOR UPDATE""", {"g": guest}, pluck=True)
 	for name in names:
 		frappe.db.set_value("TEX Loyalty Member", name, {"status": "Left", "left_at": now_datetime(),
 		                                                 "left_reason": reason})
