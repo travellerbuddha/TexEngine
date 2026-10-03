@@ -154,7 +154,7 @@ def _take_link(site, token: str) -> dict:
 
 def verify(site, token: str) -> dict:
 	"""Open a link: a session for its profile (made, for a join link, when there is none) → {"session", "expires_at",
-	"status"}. A join link joins the site's programs."""
+	"expires_in", "status"}. A join link joins the site's programs."""
 	from kamra.tex.crm.service import require_live_guest
 
 	data = _take_link(site, token)
@@ -179,7 +179,9 @@ def verify(site, token: str) -> dict:
 	frappe.get_doc({"doctype": "TEX Member Session", "site": site.name, "property": site.property or None,
 	                "guest": profile, "token_hash": digest(session), "expires_at": expires}
 	               ).insert(ignore_permissions=True)
-	return {"session": session, "expires_at": str(expires), "status": status(site, profile)}
+	# expires_in: the device keeps the session by its own clock (the server's time zone is not the browser's)
+	return {"session": session, "expires_at": str(expires), "expires_in": SESSION_DAYS * 86400,
+	        "status": status(site, profile)}
 
 
 def session_guest(site, token: str | None) -> str | None:

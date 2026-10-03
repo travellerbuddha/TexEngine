@@ -70,6 +70,7 @@ class TestSignIn(WebMemberCase):
 		self.assertIn("/member#token=", html)                                  # the token in the fragment only
 		signed = self.verify(token)
 		self.assertTrue(signed["session"] and signed["session"] != token)
+		self.assertEqual(signed["expires_in"], members.SESSION_DAYS * 86400)   # the device counts from its own clock
 		self.assertEqual((signed["status"]["signed_in"], signed["status"]["member"], signed["status"]["first_name"]),
 		                 (True, True, "Mia"))
 		row = frappe.db.get_value("TEX Member Session", {"guest": self.guest},

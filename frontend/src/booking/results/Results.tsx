@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, BedDouble, Check, Eye, Maximize2, SearchX, Users } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BadgeCheck, BedDouble, Check, Eye, Maximize2, SearchX, Users } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useI18n } from "../i18n"
 import { nightsBetween } from "../lib/dates"
@@ -10,6 +10,7 @@ import { useBooking } from "../flow/BookingContext"
 import { Summary, uniformNight } from "../flow/Summary"
 import { useContinue } from "../flow/useContinue"
 import { partyText } from "../search/GuestsPicker"
+import { useMember } from "../site/Member"
 import { useSite } from "../site/SiteContext"
 import type { Offer, OfferReason, PropertyResult, RoomContent } from "../types"
 import { countryNames, regionDisplay, type Residency } from "../../lib/residency"
@@ -67,6 +68,12 @@ function HotelList({ properties }: { properties: PropertyResult[] }) {
                         {criteria.rooms.length > 1 && ` · ${t("guests.rooms", { count: criteria.rooms.length })}`}
                       </p>
                       <p className="text-xl font-bold tabular-nums">{money(p.from_total, p.from_currency ?? p.offers[0]?.currency)}</p>
+                      {p.member_from_total && (
+                        <p className="flex items-center gap-1 text-xs font-medium text-brand-ink">
+                          <BadgeCheck className="size-3.5" aria-hidden />
+                          {t("member.fromPrice", { amount: money(p.member_from_total, p.from_currency ?? p.offers[0]?.currency) })}
+                        </p>
+                      )}
                       <p className="text-xs text-muted">{t("results.roomTypes", { count: types })}</p>
                     </div>
                   ) : (
@@ -175,9 +182,15 @@ function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName, disab
               </li>
             ))}
           </ul>
-          {q.promotions?.length > 0 && (
+          {(q.promotions?.length > 0 || offer.member_price) && (
             <div className="flex flex-wrap gap-1.5 pt-0.5">
-              {q.promotions.map((p) => (
+              {offer.member_price && (
+                <Badge tone="brand">
+                  <BadgeCheck className="size-3.5" aria-hidden />
+                  {t("member.yourPrice")}
+                </Badge>
+              )}
+              {(q.promotions ?? []).map((p) => (
                 <Badge key={p.promo_id} tone="ok">
                   {p.name}
                 </Badge>
@@ -203,6 +216,7 @@ function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName, disab
             </p>
             {!isZero(q.totals.tax_added ?? "0") && <p className="text-xs text-muted">{t("rate.inclTaxes")}</p>}
             {!night && q.nights.length > 1 && <NightlyPrices nights={q.nights} currency={q.currency} />}
+            {rq.member_total && !offer.member_price && <MemberTeaser amount={money(rq.member_total, q.currency)} />}
           </div>
           <Button
             variant={selected ? "secondary" : "primary"}
@@ -218,6 +232,26 @@ function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName, disab
         </div>
       </div>
     </li>
+  )
+}
+
+/** "Member price" beside anyone's price (C-04, owner 2026-10-03): it applies only signed in, so the guest is offered
+ * the way to it: sign in (or join on the same dialog), or, signed in without a membership here, join. */
+function MemberTeaser({ amount }: { amount: string }) {
+  const { t } = useI18n()
+  const m = useMember()
+  if (!m?.available) return null
+  const signedIn = !!(m.session && m.status)
+  return (
+    <div className="mt-2 rounded-ui bg-brand/5 px-2.5 py-1.5 text-xs sm:text-right">
+      <p className="flex items-center gap-1 font-semibold text-brand-ink sm:justify-end">
+        <BadgeCheck className="size-3.5" aria-hidden />
+        {t("member.teaser", { amount })}
+      </p>
+      <button type="button" className="font-medium text-brand-ink underline underline-offset-2" onClick={() => m.openDialog(signedIn ? "join" : "sign_in")}>
+        {signedIn ? t("member.joinNow", { program: m.program }) : t("member.teaserSignIn")}
+      </button>
+    </div>
   )
 }
 

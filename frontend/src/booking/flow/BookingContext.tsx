@@ -14,6 +14,7 @@ import { armAbandon, disarmAbandon, trackMarketRefused } from "../lib/track"
 import { marketRefusal, refusedLinkPayload, type MarketRefusal } from "../lib/marketLink"
 import { priceChange, type PriceChange } from "../lib/priceChange"
 import type { Residency } from "../../lib/residency"
+import { useMember } from "../site/Member"
 import { useSite } from "../site/SiteContext"
 import type { Basket, BookResponse, Offer, PaymentMethod, PaymentStart, QuoteResponse, RatePlanInfo, RoomQuote, SearchResult } from "../types"
 
@@ -117,6 +118,8 @@ export interface SearchState {
   /** language of the offers' names */
   lang: string | null
   hotelScope: string | null
+  /** the member session it was priced for (useMember().key; "" signed out) */
+  member?: string
   status: "idle" | "loading" | "done" | "error"
   data: SearchResult | null
   error: ApiError | null
@@ -249,6 +252,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const criteria = useMemo(() => parseCriteria(sp), [sp])
   const step = (["extras", "details", "payment"].includes(sp.get("step") ?? "") ? sp.get("step") : "rooms") as Step
   const storeKey = `tex.flow.${site.slug}`
+  // a signed-in member's searches are priced as a member's (C-04): signing in, out or joining prices them again
+  const member = useMember()
+  const memberKey = member?.key ?? ""
+  const memberSession = member?.session ?? null
 
   const [flow, setFlow] = useState<FlowState>(() => getJSON<FlowState>(storeKey) ?? emptyFlow())
   const [search, setSearch] = useState<SearchState>({ key: null, lang: null, hotelScope: null, status: "idle", data: null, error: null })
@@ -271,25 +278,34 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   const key = isComplete(criteria) ? searchKey(criteria) : null
   const hotel = site.group ? criteria.hotel : site.hotels[0]?.name ?? null
+  // the selection's prices are a member's or not: a member signing in, out or joining chooses again
+  const flowKey = key && memberKey ? `${key}|${memberKey}` : key
 
-  // a different search (dates, party, promo, currency) or hotel invalidates the selection
+  // a different search (dates, party, promo, currency), member session or hotel invalidates the selection
   useEffect(() => {
-    if (!key) return
+    if (!flowKey) return
     setFlow((f) => {
-      if (f.key === key && f.hotel === hotel && f.selections.length === criteria.rooms.length) return f
-      return { ...emptyFlow(f.guest), key, hotel }
+      if (f.key === flowKey && f.hotel === hotel && f.selections.length === criteria.rooms.length) return f
+      return { ...emptyFlow(f.guest), key: flowKey, hotel }
     })
     setActiveRoom(0)
-  }, [key, hotel, criteria.rooms.length])
+  }, [flowKey, hotel, criteria.rooms.length])
 
   const runSearch = useCallback(
     async (opts: { force?: boolean } = {}) => {
       if (!key) return null
       const scope = site.group && criteria.hotel ? criteria.hotel : null
-      if (!opts.force && search.key === key && search.lang === lang && search.status !== "error" && (search.hotelScope === null || search.hotelScope === scope))
+      if (
+        !opts.force &&
+        search.key === key &&
+        search.lang === lang &&
+        (search.member ?? "") === memberKey &&
+        search.status !== "error" &&
+        (search.hotelScope === null || search.hotelScope === scope)
+      )
         return search.data
       const seq = ++searchSeq.current
-      setSearch((s) => ({ key, lang, hotelScope: scope, status: "loading", data: s.key === key ? s.data : null, error: null }))
+      setSearch((s) => ({ key, lang, hotelScope: scope, member: memberKey, status: "loading", data: s.key === key ? s.data : null, error: null }))
       try {
         const args = {
           site: site.slug,
@@ -300,6 +316,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           promo_code: criteria.promo || undefined,
           hotel: scope || undefined,
           session_id: sessionId(),
+          member_session: memberSession || undefined,
         }
         // campaign deep link: the market (or the guest's country) picks the contracts
         const linked = criteria.market || criteria.country ? `${criteria.market ?? ""}|${criteria.country ?? ""}` : null
@@ -325,23 +342,24 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           if (!linked && seq === searchSeq.current) setMarketNotice(null)
           data = await pub<SearchResult>("search", args)
         }
-        if (seq === searchSeq.current) setSearch({ key, lang, hotelScope: scope, status: "done", data, error: null })
+        if (seq === searchSeq.current) setSearch({ key, lang, hotelScope: scope, member: memberKey, status: "done", data, error: null })
         analyticsEvent("search", { check_in: criteria.checkIn, check_out: criteria.checkOut })
         return data
       } catch (e) {
         if (seq === searchSeq.current)
-          setSearch({ key, lang, hotelScope: scope, status: "error", data: null, error: e instanceof ApiError ? e : new ApiError("", 0, "", "network") })
+          setSearch({ key, lang, hotelScope: scope, member: memberKey, status: "error", data: null, error: e instanceof ApiError ? e : new ApiError("", 0, "", "network") })
         return null
       }
     },
-    [key, criteria, site, lang, search.key, search.lang, search.status, search.hotelScope, search.data],
+    [key, criteria, site, lang, memberKey, memberSession, search.key, search.lang, search.member, search.status, search.hotelScope, search.data],
   )
 
-  // a language switch searches again: room and rate names come back in the new language
+  // a language switch searches again: room and rate names come back in the new language; a member session prices
+  // the offers again
   useEffect(() => {
     if (key) void runSearch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, criteria.hotel, lang])
+  }, [key, criteria.hotel, lang, memberKey])
 
   // Selections keep their names from the latest search (language switch, reload), and
   // the fresh offer key and quote when the price is unchanged; a different price is

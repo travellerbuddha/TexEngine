@@ -11,6 +11,7 @@ import { guestsSummary } from "../search/GuestsPicker"
 import { useWide } from "../search/DateRangePicker"
 import { SearchForm } from "../search/SearchForm"
 import { Shell } from "../site/Layout"
+import { MemberProvider } from "../site/Member"
 import { siteText, SiteProvider, useSite, useSiteData } from "../site/SiteContext"
 import { Button } from "../ui/controls"
 import { Spinner } from "../ui/feedback"
@@ -216,9 +217,11 @@ export default function SitePage() {
   if (!site) return <Loading />
   return (
     <SiteProvider site={site}>
-      <BookingProvider>
-        <SiteHome />
-      </BookingProvider>
+      <MemberProvider>
+        <BookingProvider>
+          <SiteHome />
+        </BookingProvider>
+      </MemberProvider>
     </SiteProvider>
   )
 }

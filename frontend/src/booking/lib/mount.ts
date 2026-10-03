@@ -100,7 +100,7 @@ export function useSiteSlug(): string | undefined {
 }
 
 // pages a pinned engine serves from "/" (everything else on the host is the platform's)
-const PINNED_ROUTE = /^\/(?:|manage|confirmation\/[^/]+|pay|pay\/.+)$/
+const PINNED_ROUTE = /^\/(?:|manage|member|confirmation\/[^/]+|pay|pay\/.+)$/
 
 /** In-app router path for a URL of this booking engine, else null (leave the app).
  * - /book/… on any host (this host, the TEX host behind a dev proxy, a verified custom

@@ -73,6 +73,19 @@ export interface Site {
   self_service: boolean
   analytics: { ga4?: string | null; gtm?: string | null; meta_pixel?: string | null; consent_banner: boolean }
   extras: Record<string, SiteExtra[]>
+  /** the site's loyalty programs a guest may sign in to or join (C-04, ADR-078); null: none */
+  membership?: { programs: string[] } | null
+}
+
+/** A guest signed in on the site (public.member_status) */
+export interface MemberStatus {
+  signed_in: boolean
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+  /** a member of the program of at least one of the site's hotels */
+  member: boolean
+  hotels: string[]
 }
 
 export interface CancellationRule {
@@ -144,6 +157,8 @@ export interface Promotion {
   discount?: string
   code?: string | null
   value_added?: string | null
+  /** a members-only promotion: the signed-in member's price (C-04) */
+  member_only?: boolean
 }
 
 export interface RoomQuote {
@@ -177,6 +192,8 @@ export interface OfferRoom {
   room_index: number
   offer_key: string
   quote: RoomQuote
+  /** what a member pays for this room ("Member price", applied only when signed in) */
+  member_total?: Money
 }
 
 export interface RoomReason extends OfferReason {
@@ -205,6 +222,10 @@ export interface Offer {
   complete: boolean
   /** why it does not fit the other rooms */
   room_reasons?: RoomReason[]
+  /** a members-only promotion priced it: the signed-in member's price */
+  member_price?: boolean
+  /** what a member pays for every requested room, shown beside anyone's price (only when `complete`) */
+  member_total?: Money
 }
 
 export interface RoomContent {
@@ -233,6 +254,8 @@ export interface PropertyResult {
   from_currency?: string | null
   /** requested rooms (0-based) no room type of this hotel fits */
   unplaced_rooms?: number[]
+  /** the cheapest placement at a member's price, when lower */
+  member_from_total?: Money | null
 }
 
 export interface SearchResult {
@@ -243,6 +266,8 @@ export interface SearchResult {
   residency?: Residency | null
   rooms: { adults: number; children: { age: number | null }[] }[]
   properties: PropertyResult[]
+  /** the member session sent: signed in, and the hotels it is priced as a member at */
+  member?: { signed_in: boolean; hotels: string[] }
 }
 
 export interface QuoteResponse {
