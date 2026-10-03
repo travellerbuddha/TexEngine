@@ -648,8 +648,9 @@ fi
 step "Frappe bench ($FRAPPE_BRANCH)"
 if [ "$NEED_INIT" = 0 ]; then
 	have_frappe=$(env_py -c 'import frappe; print(frappe.__version__)' 2>/dev/null || echo '?')
-	if [ "v$have_frappe" != "$FRAPPE_BRANCH" ]; then
-		info "note: this bench runs Frappe $have_frappe, not $FRAPPE_BRANCH; keeping it (NATIVE.md section 5 moves it)"
+	# only against a release tag (a branch name is no version) and a version that could be read
+	if [[ "$FRAPPE_BRANCH" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$have_frappe" != '?' ] && [ "v$have_frappe" != "$FRAPPE_BRANCH" ]; then
+		warn "this bench runs Frappe $have_frappe, not $FRAPPE_BRANCH; keeping it (NATIVE.md section 5 moves it)"
 	fi
 	skip "bench exists at $DIR (Frappe $have_frappe)"
 else
