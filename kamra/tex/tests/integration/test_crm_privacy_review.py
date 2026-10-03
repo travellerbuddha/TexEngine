@@ -418,6 +418,28 @@ class TestGuestMerge(PrivacyCase):
 		as_user(self.here)
 		self.assertIn("the duplicate's own record", {c["reason"] for c in crm_api.guest(kept)["consent_history"]})
 
+	def test_c03_a_merge_keeps_each_contact_its_merged_consent_allows(self):
+		"""C-03 (2M review round 1): the merged profile keeps the consents both profiles gave, and each case keeps
+		what they allow. Two profiles that agreed to SMS only: the cases keep the profile and the phone (they were
+		made anonymous). E-mail on both, SMS on the duplicate only: its case keeps the e-mail, not the phone (O-26;
+		the phone stayed)."""
+		def case(session: str):
+			return frappe.db.get_value("TEX Abandoned Booking", {"session_id": session}, ["guest", "email", "phone"])
+
+		_b, kept = self.booked_guest("c03m-a", "c03m-a@example.com", consent_sms=1, phone="+49 30 8890")
+		_b, dup = self.booked_guest("c03m-b", "c03m-b@example.com", consent_sms=1, phone="+49 30 8891")
+		_b, kept2 = self.booked_guest("c03m-c", "c03m-c@example.com", consent_email=1, phone="+49 30 8892")
+		_b, dup2 = self.booked_guest("c03m-d", "c03m-d@example.com", consent_email=1, consent_sms=1, phone="+49 30 8893")
+		crm.detect_abandoned(now=later())
+		self.assertEqual(case("c03m-d"), (dup2, "c03m-d@example.com", "+49 30 8893"))
+		as_user(self.here)
+		crm_api.merge_guests(source=dup, target=kept)
+		crm_api.merge_guests(source=dup2, target=kept2)
+		as_user("Administrator")
+		self.assertEqual((case("c03m-a"), case("c03m-b")), ((kept, None, "+49 30 8890"), (kept, None, "+49 30 8891")))
+		self.assertEqual((case("c03m-c"), case("c03m-d")),
+		                 ((kept2, "c03m-c@example.com", None), (kept2, "c03m-d@example.com", None)))
+
 	def test_consent_both_gave_stays_given(self):
 		kept, dup, _rec = self.pair("m2-both")
 		frappe.db.set_value("Guest", dup, "tex_consent_email", 1)

@@ -483,6 +483,58 @@ class TestAbandonedPrivacy(PrivacyCase):
 		case = frappe.db.get_value("TEX Abandoned Booking", stored["both"].name, ["guest", "email", "phone"])
 		self.assertEqual(case, (guests["both"], "o26-both@example.com", None))        # the e-mail case stays
 
+	def test_c03_a_guest_who_agrees_to_sms_or_whatsapp_only_is_listed_with_the_phone(self):
+		"""C-03 (owner, 2026-10-03): a guest who agreed to SMS or WhatsApp but not to marketing e-mail was anonymous in
+		the list (the session's e-mail tick and the profile's e-mail consent decided). The case now keeps the profile
+		and the phone, never the e-mail; the list names the channels the guest agreed to. No consent: anonymous."""
+		sessions = {"sms": dict(consent_sms=1), "wa": dict(consent_whatsapp=1), "none": {}}
+		guests, phones = {}, {key: f"+49 30 270{i}" for i, key in enumerate(sessions)}
+		for key, consent in sessions.items():
+			_b, guests[key] = self.booked_guest(f"c03-{key}", f"c03-{key}@example.com", phone=phones[key], **consent)
+		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
+		stored = {k: frappe.db.get_value("TEX Abandoned Booking", {"session_id": f"c03-{k}"},
+		                                 ["name", "guest", "email", "phone", "consent_marketing"], as_dict=True)
+		          for k in sessions}
+		self.assertEqual({k: (c.guest, c.email, c.phone, c.consent_marketing) for k, c in stored.items()},
+		                 {"sms": (guests["sms"], None, phones["sms"], 1), "wa": (guests["wa"], None, phones["wa"], 1),
+		                  "none": (None, None, None, 0)})
+		# no e-mail consent, no e-mail hash in the funnel
+		self.assertEqual({e.email_hash for k in sessions for e in funnel(f"c03-{k}")}, {None})
+		as_user(self.here)
+		listed = {k: next(r for r in crm_api.abandoned(fx.PROPERTY) if r["name"] == c.name) for k, c in stored.items()}
+		self.assertEqual({k: (r["guest"], r["email"], r["phone"], r["phone_channels"]) for k, r in listed.items()},
+		                 {"sms": (guests["sms"], None, phones["sms"], ["SMS"]),
+		                  "wa": (guests["wa"], None, phones["wa"], ["WhatsApp"]), "none": (None, None, None, [])})
+
+	def test_c03_a_withdrawal_keeps_only_what_another_consent_still_allows(self):
+		"""C-03: e-mail consent withdrawn while SMS holds: the case keeps the profile and the phone, loses the e-mail,
+		and the funnel loses the e-mail hash; the last consent withdrawn (in the CRM, or where no hook sees it) makes
+		the case anonymous."""
+		_b, both = self.booked_guest("c03-both", "c03-both@example.com", phone="+49 30 2801", consent_email=1,
+		                             consent_sms=1)
+		_b, sms = self.booked_guest("c03-sms-wd", "c03-sms-wd@example.com", phone="+49 30 2802", consent_sms=1)
+		_b, direct = self.booked_guest("c03-direct", "c03-direct@example.com", phone="+49 30 2803", consent_whatsapp=1)
+		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
+		case = {k: frappe.db.get_value("TEX Abandoned Booking", {"session_id": k}) for k in
+		        ("c03-both", "c03-sms-wd", "c03-direct")}
+		self.assertTrue([e for e in funnel("c03-both") if e.email_hash])
+		as_user(self.here)
+		crm_api.update_guest(both, {"tex_consent_email": 0}, consent_source="guest asked")
+		crm_api.update_guest(sms, {"tex_consent_sms": 0}, consent_source="guest asked")
+		as_user("Administrator")
+		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", case["c03-both"], ["guest", "email", "phone"]),
+		                 (both, None, "+49 30 2801"))
+		self.assertEqual({e.email_hash for e in funnel("c03-both")}, {None})
+		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", case["c03-sms-wd"],
+		                                     ["guest", "email", "phone", "consent_marketing"]), (None, None, None, 0))
+		frappe.db.set_value("Guest", direct, "tex_consent_whatsapp", 0, update_modified=False)   # no hook sees it
+		as_user(self.here)
+		listed = {r["name"]: r for r in crm_api.abandoned(fx.PROPERTY)}
+		self.assertEqual((listed[case["c03-both"]]["email"], listed[case["c03-both"]]["phone"],
+		                  listed[case["c03-both"]]["phone_channels"]), (None, "+49 30 2801", ["SMS"]))
+		self.assertEqual((listed[case["c03-direct"]]["guest"], listed[case["c03-direct"]]["phone"],
+		                  listed[case["c03-direct"]]["consent_marketing"]), (None, None, 0))
+
 	def test_contact_data_is_shown_only_while_the_consent_holds(self):
 		b, guest = self.booked_guest("g81-wd", "g81-wd@example.com", consent_email=1, phone="+49 30 99")
 		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))

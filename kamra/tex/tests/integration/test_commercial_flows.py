@@ -1984,6 +1984,17 @@ class TestPromotionSaveChecks(TexTestCase):
 		frappe.db.set_value("TEX Promotion", name, "code", "WİNTER")          # stored before this change
 		self.assertRefused(self.draft, trigger="Code", code="winter")
 
+	def test_c12_a_code_with_turkish_letters_is_stored_and_compared_by_its_latin_key(self):
+		"""C-12 (owner, 2026-10-03): ŞEKER is stored as SEKER, and SEKER is refused beside it; a code stored
+		before C-12 (ÇAĞ) is compared by its key (CAG) too, however the new one is typed."""
+		name = self.draft(trigger="Code", code="şeker")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "code"), "SEKER")
+		self.assertRefused(self.draft, trigger="Code", code="SEKER")
+		other = self.draft(trigger="Code", code="cag")
+		frappe.db.set_value("TEX Promotion", other, "code", "ÇAĞ")           # stored before C-12
+		self.assertRefused(self.draft, trigger="Code", code="çağ")
+		self.assertRefused(self.draft, trigger="Code", code="CAG")
+
 	def test_a_member_only_promotion_is_refused_until_a_sale_knows_members(self):
 		"""G-57: no search or quote tells the engine the guest is a member, so a members-only promotion
 		never applied. It is refused on a draft's save and activation; a live one stays archivable."""

@@ -2,7 +2,7 @@
 // reservation change where the revenue manager sees OLD vs NEW price before applying.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e crs
 import { expect, test, type Page } from "@playwright/test"
-import { byLabel, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
+import { byLabel, login, pageApi, pageApiOk, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
 import { applyChange, openReservation, proposeChange, readLockedPrice, readRevisions } from "./flows/reservations"
 
 // typed dates follow the browser locale (mm/dd/yyyy); the UI language is pinned per page
@@ -190,6 +190,50 @@ test("Reservation change: OLD vs NEW price before applying, then a new revision"
   expect(revisions[0]).toMatchObject({ oldAmount: p.old.amount, newAmount: p.proposed.amount })
   expect(revisions[0].text).toContain(`Guest extends by one night (${run})`)
   expect(revisions.at(-1)?.changeType).toBe("Original")
+  noErrors()
+})
+
+test("C-02: an agent changing a stay priced by hand is not offered the change's price", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  await english(page)
+  await login(page, "revenue@demo.tex")
+  await page.goto(texPath("/tex/reservations"))
+
+  // a confirmed stay the revenue manager prices by hand (set up through the API)
+  const run = uniqueRunId()
+  const { checkIn, checkOut } = stayDates(95, 2)
+  const s = await pageApiOk<{ properties: { offers: { refundable?: boolean; rooms: { offer_key: string }[] }[] }[] }>(
+    page,
+    "kamra.tex.api.ui_crs.search",
+    { check_in: checkIn, check_out: checkOut, rooms: [{ adults: 2, children: [] }], market: "DE", properties: ["Aurora Beach Resort"] },
+  )
+  const offers = s.properties[0].offers
+  const offer = offers.find((o) => o.refundable) ?? offers[0]
+  const q = await pageApiOk<{ quote_id: string }>(page, "kamra.tex.api.crs.quote", { offer_key: offer.rooms[0].offer_key })
+  const bk = await pageApiOk<{ booking: string; status: string }>(page, "kamra.tex.api.ui_crs.book", {
+    quote_ids: [q.quote_id],
+    guest: { first_name: "Hana", last_name: `Byhand ${run}`, email: `hana.${run.toLowerCase()}@example.com` },
+    payment_method: "Pay at Hotel",
+    confirm_without_payment: 1,
+    idempotency_key: `e2e-c02-${run}`,
+  })
+  expect(bk.status).toBe("Confirmed")
+  const name = await openReservation(page, { booking: bk.booking })
+  const priced = await pageApiOk<{ proposal_token: string }>(page, "kamra.tex.api.crs.propose_modification", { reservation: name, changes: {} })
+  await pageApiOk(page, "kamra.tex.api.crs.apply_modification", { proposal_token: priced.proposal_token, reason: `Corporate rate (${run})`, override_amount: "123.00" })
+
+  // the agent sees both prices, is told who can make the change, and cannot apply it
+  await login(page, "agent@demo.tex")
+  await openReservation(page, { reservation: name })
+  expect((await readLockedPrice(page)).amount).toBe("123.00")
+  await proposeChange(page, { checkOut: addDays(checkOut, 1), basis: "CURRENT" })
+  const drawer = page.getByRole("dialog", { name: /^Modify / })
+  await expect(drawer.getByText("Price set by hand", { exact: true })).toBeVisible()
+  await expect(drawer.getByText("Only staff who may set prices can change a stay priced by hand. Ask a revenue manager to make this change.")).toBeVisible()
+  await expect(drawer.getByRole("button", { name: "Use the change's price" })).toHaveCount(0)
+  await expect(drawer.getByText(/kept unless you use the change's price/)).toHaveCount(0) // review round 1: no choice offered in words either
+  await byLabel(drawer, "Reason").fill(`One more night (${run})`)
+  await expect(drawer.getByRole("button", { name: "Apply change" })).toBeDisabled()
   noErrors()
 })
 

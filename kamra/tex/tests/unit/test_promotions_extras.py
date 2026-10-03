@@ -304,14 +304,14 @@ class TestGroupRule(unittest.TestCase):
 
 
 class TestCodeKey(unittest.TestCase):
-	"""O-31: a promotion code is compared by its key: Turkish dotted and dotless i are I, other
-	letters (Ş, Ğ, Ü, Ö, Ç) are kept upper-cased."""
+	"""O-31: a promotion code is compared by its key: Turkish dotted and dotless i are I; C-12 (owner,
+	2026-10-03): Ş, Ğ, Ü, Ö, Ç are S, G, U, O, C, so a guest without a Turkish keyboard types the code."""
 
 	def test_cases(self):
 		for typed, key in (("winter", "WINTER"), ("wİnter", "WINTER"), ("WİNTER", "WINTER"), ("wınter", "WINTER"),
 		                   ("wi\u0307nter", "WINTER"), ("WI\u0307NTER", "WINTER"), ("  yaz-24 ", "YAZ-24"),
-		                   ("şeker", "ŞEKER"), ("ŞEKER", "ŞEKER"), ("dağ", "DAĞ"), ("üçgöz", "ÜÇGÖZ"),
-		                   ("s\u0327eker", "ŞEKER")):
+		                   ("şeker", "SEKER"), ("ŞEKER", "SEKER"), ("dağ", "DAG"), ("üçgöz", "UCGOZ"),
+		                   ("s\u0327eker", "SEKER")):
 			with self.subTest(typed=typed):
 				self.assertEqual(promotions.code_key(typed), key)
 				self.assertEqual(promotions.code_key(key), promotions.code_key(typed))      # idempotent
@@ -339,7 +339,21 @@ class TestCodeKey(unittest.TestCase):
 	def test_a_code_stored_with_a_turkish_i_matches(self):
 		self.assertEqual(self.price("winter", "WİNTER"), D("540.00"))
 		self.assertEqual(self.price("şeker", "ŞEKER"), D("540.00"))
-		self.assertEqual(self.price("seker", "ŞEKER"), D("600.00"))            # Ş is not S
+		self.assertEqual(self.price("seker", "ŞEKER"), D("540.00"))            # Ş is S (C-12)
+
+	def test_c12_the_turkish_letters_fold_to_their_latin_base(self):
+		"""C-12 (owner, 2026-10-03): ŞEKER and SEKER, ÇAĞ and CAG are one code; composed or decomposed, upper or
+		lower case; any other letter keeps its marks (É, Ñ, Ä are not Turkish letters)."""
+		for typed, key in (("ŞĞÜÖÇ", "SGUOC"), ("şğüöç", "SGUOC"), ("çağ", "CAG"), ("ÇAĞ", "CAG"),
+		                   ("c\u0327ag\u0306", "CAG"), ("u\u0308c\u0327go\u0308z", "UCGOZ"), ("S\u0327\u0323", "\u1E62"),
+		                   ("kış-24", "KIS-24"), ("öğretmen_ü", "OGRETMEN_U"), ("éte", "ÉTE"), ("año", "AÑO"),
+		                   ("bär", "BÄR")):
+			with self.subTest(typed=typed):
+				self.assertEqual(promotions.code_key(typed), key)
+				self.assertEqual(promotions.code_key(key), key)                    # idempotent
+		self.assertEqual(self.price("cag", "ÇAĞ"), D("540.00"))
+		self.assertEqual(self.price("ÇAĞ", "CAG"), D("540.00"))
+		self.assertEqual(self.price("kis", "KIŞ"), D("540.00"))
 
 
 def xctx(**kw):

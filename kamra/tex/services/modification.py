@@ -553,9 +553,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 
 	A stay whose price staff set by hand (``booking.manual_price``) keeps it on a change only by an
 	explicit choice (D-9, ADR-065): ``override_amount`` (``price.override``; the drawer fills in the
-	price set by hand) or ``reprice`` (``reservation.modify``: the change's price, the revision's
-	``manual_price_dropped`` and an audit event say so); with neither the change is refused, naming
-	both amounts. Never repriced silently.
+	price set by hand) or ``reprice`` (the change's price, the revision's ``manual_price_dropped`` and an
+	audit event say so); with neither the change is refused, naming both amounts. Never repriced silently.
+	Staff without ``price.override`` change no such stay, whatever they chose (C-02, ADR-076).
 
 	Locks: the booking, then the reservation, then the inventory days: the order every path that
 	changes a TEX booking takes (review of ADR-044)."""
@@ -608,12 +608,18 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		             refusal("RESERVATION_CHANGED"))
 	if not (reason or "").strip():
 		frappe.throw(_("A reason is required for every modification."), refusal("INVALID_REQUEST"))
+	manual = booking_svc.manual_price(res)
+	if manual is not None and not _guest_authorized and not scope.has_capability("price.override", res.property):
+		# C-02 (owner, 2026-10-03): a stay priced by hand is changed only by who may set prices, whatever they
+		# chose (keep it, the change's price, or neither): before its nights are locked or anything is written
+		frappe.throw(_("The price of this stay was set by hand: only staff who may set prices can change this "
+		               "stay. Ask a revenue manager to make this change."),
+		             refusal("NOT_PERMITTED", frappe.PermissionError))
 	if override_amount not in (None, ""):
 		scope.require("price.override", res.property)
 		if reprice:
 			frappe.throw(_("Choose one: keep a price set by hand, or use the price of the change."),
 			             refusal("INVALID_REQUEST"))
-	manual = booking_svc.manual_price(res)
 
 	# lock the new nights first, then recompute deterministically under the lock
 	changes = p["changes"]

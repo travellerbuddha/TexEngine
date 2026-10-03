@@ -113,17 +113,22 @@ PROMO_NO_FX = "PROMO_NO_FX"
 COUPON_REJECTED = "COUPON_REJECTED"
 
 
+# C-12 (owner, 2026-10-03): the Turkish letters are their Latin base, so a guest without a Turkish keyboard
+# types the code (ŞEKER is SEKER); any other letter keeps its marks
+TURKISH_FOLD = str.maketrans("ŞĞÜÖÇ", "SGUOC")
+
+
 def code_key(code: str | None) -> str | None:
 	"""What a promotion code is compared by (O-31): NFC, trimmed, the Turkish dotted İ and dotless ı
 	as I, upper-cased, and a combining dot above an I dropped (a lower-case i with a dot, upper-cased),
-	repeated until nothing changes. Ş, Ğ, Ü, Ö, Ç stay letters of their own. Idempotent; None when blank."""
+	Ş, Ğ, Ü, Ö, Ç as S, G, U, O, C (C-12), repeated until nothing changes. Idempotent; None when blank."""
 	if code is None:
 		return None
 	key = unicodedata.normalize("NFC", str(code).strip())
 	# to a fixed point: stacked dots above (İ + U+0307 …) turn back into İ under NFC, one per pass (2D-1)
 	for _pass in range(len(key) + 2):             # a changing pass drops a mark (or upper-cases once)
 		step = unicodedata.normalize(
-			"NFC", key.replace("İ", "I").replace("ı", "I").upper().replace("I\u0307", "I"))
+			"NFC", key.replace("İ", "I").replace("ı", "I").upper().replace("I\u0307", "I")).translate(TURKISH_FOLD)
 		if step == key:
 			break
 		key = step

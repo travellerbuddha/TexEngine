@@ -2908,7 +2908,9 @@ three Low, fixed as follows.
     abandoned-payment contact depend on the profile's own consent. A per-hotel legitimate-interest
     setting is a legal decision for the owner (recorded as an open item), not a default;
   - contact data of a case is stored only with the profile's own e-mail consent (ADR-046) and
-    shown only while that consent holds: withdrawn later, the case stays, anonymous;
+    shown only while that consent holds: withdrawn later, the case stays, anonymous; *amended by
+    ADR-076 (C-03):* the profile's own consent on any channel keeps the case, each contact with its
+    channel's consent (the e-mail with e-mail consent, the phone with SMS or WhatsApp);
   - a case is recovered when its session books, or when the booking it left at payment is paid
     later (`Confirmed` / `Partially Cancelled`): at detection for sessions still in the window, and
     by a sweep of open payment-stage cases of the last 60 days (a payment link's life);
@@ -9416,7 +9418,8 @@ the versions the roll superseded the state their contract's later publishes woul
   `_refresh_booking_after_change`. Money reads the stored price; the snapshot gives only the terms, never the price.
 - `required_now` = each live room's `amount_due_now` (its frozen policy, its stored price) + the cancelled rooms' fees.
 - Extras add to the stored price; a price set by hand stays one. A later stay change needs staff's choice (keep it, or the
-  change's price, audited); a guest cannot change such a stay online (D-9).
+  change's price, audited); a guest cannot change such a stay online (D-9). *Amended by ADR-076 (C-02):* either choice
+  needs `price.override`.
 - A booking cancelled never confirmed holds no money: on its cancellation and on every refund outcome it goes to
   reconciliation (keys `cancelled:`, `refund:`, `refund-fix:`; `expired:` stays B2/D4's). Gateway, link and transfer money is
   allocated up to what the booking owes, the rest stays on the charge (`OVERPAID`); status check `payments.overpaid`.
@@ -9521,6 +9524,7 @@ the versions the roll superseded the state their contract's later publishes woul
 - *Minimum basket (D-18).* Accommodation before discounts plus extras, of the booking's rooms it covers, in the promotion's
   currency; a minimum requires that currency. *Members only (G-57):* refused until a sale carries a membership signal.
 - *Codes (O-31).* Compared by `code_key` (İ and ı are I); p60 rewrites stored codes and reports clashes, never payloads.
+  *Amended by ADR-076 (C-12):* Ş, Ğ, Ü, Ö, Ç are S, G, U, O, C too; p60 keeps the O-31 key it was written with.
 - *Markups (G-53).* A REPLACE markup tying a live one (scope, priority, stay dates) is refused on activation (serialised);
   publishing from the contract page runs the workspace's board checks. `level()` and server defaults are unchanged.
 - New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.
@@ -9830,3 +9834,44 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   - The content mounts, hidden, with the parent's state as it was: what it does on mount sees the last session's
     props (a picker may fetch for them before the reset). State a content component copies from its props at mount
     (`useState(prop)`) is not reset by the parent's effect: such a form is still mounted per opening (keyed).
+
+## ADR-076 Owner decisions C-01, C-02, C-03, C-12 (audit Part 2M)
+The owner answered four questions of HANDOFF_LEFTOVERS §3 on 2026-10-03.
+- *C-12: a promotion code's Turkish letters are their Latin base.* A guest without a Turkish keyboard types SEKER for
+  ŞEKER, CAG for ÇAĞ. `promotions.code_key` (O-31: İ and ı as I) also makes Ş, Ğ, Ü, Ö, Ç S, G, U, O, C (`TURKISH_FOLD`),
+  composed or decomposed, to the same fixed point; any other letter keeps its marks (É, Ñ, Ä). The CRS input's mirror
+  (`normalisePromoCode`) folds the same letters.
+  - A code is stored and compared by that key, so ŞEKER and SEKER are one code: a draft whose key another draft or live
+    promotion of the hotel has is refused.
+  - A stored code is keyed again on every read (the engine, a contract's offers, a promotion's save and its clash
+    check): a code stored before as KIŞ matches KIS. No patch (D-14). p60 keeps the O-31 key it was written with
+    (`o31_key`): a patch does what it did when it was written.
+  - ENGINE_VERSION unchanged, as for O-31.
+- *C-02: only who may set prices drops a price set by hand.* A stay a revenue manager priced by hand (D-9, ADR-065) is
+  changed only by staff with `price.override` at the hotel: keeping the price set by hand needed it already, and now
+  taking the change's price (`reprice`) does too. Anyone else is refused whatever they chose (keep it, the change's
+  price, or neither), before the nights are locked or anything is written (403, `NOT_PERMITTED`; the message names
+  revenue management); the modify drawer offers the change's price only to who may set prices and tells anyone else
+  to ask a revenue manager. Guests were refused already; add-ons keep the price set
+  by hand, as before.
+- *C-03: each contact of an abandoned case follows its own channel's consent.* A guest who agreed to SMS or WhatsApp
+  but not to marketing e-mail is listed with the phone, so the team follows up on those channels (registering consent
+  with İYS is the hotel's side until C-10). The profile's own consent still decides (ADR-046):
+  - the session's consent mark (`TEX Funnel Event.consent_marketing`) is any of the three ticks; the e-mail hash is
+    kept only with the e-mail tick (`_track`'s `email_consent`, ADR-056);
+  - a case is anonymous when the profile agrees to nothing; otherwise it keeps the profile, the e-mail only with
+    e-mail consent, the phone only with SMS or WhatsApp consent (O-26), at detection, on its own save (read with a
+    lock) and in the list;
+  - e-mail consent withdrawn while SMS or WhatsApp holds takes the e-mail off the cases and the hashes off the funnel
+    (`forget_contact(keep_phone=True)`); the last consent withdrawn, or an e-mail or phone cleared, makes the cases
+    anonymous; the last phone channel withdrawn while e-mail holds takes the phone off (as before). A guest merge,
+    whose profile keeps only the consents both gave, does the same to the cases it moves (review round 1).
+  - The session's mark says the visitor agreed to marketing on some channel; which contact a case keeps is the
+    profile's own consent per channel. A visitor who ticked SMS while the profile had agreed to e-mail before is listed
+    with the e-mail too: that consent is the profile's, given on a channel where the guest proved it (ADR-046).
+  - Segment facts count such a guest's abandoned cases, as they count any case that names its guest.
+- *C-01: a no-show keeps the points the stay was paid with.* A guest who paid part of a stay with loyalty points and
+  did not come gets nothing back: the points stay with the hotel, as a fee keeps the points it took; a cancellation
+  gives them back (O-20). This is what TEX did: `return_points` gives back what a booking holds beyond its cost, and a
+  No Show (set by staff in Desk or REST; TEX sets none) leaves the booking's total as it was. The stay's own earning is
+  reversed. Pinned by a test. Who charges a no-show fee and where a no-show comes from stay with D-15 / G-69r.
