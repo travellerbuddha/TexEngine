@@ -686,7 +686,7 @@
   "refusal.MEMBER_LINK_INVALID": "This link is not valid or has expired. Please ask for a new one.",
   "refusal.MEMBER_SESSION_ENDED": "You are signed out. Please sign in again to see your member prices.",
   "refusal.NOT_A_MEMBER": "There is no membership with this e-mail yet. You can join the program instead.",
-  "refusal.MEMBERS_ONLY": "This member price is for the signed-in member only. Book with your own name and e-mail, or search again.",
+  "refusal.MEMBERS_ONLY": "This member price is for members of the hotel's program only. Refresh the prices to see the price you can book.",
   "member.signIn": "Member sign-in",
   "member.signInTitle": "Member sign-in",
   "member.signInTab": "Sign in",
@@ -697,11 +697,11 @@
   "member.sentTitle": "Check your e-mail",
   "member.sentBody": "We sent an e-mail to {email}. Its link works once, for 30 minutes.",
   "member.joinSentBody": "We sent a link to {email}. Open it within 30 minutes to confirm your membership.",
-  "member.accept": "I want to join {program} and accept its membership terms.",
+  "member.accept": "I want to become a member of {program}.",
   "member.acceptHint": "Your name and e-mail are used for your membership. You can ask the hotel to end it at any time.",
   "member.joinTitle": "Join {program}",
   "member.joinNow": "Join {program}",
-  "member.joinSignedIn": "You are signed in as {email}. Join {program} for member prices on your stays.",
+  "member.joinSignedIn": "You are signed in as {email}. To join {program}, we send a link to this address: opening it confirms your membership.",
   "member.already": "You are a member of {program}. Your searches show member prices.",
   "member.hello": "Hello, {name}",
   "member.signOut": "Sign out",
@@ -716,5 +716,8 @@
   "member.teaser": "Member price: {amount}",
   "member.teaserSignIn": "Sign in or join to get it",
   "member.fromPrice": "Member price from {amount}",
-  "member.emailLocked": "Your member price is booked under the e-mail you signed in with."
+  "member.emailLocked": "Your member price is booked under the e-mail you signed in with.",
+  "member.linkReadyTitle": "Your {program} link",
+  "member.linkReadyBody": "Continue to sign in on this device and see your member prices.",
+  "member.continue": "Continue"
 }

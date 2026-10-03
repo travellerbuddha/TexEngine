@@ -95,7 +95,8 @@ T: dict[str, dict[str, tuple[str, str]]] = {
 
 # C-04 on the web (ADR-078): a one-time link to sign in, or to confirm joining, at {hotel}; {program}: the program's
 # name; {minutes}: how long the link works. An address with no membership asked to sign in gets "member_none", with a
-# link to joining and no token
+# link to joining and no token. No mail greets by a name: a visitor types the names for an address they may not own
+# (review round 1)
 T["member_sign_in"] = {
 	"en": ("Your sign-in link for {hotel}",
 	       "Hello,<br><br>use the button below to sign in to {program} at {hotel} and see your member prices. The link "
@@ -122,27 +123,27 @@ T["member_sign_in"] = {
 }
 T["member_join"] = {
 	"en": ("Confirm that you join {program}",
-	       "Dear {name},<br><br>use the button below to confirm that you join {program} at {hotel}. You are then a member "
+	       "Hello,<br><br>use the button below to confirm that you join {program} at {hotel}. You are then a member "
 	       "and see member prices at once. The link works once, for {minutes} minutes. If you did not ask for it, you can "
 	       "ignore this e-mail: nothing happens."),
 	"tr": ("{program} üyeliğinizi onaylayın",
-	       "Sayın {name},<br><br>{hotel} {program} programına katıldığınızı onaylamak için aşağıdaki düğmeyi kullanın. "
+	       "Merhaba,<br><br>{hotel} {program} programına katıldığınızı onaylamak için aşağıdaki düğmeyi kullanın. "
 	       "Böylece üye olursunuz ve üye fiyatlarını hemen görürsünüz. Bağlantı bir kez ve {minutes} dakika boyunca "
 	       "çalışır. Bu isteği siz yapmadıysanız bu e-postayı dikkate almayın: hiçbir şey değişmez."),
 	"de": ("Bestätigen Sie Ihren Beitritt zu {program}",
-	       "Guten Tag {name},<br><br>bestätigen Sie mit der Schaltfläche unten, dass Sie {program} im {hotel} beitreten. "
+	       "Guten Tag,<br><br>bestätigen Sie mit der Schaltfläche unten, dass Sie {program} im {hotel} beitreten. "
 	       "Danach sind Sie Mitglied und sehen sofort Mitgliederpreise. Der Link funktioniert einmal, {minutes} Minuten "
 	       "lang. Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail: Es geschieht nichts."),
 	"ru": ("Подтвердите участие в {program}",
-	       "Здравствуйте, {name}!<br><br>Нажмите кнопку ниже, чтобы подтвердить участие в {program} отеля {hotel}. После "
+	       "Здравствуйте!<br><br>Нажмите кнопку ниже, чтобы подтвердить участие в {program} отеля {hotel}. После "
 	       "этого вы станете участником и сразу увидите цены для участников. Ссылка работает один раз в течение {minutes} "
 	       "минут. Если вы этого не запрашивали, проигнорируйте письмо: ничего не изменится."),
 	"ro": ("Confirmați înscrierea în {program}",
-	       "Stimate/Stimată {name},<br><br>folosiți butonul de mai jos pentru a confirma înscrierea în {program} de la "
+	       "Bună ziua,<br><br>folosiți butonul de mai jos pentru a confirma înscrierea în {program} de la "
 	       "{hotel}. Veți fi apoi membru și veți vedea imediat prețurile de membru. Linkul funcționează o singură dată, "
 	       "timp de {minutes} minute. Dacă nu ați cerut acest lucru, ignorați e-mailul: nu se întâmplă nimic."),
 	"pl": ("Potwierdź dołączenie do {program}",
-	       "Dzień dobry {name},<br><br>użyj przycisku poniżej, aby potwierdzić dołączenie do {program} w {hotel}. Staniesz "
+	       "Dzień dobry,<br><br>użyj przycisku poniżej, aby potwierdzić dołączenie do {program} w {hotel}. Staniesz "
 	       "się członkiem i od razu zobaczysz ceny dla członków. Link działa jeden raz przez {minutes} minut. Jeśli o to "
 	       "nie prosiłeś, zignoruj tę wiadomość: nic się nie zmieni."),
 }

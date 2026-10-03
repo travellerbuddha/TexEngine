@@ -933,10 +933,11 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	ended = loyalty.end_memberships(guest, "erased")    # no member prices for a profile nobody is (C-04)
 	from kamra.tex.crm import members
 
-	ended += members.end_sessions(guest)                # signed out on every booking site (ADR-078)
+	sessions = members.end_sessions(guest)              # signed out on every booking site (ADR-078)
 	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
-	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended}
-	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended
+	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended,
+	       "sessions_ended": sessions}
+	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended + sessions
 	if audit_event:
 		audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
 	return out

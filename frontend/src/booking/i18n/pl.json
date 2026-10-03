@@ -686,7 +686,7 @@
   "refusal.MEMBER_LINK_INVALID": "Ten link jest nieprawidłowy lub wygasł. Poproś o nowy.",
   "refusal.MEMBER_SESSION_ENDED": "Wylogowano Cię. Zaloguj się ponownie, aby zobaczyć ceny dla członków.",
   "refusal.NOT_A_MEMBER": "Z tym adresem e-mail nie ma jeszcze członkostwa. Możesz dołączyć do programu.",
-  "refusal.MEMBERS_ONLY": "Ta cena dla członków dotyczy tylko zalogowanego członka. Zarezerwuj na własne imię i e-mail albo wyszukaj ponownie.",
+  "refusal.MEMBERS_ONLY": "Ta cena dla członków jest tylko dla członków programu hotelu. Odśwież ceny, aby zobaczyć cenę, którą możesz zarezerwować.",
   "member.signIn": "Logowanie członków",
   "member.signInTitle": "Logowanie członków",
   "member.signInTab": "Zaloguj się",
@@ -697,11 +697,11 @@
   "member.sentTitle": "Sprawdź e-mail",
   "member.sentBody": "Wysłaliśmy wiadomość na {email}. Link w niej działa jeden raz, przez 30 minut.",
   "member.joinSentBody": "Wysłaliśmy link na {email}. Otwórz go w ciągu 30 minut, aby potwierdzić członkostwo.",
-  "member.accept": "Chcę dołączyć do {program} i akceptuję warunki członkostwa.",
+  "member.accept": "Chcę zostać członkiem {program}.",
   "member.acceptHint": "Twoje imię, nazwisko i e-mail są używane do członkostwa. W każdej chwili możesz poprosić hotel o jego zakończenie.",
   "member.joinTitle": "Dołącz do {program}",
   "member.joinNow": "Dołącz do {program}",
-  "member.joinSignedIn": "Zalogowano jako {email}. Dołącz do {program}, aby korzystać z cen dla członków.",
+  "member.joinSignedIn": "Zalogowano jako {email}. Aby dołączyć do {program}, wyślemy link na ten adres: jego otwarcie potwierdzi członkostwo.",
   "member.already": "Jesteś członkiem {program}. Wyniki wyszukiwania pokazują ceny dla członków.",
   "member.hello": "Dzień dobry, {name}",
   "member.signOut": "Wyloguj się",
@@ -716,5 +716,8 @@
   "member.teaser": "Cena dla członków: {amount}",
   "member.teaserSignIn": "Zaloguj się lub dołącz",
   "member.fromPrice": "Cena dla członków od {amount}",
-  "member.emailLocked": "Cena dla członków jest rezerwowana na e-mail, którym się zalogowano."
+  "member.emailLocked": "Cena dla członków jest rezerwowana na e-mail, którym się zalogowano.",
+  "member.linkReadyTitle": "Twój link {program}",
+  "member.linkReadyBody": "Kontynuuj, aby zalogować się na tym urządzeniu i zobaczyć ceny dla członków.",
+  "member.continue": "Dalej"
 }

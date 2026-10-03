@@ -5,7 +5,9 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   forgetMemberSession,
+  isolateMemberData,
   keepMemberSession,
+  keepSessionsOnDevice,
   linkToken,
   memberPriced,
   memberReturn,
@@ -13,7 +15,7 @@ import {
   rememberMemberReturn,
   sessionTag,
 } from "../../src/booking/lib/member.ts"
-import { setJSON } from "../../src/booking/lib/storage.ts"
+import { getItem, setJSON } from "../../src/booking/lib/storage.ts"
 
 const DAY = 86400
 
@@ -93,4 +95,44 @@ test("a member's price: a members-only promotion that applied to a room", () => 
   assert.equal(memberPriced([{ promotions: [promo(false, true)] }]), false)
   assert.equal(memberPriced([{ promotions: [promo(true)] }]), false)
   assert.equal(memberPriced([undefined, null, { promotions: [] }]), false)
+})
+
+test("on a hotel's own host the session is kept on the device; on the platform's shared host only in the tab", () => {
+  const now = Date.now()
+  keepSessionsOnDevice(true)
+  keepMemberSession("aurora", "tok-device", DAY, now)
+  assert.ok(getItem("tex.member.aurora", "local"))
+  assert.equal(getItem("tex.member.aurora", "session"), null)
+  forgetMemberSession("aurora")
+  keepSessionsOnDevice(false)
+  keepMemberSession("aurora", "tok-tab", DAY, now)
+  assert.equal(getItem("tex.member.aurora", "local"), null)
+  assert.ok(getItem("tex.member.aurora", "session"))
+  assert.equal(memberSession("aurora", now), "tok-tab")
+  forgetMemberSession("aurora")
+  keepSessionsOnDevice(true)
+})
+
+test("on the platform's shared host a site's page keeps no other site's member data (owner, review round 1)", () => {
+  const now = Date.now()
+  setJSON("tex.member.borealis", { token: "theirs", expires: now + 1000 }, "session")
+  setJSON("tex.member.aurora", { token: "ours", expires: now + 1000 }, "session")
+  setJSON("tex.member.borealis", { token: "kept-on-device", expires: now + 1000 }, "local")
+  setJSON("tex.member.aurora", { token: "kept-on-device", expires: now + 1000 }, "local")
+  rememberMemberReturn("aurora", "?checkin=2026-11-01", now)
+  rememberMemberReturn("borealis", "?checkin=2026-12-01", now)
+  isolateMemberData("aurora")
+  keepSessionsOnDevice(false)
+  assert.equal(memberSession("aurora", now), "ours")
+  assert.equal(memberSession("borealis", now), null)
+  // nothing of a session stays on the device there; the search to return to is this site's only
+  assert.equal(getItem("tex.member.aurora", "local"), null)
+  assert.equal(getItem("tex.member.borealis", "local"), null)
+  assert.equal(memberReturn("borealis", now), null)
+  assert.equal(memberReturn("aurora", now), "?checkin=2026-11-01")
+  // a site-less page (a payment link) keeps none
+  setJSON("tex.member.aurora", { token: "ours", expires: now + 1000 }, "session")
+  isolateMemberData(null)
+  assert.equal(memberSession("aurora", now), null)
+  keepSessionsOnDevice(true)
 })

@@ -2,14 +2,16 @@
 // link and books the member price; anyone else sees it as "Member price", applied only signed in.
 // The revenue manager runs a loyalty program at Aurora Beach Resort (this run's, or one already enabled there) and
 // puts a members-only promotion live. A guest searches the site: the header offers "Member sign-in" and the rates
-// show "Member price: …". From a rate they join on the dialog (e-mail, name and the program's terms); the link of
-// the mail (read from the server's mail queue) signs them in and brings them back to their search, priced as a
-// member: "Your member price", no teaser. The details step is filled in from the membership, and the e-mail a
-// member's price is booked under cannot be changed; the booking is made. The link is spent: opened again it asks for
-// a new one. Signing out forgets the session on this device and the teaser is back. Mail reaches the queue only with
-// an outgoing account: without one (a bench as CI sets it up) the run turns on an outbox of its own that sends
-// nothing (an SMTP host that does not resolve, and the site's scheduler, which would flush the queue, is off), and
-// turns it off again. Clean-up: the stay is cancelled, the promotion archived and a program this run created disabled.
+// show "Member price: …". From a rate they join on the dialog (e-mail, name and the tick); the link of the mail (read
+// from the server's mail queue) opens the member page, where "Continue" signs them in and brings them back to their
+// search, priced as a member: "Your member price", no teaser. On the platform's shared host the session is kept in the
+// tab only, never on the device (owner, review round 1). The details step is filled in from the membership, and the
+// e-mail a member's price is booked under cannot be changed; the booking is made. The link is spent: opened again in
+// this tab it goes back to the search (signed in already), in another browser it asks for a new one. Signing out
+// forgets the session and the teaser is back. Mail reaches the queue only with an outgoing account: without one (a
+// bench as CI sets it up) the run turns on an outbox of its own that sends nothing (an SMTP host that does not
+// resolve, and the site's scheduler, which would flush the queue, is off), and puts the accounts back as they were.
+// Clean-up: the stay is cancelled, the promotion archived and a program this run created disabled.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… TEX_E2E_ADMIN_PASSWORD=… npx playwright test -c e2e member-web
 import { expect, request as pwRequest, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test"
 import { ADMIN_PASSWORD, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
@@ -49,16 +51,18 @@ async function admin(): Promise<APIRequestContext> {
 
 const OUTBOX = "TEX E2E outbox"
 
-/** An outgoing account, so that mail reaches the queue; true when this run turned its own on. */
-async function outboxOn(ctx: APIRequestContext): Promise<boolean> {
+/** An outgoing account, so that mail reaches the queue: null when the bench has one already, else the accounts
+ * that were the default (disabled ones: Frappe takes the flag from them when ours becomes the default) to put back. */
+async function outboxOn(ctx: APIRequestContext): Promise<string[] | null> {
   const list = async (filters: unknown[]) => {
     const r = await ctx.get("/api/method/frappe.client.get_list", {
-      params: { doctype: "Email Account", fields: JSON.stringify(["name"]), filters: JSON.stringify(filters), limit_page_length: "5" },
+      params: { doctype: "Email Account", fields: JSON.stringify(["name"]), filters: JSON.stringify(filters), limit_page_length: "20" },
     })
     expect(r.ok(), "list Email Account").toBeTruthy()
-    return ((await r.json()) as { message: { name: string }[] }).message
+    return ((await r.json()) as { message: { name: string }[] }).message.map((a) => a.name)
   }
-  if ((await list([["enable_outgoing", "=", 1], ["default_outgoing", "=", 1]])).length) return false
+  if ((await list([["enable_outgoing", "=", 1], ["default_outgoing", "=", 1]])).length) return null
+  const defaults = (await list([["default_outgoing", "=", 1]])).filter((n) => n !== OUTBOX)
   const on = { enable_outgoing: 1, default_outgoing: 1, smtp_server: "smtp.invalid", smtp_port: 25, no_smtp_authentication: 1, awaiting_password: 0 }
   const r = (await list([["name", "=", OUTBOX]])).length
     ? await ctx.post("/api/method/frappe.client.set_value", { data: { doctype: "Email Account", name: OUTBOX, fieldname: on } })
@@ -66,14 +70,18 @@ async function outboxOn(ctx: APIRequestContext): Promise<boolean> {
         data: { doc: { doctype: "Email Account", email_account_name: OUTBOX, email_id: "tex-e2e-outbox@example.com", enable_incoming: 0, ...on } },
       })
   expect(r.ok(), `outbox: ${(await r.text()).slice(0, 300)}`).toBeTruthy()
-  return true
+  return defaults
 }
 
-async function outboxOff(ctx: APIRequestContext) {
+async function outboxOff(ctx: APIRequestContext, defaults: string[]) {
   const r = await ctx.post("/api/method/frappe.client.set_value", {
     data: { doctype: "Email Account", name: OUTBOX, fieldname: { enable_outgoing: 0, default_outgoing: 0 } },
   })
   expect(r.ok(), `outbox off: ${(await r.text()).slice(0, 300)}`).toBeTruthy()
+  for (const name of defaults) {
+    const back = await ctx.post("/api/method/frappe.client.set_value", { data: { doctype: "Email Account", name, fieldname: "default_outgoing", value: 1 } })
+    expect(back.ok(), `default back on ${name}`).toBeTruthy()
+  }
 }
 
 /** A mail's text as sent: quoted-printable soft breaks and escapes undone, base64 parts decoded. */
@@ -161,17 +169,18 @@ test("a guest joins on the site, signs in by the mailed link, books the member p
     },
   })
   expect(promo.ok, JSON.stringify(promo.body).slice(0, 300)).toBeTruthy()
-  const live = await pageApi(revenue, "kamra.tex.api.policies.activate", { doctype: "TEX Promotion", name: promo.message.name })
-  expect(live.ok, JSON.stringify(live.body).slice(0, 300)).toBeTruthy()
 
   const guestCtx = await browser.newContext({ locale: "en-US", baseURL: test.info().project.use.baseURL, viewport: { width: 1280, height: 900 } })
   opened.push(guestCtx)
   const page = await guestCtx.newPage()
   const noErrors = trackErrors(page)
   const mail = await admin()
-  const outbox = await outboxOn(mail)
+  let outbox: string[] | null = null
   let reservation: string | null = null
   try {
+    const live = await pageApi(revenue, "kamra.tex.api.policies.activate", { doctype: "TEX Promotion", name: promo.message.name })
+    expect(live.ok, JSON.stringify(live.body).slice(0, 300)).toBeTruthy()
+    outbox = await outboxOn(mail)
     const { checkIn, checkOut } = stayDates(150, 3)
     const header = page.getByRole("banner")
     const teaser = page.getByText(/^Member price: /)
@@ -192,7 +201,7 @@ test("a guest joins on the site, signs in by the mailed link, books the member p
       // the program's terms first
       await join.getByRole("button", { name: "Send me the link" }).click()
       await expect(join.getByRole("alert")).toBeVisible()
-      await join.getByRole("checkbox", { name: /^I want to join .+ and accept its membership terms\./ }).check()
+      await join.getByRole("checkbox", { name: /^I want to become a member of .+\./ }).check()
       await Promise.all([
         page.waitForResponse((r) => r.url().includes("kamra.tex.api.public.member_link") && r.ok()),
         join.getByRole("button", { name: "Send me the link" }).click(),
@@ -207,14 +216,19 @@ test("a guest joins on the site, signs in by the mailed link, books the member p
 
     await test.step("the mailed link signs the guest in and brings them back to their search, priced as a member", async () => {
       await page.goto(`/book/${SLUG}/member#token=${token}`)
-      await page.waitForURL((u) => u.pathname === `/book/${SLUG}` && u.searchParams.get("checkin") === checkIn, { timeout: 30_000 })
+      // the token leaves the address bar before the page asks for anything; the link is spent only by a click
+      await expect(page.getByRole("button", { name: "Continue" })).toBeVisible()
       expect(new URL(page.url()).hash, "the token is gone from the address").toBe("")
+      await page.getByRole("button", { name: "Continue" }).click()
+      await page.waitForURL((u) => u.pathname === `/book/${SLUG}` && u.searchParams.get("checkin") === checkIn, { timeout: 30_000 })
       await expect(header.getByText("Hello, Nora")).toBeVisible()
       await expect(page.getByText("Your member price").first()).toBeVisible({ timeout: 30_000 })
       await expect(teaser).toHaveCount(0)
-      const kept = await page.evaluate((slug) => localStorage.getItem(`tex.member.${slug}`), SLUG)
-      expect(kept, "the session is kept on this device").toContain('"expires"')
-      expect(kept ?? "").not.toContain(token)
+      // the platform's shared host: the session in this tab only, nothing of it on the device
+      const kept = await page.evaluate((slug) => [sessionStorage.getItem(`tex.member.${slug}`), localStorage.getItem(`tex.member.${slug}`)], SLUG)
+      expect(kept[0], "the session is kept in the tab").toContain('"expires"')
+      expect(kept[0] ?? "").not.toContain(token)
+      expect(kept[1], "nothing on the device").toBeNull()
     })
 
     await test.step("a member's price is booked under the member's e-mail", async () => {
@@ -251,10 +265,17 @@ test("a guest joins on the site, signs in by the mailed link, books the member p
       await page.waitForURL(/\/book\/[^/]+\/confirmation\//, { timeout: 30_000 })
     })
 
-    await test.step("the link is spent: opened again it asks for a new one", async () => {
+    await test.step("the link is spent: this tab goes back to the search, another browser asks for a new one", async () => {
       await page.goto(`/book/${SLUG}/member#token=${token}`)
-      await expect(page.getByRole("heading", { name: "This link cannot be used" })).toBeVisible()
-      await expect(page.getByRole("link", { name: "Ask for a new link" })).toBeVisible()
+      await page.getByRole("button", { name: "Continue" }).click()
+      await page.waitForURL((u) => u.pathname === `/book/${SLUG}`, { timeout: 30_000 })
+      const other = await browser.newContext({ locale: "en-US", baseURL: test.info().project.use.baseURL })
+      opened.push(other)
+      const elsewhere = await other.newPage()
+      await elsewhere.goto(`/book/${SLUG}/member#token=${token}`)
+      await elsewhere.getByRole("button", { name: "Continue" }).click()
+      await expect(elsewhere.getByRole("heading", { name: "This link cannot be used" })).toBeVisible()
+      await expect(elsewhere.getByRole("link", { name: "Ask for a new link" })).toBeVisible()
     })
 
     await test.step("signing out forgets the session here; the teaser is back", async () => {
@@ -267,11 +288,11 @@ test("a guest joins on the site, signs in by the mailed link, books the member p
       await expect(header.getByRole("button", { name: "Member sign-in" })).toBeVisible()
       await expect(teaser.first()).toBeVisible({ timeout: 30_000 })
       await expect(page.getByText("Your member price")).toHaveCount(0)
-      expect(await page.evaluate((slug) => localStorage.getItem(`tex.member.${slug}`), SLUG)).toBeNull()
+      expect(await page.evaluate((slug) => sessionStorage.getItem(`tex.member.${slug}`), SLUG)).toBeNull()
     })
     noErrors()
   } finally {
-    if (outbox) await outboxOff(mail)
+    if (outbox) await outboxOff(mail, outbox)
     await mail.dispose()
     if (reservation) {
       const agent = await staff(browser, AGENT, opened)

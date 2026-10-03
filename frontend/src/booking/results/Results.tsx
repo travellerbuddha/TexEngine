@@ -5,6 +5,8 @@ import { nightsBetween } from "../lib/dates"
 import { isZero } from "../lib/format"
 import { boardLabel, cancellation, paymentTerms, reasonText } from "../lib/policy"
 import { refusalMessage } from "../lib/refusals"
+import { isEmbedded } from "../lib/storage"
+import { sitePath } from "../lib/mount"
 import { trackRoomView } from "../lib/track"
 import { useBooking } from "../flow/BookingContext"
 import { Summary, uniformNight } from "../flow/Summary"
@@ -239,18 +241,34 @@ function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName, disab
  * the way to it: sign in (or join on the same dialog), or, signed in without a membership here, join. */
 function MemberTeaser({ amount }: { amount: string }) {
   const { t } = useI18n()
+  const { site } = useSite()
   const m = useMember()
   if (!m?.available) return null
   const signedIn = !!(m.session && m.status)
+  const link = "font-medium text-brand-ink underline underline-offset-2"
+  // in the widget's frame a session would stay in the frame (its storage is the host page's site's): the guest signs
+  // in on the hotel's site, in a new tab, with this search
+  const onSite = () => {
+    const q = new URLSearchParams(window.location.search)
+    for (const k of ["step", "embed", "widget"]) q.delete(k)
+    q.set("sign_in", "1")
+    return sitePath(site.slug, `?${q}`)
+  }
   return (
     <div className="mt-2 rounded-ui bg-brand/5 px-2.5 py-1.5 text-xs sm:text-right">
       <p className="flex items-center gap-1 font-semibold text-brand-ink sm:justify-end">
         <BadgeCheck className="size-3.5" aria-hidden />
         {t("member.teaser", { amount })}
       </p>
-      <button type="button" className="font-medium text-brand-ink underline underline-offset-2" onClick={() => m.openDialog(signedIn ? "join" : "sign_in")}>
-        {signedIn ? t("member.joinNow", { program: m.program }) : t("member.teaserSignIn")}
-      </button>
+      {isEmbedded() ? (
+        <a className={link} href={onSite()} target="_blank" rel="noopener">
+          {t("member.teaserSignIn")}
+        </a>
+      ) : (
+        <button type="button" className={link} onClick={() => m.openDialog(signedIn ? "join" : "sign_in")}>
+          {signedIn ? t("member.joinNow", { program: m.program }) : t("member.teaserSignIn")}
+        </button>
+      )}
     </div>
   )
 }

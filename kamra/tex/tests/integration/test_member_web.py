@@ -14,7 +14,7 @@ from kamra.tex.money import D
 from kamra.tex.services import notify
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import SLUG
-from kamra.tex.tests.integration.test_loyalty_membership import MembershipCase
+from kamra.tex.tests.integration.test_loyalty_membership import CLUB, OTHER, MembershipCase
 
 
 def code_of(exc) -> str | None:
@@ -163,6 +163,8 @@ class TestJoinOnTheWeb(WebMemberCase):
 		self.assertEqual(frappe.db.count("Guest", {"email": self.email}), 1)
 
 	def test_c04e_a_signed_in_guest_who_is_no_member_joins_with_a_tick(self):
+		"""Review round 1 (B1): the join of a signed-in guest is confirmed by a link sent to their e-mail, as every web
+		join (the owner's choice), never by the session alone: a script that holds a session joins nobody."""
 		self.ask(self.email)                                                   # a past guest: a profile, no membership
 		signed = self.verify(self.token())
 		self.assertEqual((signed["status"]["signed_in"], signed["status"]["member"]), (True, False))
@@ -170,7 +172,13 @@ class TestJoinOnTheWeb(WebMemberCase):
 		self.assertEqual(self.refused(public.member_join, site=SLUG, member_session=session, accepted=0),
 		                 "MEMBER_CONSENT_REQUIRED")
 		out = self.as_guest(public.member_join, site=SLUG, member_session=session, accepted=1)
-		self.assertTrue(out["member"])
+		self.assertEqual(out, {"ok": True})
+		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))            # not before the link is opened
+		to, _subject, html = self.mails[-1]
+		self.assertEqual(to, self.email)
+		self.assertIn("/member#token=", html)
+		joined = self.verify(self.token())
+		self.assertTrue(joined["status"]["member"])
 		self.assertEqual(loyalty.membership(self.guest, self.club).source, "Web")
 
 	def test_c04e_no_program_no_web_membership(self):
@@ -311,3 +319,176 @@ class TestMemberPricesOnTheWeb(WebMemberCase):
 		offer = self.flex(self.search())
 		self.assertNotIn("member_total", offer)
 		self.assertNotIn("member_total", offer["rooms"][0])
+
+
+class TestReviewRound1(WebMemberCase):
+	"""2N-2 review round 1 (ADR-078)."""
+
+	def site(self):
+		return frappe.get_doc("TEX Booking Site", SLUG)
+
+	def test_r1_s1_one_plain_address_only(self):
+		"""Frappe's own check takes a display name, a list or an invisible character: each would key the limit, the
+		profile and the mail differently. Only one plain address is taken, in lower case."""
+		for raw in ("Mia <mia.r1@example.com>", "junk, mia.r1@example.com", "mia.r1@example.com\u200b",
+		            "mia.r1@example.com;eve@example.com", "mia r1@example.com"):
+			self.assertEqual(self.refused(public.member_link, site=SLUG, email=raw), "GUEST_EMAIL_INVALID", raw)
+		self.assertEqual(self.mails, [])
+		self.assertEqual(self.ask("  " + self.email.upper() + " "), {"ok": True})
+		self.assertEqual(self.mails[-1][0], self.email)                       # the member's own address
+		self.assertIn("#token=", self.mails[-1][2])                            # their profile: a sign-in link
+
+	def test_r1_s2_a_deadlock_retries_with_the_link_in_hand(self):
+		from kamra.tex.services import txn
+
+		self.join(self.guest)
+		self.ask(self.email)
+		token, real, calls = self.token(), members._profile, []
+
+		def victim_once(*a, **kw):
+			calls.append(1)
+			if len(calls) == 1:
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock (simulated)")
+			return real(*a, **kw)
+
+		# the rollback kept out: the test's fixtures are its transaction
+		with mock.patch.object(members, "_profile", side_effect=victim_once), mock.patch.object(txn.time, "sleep"), \
+				mock.patch.object(frappe.db, "rollback"):
+			signed = self.verify(token)
+		self.assertEqual(len(calls), 2)
+		self.assertTrue(signed["status"]["member"])
+
+	def test_r1_s2_a_busy_answer_keeps_the_link(self):
+		from kamra.tex.services import txn
+
+		self.join(self.guest)
+		self.ask(self.email)
+		token = self.token()
+		deadlock = frappe.QueryDeadlockError("Deadlock found")
+		with mock.patch.object(members, "_profile", side_effect=deadlock), mock.patch.object(txn.time, "sleep"), \
+				mock.patch.object(frappe.db, "rollback"):
+			self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "BUSY")
+		self.assertTrue(self.verify(token)["status"]["member"])                 # the link still works, once
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
+
+	def test_r1_s4_a_stranger_is_greeted_with_no_typed_name(self):
+		"""A join mail to an address with no profile never carries what the visitor typed (anyone could send text of
+		their choice in the hotel's name)."""
+		self.ask("c04-r1-stranger@example.com", "join", first_name="Visit", last_name="evil.example now", accepted=1)
+		self.assertNotIn("evil.example", self.mails[-1][2])
+		self.assertNotIn("Visit", self.mails[-1][2])
+		# the names typed are still the new profile's, once the link proves the address
+		self.verify(self.token())
+		self.assertEqual(frappe.db.get_value("Guest", {"email": "c04-r1-stranger@example.com"},
+		                                     ["first_name", "last_name"]), ("Visit", "evil.example now"))
+
+	def test_r1_s5_a_group_sites_join_belongs_to_one_of_its_hotels(self):
+		from kamra.tex.api import loyalty as loyalty_api
+
+		group = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
+		frappe.db.set_value("TEX Loyalty Program", self.club, "enabled", 0)
+		shared = loyalty_api.save_program({**CLUB, "program_name": "Group Club R1", "hotel_group": group})["name"]
+		site = frappe._dict(name=SLUG, property=None, hotel_group=group)
+		members.join_site(site, self.guest)
+		m = loyalty.membership(self.guest, shared)
+		self.assertEqual(m.status, "Active")
+		self.assertIn(m.property, members.site_properties(site))                 # a hotel of the site, never none
+		event = frappe.db.get_value("TEX Audit Event", {"action": "loyalty.member_join", "reference_name": m.name},
+		                            "property")
+		self.assertEqual(event, m.property)                                    # its staff see the join
+
+	def test_r1_n5_a_disabled_hotel_is_not_the_sites(self):
+		group = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
+		closed = fx.ensure("Property", {"property_name": "TEX C04 R1 Closed"},
+		                   {"property_name": "TEX C04 R1 Closed", "city": "Kemer", "country": "Turkey", "currency": "EUR"})
+		frappe.db.set_value("Property", closed, {"tex_hotel_group": group, "disabled": 1})
+		self.assertNotIn(closed, members.site_properties(frappe._dict(name=SLUG, property=None, hotel_group=group)))
+
+	def test_r1_n1_an_erasure_counts_the_sessions_apart(self):
+		self.join(self.guest)
+		self.ask(self.email)
+		self.verify(self.token())
+		frappe.db.set_value("Guest", self.guest, "tex_erased_at", now_datetime())
+		from kamra.tex.crm import service as crm
+
+		out = crm.erase_traces(self.guest, "Erased guest", emails=(), audit_event=False)
+		self.assertEqual((out["memberships_ended"], out["sessions_ended"]), (1, 1))
+
+	def test_r1_n3_the_language_is_one_the_booking_app_speaks(self):
+		self.ask("c04-r1-lang@example.com", "join", first_name="Lia", last_name="Lang", accepted=1,
+		         language="zz-<b>")
+		self.verify(self.token())
+		self.assertIn(frappe.db.get_value("Guest", {"email": "c04-r1-lang@example.com"}, "tex_language"), (None, "en"))
+
+	def test_r1_n4_the_counter_always_expires(self):
+		"""The counter is made with its hour in one step: never one without an expiry (the address capped for good)."""
+		real = members._cache()
+
+		class SeesAnOldCounter:
+			def __getattr__(self, name):
+				return getattr(real, name)
+
+			def get(self, key):                                                # the old counter seen, then gone
+				return b"1"
+
+		key = frappe.cache.make_key(f"{members.COUNT_KEY}{SLUG}:{members.digest(self.email)}")
+		frappe.cache.delete(key)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		with mock.patch.object(members, "_cache", return_value=SeesAnOldCounter()):
+			self.ask(self.email)
+		self.assertGreater(frappe.cache.ttl(key), 0)  # nosemgrep: frappe-cache-breaks-multitenancy -- site-scoped key
+
+	def test_r1_n16_a_retried_request_sends_one_mail(self):
+		self.join(self.guest)
+		for _ in range(2):
+			self.assertEqual(self.ask(self.email, idempotency_key="r1-retry-once"), {"ok": True})
+		self.assertEqual(len(self.mails), 1)
+
+	def test_r1_n19_a_session_counts_on_its_own_site_only(self):
+		self.join(self.guest)
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		self.assertEqual(members.session_guest(self.site(), session), self.guest)
+		self.assertIsNone(members.session_guest(frappe._dict(name="another-site"), session))
+
+	def test_r1_n19_a_join_never_takes_another_enterprises_profile(self):
+		theirs = frappe.get_doc({"doctype": "Guest", "first_name": "Other", "last_name": "Tenant",
+		                         "email": "c04-r1-shared@example.com",
+		                         "tex_enterprise": frappe.db.get_value("Property", OTHER, "tex_enterprise")}
+		                        ).insert(ignore_permissions=True).name
+		self.ask("c04-r1-shared@example.com", "join", first_name="Our", last_name="Guest", accepted=1)
+		self.verify(self.token())
+		ours = frappe.db.get_value("Guest", {"email": "c04-r1-shared@example.com", "name": ("!=", theirs)},
+		                           ["name", "tex_enterprise", "first_name"], as_dict=True)
+		self.assertEqual((ours.tex_enterprise, ours.first_name),
+		                 (frappe.db.get_value("Property", fx.PROPERTY, "tex_enterprise"), "Our"))
+		self.assertIsNone(loyalty.membership(theirs, self.club))
+		self.assertEqual(frappe.db.get_value("Guest", theirs, "first_name"), "Other")
+
+	def test_r1_n19_a_member_who_left_rejoins_on_the_web(self):
+		self.join(self.guest)
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff end the membership
+		from kamra.tex.api import crm as crm_api
+
+		crm_api.loyalty_leave(guest=self.guest, program=self.club, reason="Guest asked to leave")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		self.verify(self.token())
+		m = loyalty.membership(self.guest, self.club)
+		self.assertEqual((m.status, m.source), ("Active", "Web"))
+
+	def test_r1_n19_an_erased_profiles_join_link_joins_nobody(self):
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		token = self.token()
+		frappe.db.set_value("Guest", self.guest, "tex_erased_at", now_datetime())
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "NOT_A_MEMBER")
+		self.assertIsNone(loyalty.membership(self.guest, self.club))
+		self.assertFalse(frappe.db.exists("TEX Member Session", {"guest": self.guest}))
+
+	def test_r1_n19_signed_out_sessions_are_purged_too(self):
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		self.as_guest(public.member_sign_out, site=SLUG, member_session=session)
+		frappe.db.set_value("TEX Member Session", {"token_hash": members.digest(session)}, "revoked_at",
+		                    add_days(now_datetime(), -(members.PURGE_AFTER_DAYS + 1)))
+		self.assertEqual(members.purge_sessions(), 1)

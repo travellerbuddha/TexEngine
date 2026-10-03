@@ -1,8 +1,11 @@
-// A loyalty member's session on this booking site (C-04, ADR-078): opened by a one-time e-mail link, kept on this
-// device for 30 days (the owner's choice) until the guest signs out. Only the session token is kept, never the
-// link's; the server is the source of truth (an ended session is answered as signed out).
+// A loyalty member's session on this booking site (C-04, ADR-078): opened by a one-time e-mail link. On a hotel's own
+// host it is kept on this device for 30 days (the owner's choice) until the guest signs out; on the platform's shared
+// host, where other hotels' pages and their tag containers run on the same origin, only in this tab, and a site's page
+// removes every other site's member data before anything else runs (owner, 2026-10-03, review round 1). Only the
+// session token is kept, never the link's; the server is the source of truth (an ended session is answered as
+// signed out).
 import type { RoomQuote } from "../types"
-import { getJSON, removeItem, setJSON } from "./storage.ts"
+import { getJSON, keysWithPrefix, removeItem, setJSON } from "./storage.ts"
 
 export interface StoredMemberSession {
   token: string
@@ -10,14 +13,37 @@ export interface StoredMemberSession {
   expires: number
 }
 
-const key = (slug: string) => `tex.member.${slug}`
+const PREFIX = "tex.member."
+const key = (slug: string) => `${PREFIX}${slug}`
+const backKey = (slug: string) => `${PREFIX}back.${slug}`
+
+let kind: "local" | "session" = "local"
+
+/** Where sessions are kept: on the device (a hotel's own host) or in the tab (the platform's shared host). Set once,
+ * before the app starts. */
+export function keepSessionsOnDevice(on: boolean) {
+  kind = on ? "local" : "session"
+}
+
+/** On the platform's shared host, before anything of a site runs: every other site's member data goes (its session
+ * and the search a link was asked from), and nothing is kept on the device there. `current`: the site of the page
+ * (null: a site-less page keeps none). */
+export function isolateMemberData(current: string | null) {
+  const siteOf = (k: string) => {
+    const rest = k.slice(PREFIX.length)
+    return rest.startsWith("back.") ? rest.slice(5) : rest
+  }
+  const isBack = (k: string) => k.startsWith(`${PREFIX}back.`)
+  for (const k of keysWithPrefix(PREFIX, "local")) if (!isBack(k) || siteOf(k) !== current) removeItem(k, "local")
+  for (const k of keysWithPrefix(PREFIX, "session")) if (siteOf(k) !== current) removeItem(k, "session")
+}
 
 /** The session kept for this site, while it has not ended; an ended or unreadable one is forgotten. */
 export function memberSession(slug: string, now = Date.now()): string | null {
-  const s = getJSON<StoredMemberSession>(key(slug), "local")
+  const s = getJSON<StoredMemberSession>(key(slug), kind)
   if (!s) return null
   if (typeof s.token !== "string" || !s.token || typeof s.expires !== "number" || !Number.isFinite(s.expires) || s.expires <= now) {
-    removeItem(key(slug), "local")
+    removeItem(key(slug), kind)
     return null
   }
   return s.token
@@ -26,7 +52,12 @@ export function memberSession(slug: string, now = Date.now()): string | null {
 /** Keep a session the server opened for `expiresIn` seconds (counted here: the server's time zone is not ours). */
 export function keepMemberSession(slug: string, token: string, expiresIn: number, now = Date.now()) {
   if (!token || !Number.isFinite(expiresIn) || expiresIn <= 0) return
-  setJSON(key(slug), { token, expires: now + expiresIn * 1000 } satisfies StoredMemberSession, "local")
+  setJSON(key(slug), { token, expires: now + expiresIn * 1000 } satisfies StoredMemberSession, kind)
+}
+
+/** The storage key of a site's session (a `storage` event names it when another tab signs in or out). */
+export function memberSessionKey(slug: string) {
+  return key(slug)
 }
 
 /** A short tag of a session (FNV-1a), so a price can name the session it is for without keeping its token. */
@@ -40,15 +71,15 @@ export function sessionTag(token: string): string {
 }
 
 export function forgetMemberSession(slug: string) {
-  removeItem(key(slug), "local")
+  removeItem(key(slug), kind)
 }
 
-const backKey = (slug: string) => `tex.member.back.${slug}`
 /** how long the search a link was asked from is kept for it (the link works for 30 minutes) */
 const BACK_MS = 60 * 60 * 1000
 
 /** The search a guest asks for a link from ("?checkin=…"), kept to return to once the link is opened (the step and
- * the dialog's own parameters are left out: the member chooses their rooms again, at a member's price). */
+ * the dialog's own parameters are left out: the member chooses their rooms again, at a member's price). It is kept
+ * on the device even on the platform's host (the link opens in a new tab): dates and a party, no personal data. */
 export function rememberMemberReturn(slug: string, search: string, now = Date.now()) {
   const q = new URLSearchParams(search)
   for (const k of ["step", "join", "sign_in"]) q.delete(k)
@@ -76,11 +107,15 @@ export function linkToken(hash: string): string | null {
   }
 }
 
+let adopted: string | null = null
+
 /** Take a member link's token from the address bar's fragment (a fragment never reaches a server or its logs) and
- * remove it, so it is not kept in the history or shared by a copied address. */
+ * remove it, so it is not kept in the history, shared by a copied address or seen by a tag container. Call before the
+ * app starts, and on a `hashchange` of the member page. */
 export function takeMemberLinkToken(): string | null {
   const token = linkToken(window.location.hash)
   if (token) {
+    adopted = token
     try {
       window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search)
     } catch {
@@ -88,6 +123,16 @@ export function takeMemberLinkToken(): string | null {
     }
   }
   return token
+}
+
+/** The link token taken from the address this page opened at (or its last `hashchange`), or null. */
+export function adoptedLinkToken(): string | null {
+  return adopted
+}
+
+/** The link is settled (used or refused): it is not offered again. */
+export function dropLinkToken() {
+  adopted = null
 }
 
 /** A members-only promotion priced one of these rooms: the booking is the signed-in member's own (the server refuses

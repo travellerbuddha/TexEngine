@@ -686,7 +686,7 @@
   "refusal.MEMBER_LINK_INVALID": "Acest link nu este valid sau a expirat. Vă rugăm să cereți unul nou.",
   "refusal.MEMBER_SESSION_ENDED": "Ați fost deconectat. Conectați-vă din nou pentru a vedea prețurile de membru.",
   "refusal.NOT_A_MEMBER": "Nu există încă o calitate de membru cu acest e-mail. Vă puteți înscrie în program.",
-  "refusal.MEMBERS_ONLY": "Acest preț de membru este doar pentru membrul conectat. Rezervați cu propriul nume și e-mail sau căutați din nou.",
+  "refusal.MEMBERS_ONLY": "Acest preț de membru este doar pentru membrii programului hotelului. Actualizați prețurile pentru a vedea prețul pe care îl puteți rezerva.",
   "member.signIn": "Autentificare membri",
   "member.signInTitle": "Autentificare membri",
   "member.signInTab": "Autentificare",
@@ -697,11 +697,11 @@
   "member.sentTitle": "Verificați-vă e-mailul",
   "member.sentBody": "Am trimis un e-mail la {email}. Linkul din el funcționează o singură dată, timp de 30 de minute.",
   "member.joinSentBody": "Am trimis un link la {email}. Deschideți-l în 30 de minute pentru a vă confirma înscrierea.",
-  "member.accept": "Doresc să mă înscriu în {program} și accept condițiile de membru.",
+  "member.accept": "Doresc să devin membru {program}.",
   "member.acceptHint": "Numele și adresa de e-mail sunt folosite pentru calitatea de membru. Puteți cere oricând hotelului să o încheie.",
   "member.joinTitle": "Înscriere în {program}",
   "member.joinNow": "Înscrieți-vă în {program}",
-  "member.joinSignedIn": "Sunteți autentificat ca {email}. Înscrieți-vă în {program} pentru prețuri de membru la sejururi.",
+  "member.joinSignedIn": "Sunteți autentificat ca {email}. Pentru înscrierea în {program} trimitem un link la această adresă: deschiderea lui vă confirmă înscrierea.",
   "member.already": "Sunteți membru {program}. Căutările dvs. arată prețuri de membru.",
   "member.hello": "Bună, {name}",
   "member.signOut": "Deconectare",
@@ -716,5 +716,8 @@
   "member.teaser": "Preț de membru: {amount}",
   "member.teaserSignIn": "Autentificați-vă sau înscrieți-vă",
   "member.fromPrice": "Preț de membru de la {amount}",
-  "member.emailLocked": "Prețul de membru se rezervă pe adresa de e-mail cu care v-ați autentificat."
+  "member.emailLocked": "Prețul de membru se rezervă pe adresa de e-mail cu care v-ați autentificat.",
+  "member.linkReadyTitle": "Linkul dvs. {program}",
+  "member.linkReadyBody": "Continuați pentru a vă autentifica pe acest dispozitiv și a vedea prețurile de membru.",
+  "member.continue": "Continuați"
 }

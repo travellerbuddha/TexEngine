@@ -17,7 +17,7 @@ export const KIND_BY_CODE: Readonly<Record<string, ErrorKind>> = {
   // the offer, the quote or the rate is gone: the same rooms are searched or priced again
   ...kinds("expired", ["OFFER_INVALID", "OFFER_EXPIRED", "QUOTE_INVALID", "QUOTE_EXPIRED", "QUOTE_USED", "NOT_ON_SALE",
     "CONTRACT_NOT_ON_SALE", "CONTRACT_SUSPENDED", "RATE_UNAVAILABLE", "ROOM_NOT_SOLD", "SEARCH_AGAIN",
-    "BASKET_NOT_TOGETHER", "PROPOSAL_EXPIRED", "MARKET_NOT_ALLOWED"]),
+    "BASKET_NOT_TOGETHER", "PROPOSAL_EXPIRED", "MARKET_NOT_ALLOWED", "MEMBERS_ONLY"]),
   ...kinds("invalid", ["MARKET_UNKNOWN", "MARKET_AMBIGUOUS", "MARKET_REQUIRED", "MARKET_RESIDENCY"]),
   // the guest chooses another way to pay
   ...kinds("payment_method", ["PAYMENT_METHOD_UNAVAILABLE", "PAY_AT_HOTEL_NOT_ALLOWED", "WEB_TRANSFER_ROOMS",

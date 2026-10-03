@@ -7,11 +7,12 @@ A guest signs in on a booking site, or joins its hotels' loyalty program, by a o
 * ``request_link``: a visitor asks for a link with an e-mail (to join: with their name and an explicit tick). The
   answer is the same whatever the e-mail (nobody learns from the site whether it has a profile or a membership); an
   address without a profile asked to sign in gets a mail that says so and links to joining, with no token. At most
-  ``LINKS_PER_ADDRESS`` mails per address and site an hour.
+  ``LINKS_PER_ADDRESS`` mails per address and site an hour; a retried request (its idempotency key) sends none.
 * ``verify``: the link, used once within ``LINK_MINUTES`` on its own site, opens a session on that device for
   ``SESSION_DAYS`` (the owner's choice). Opening a join link joins the profile with that e-mail, made then with the
   name given when there is none: the link proves the e-mail is theirs, so nobody is joined with another's e-mail.
-* ``join_signed_in``: a signed-in guest who is no member joins with a tick.
+* ``join_signed_in``: a signed-in guest who is no member asks to join with a tick: a join link goes to their own
+  e-mail, as every web join is confirmed (the owner's choice), so a script that holds a session joins nobody.
 
 A link's token lives only in the mail (in the URL fragment, which browsers never send to a server) and in the cache,
 by its hash, with what opening it needs (the e-mail, the name to join with) until it is used or expires. A session's
@@ -23,7 +24,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
+import unicodedata
 
 import frappe
 from frappe import _
@@ -31,6 +34,7 @@ from frappe.utils import add_days, add_to_date, get_datetime, now_datetime, vali
 
 from kamra.tex.crm import loyalty
 from kamra.tex.services.refusals import refusal
+from kamra.tex.services.txn import retry_on_deadlock
 
 LINK_MINUTES = 30
 SESSION_DAYS = 30
@@ -39,6 +43,12 @@ PURGE_AFTER_DAYS = 30                        # an ended session's row is removed
 PURPOSES = ("sign_in", "join")
 LINK_KEY = "tex:member_link:"                # + the token's hash
 COUNT_KEY = "tex:member_links:"              # + site and the address's hash
+REQUEST_KEY = "tex:member_request:"          # + site and the idempotency key's hash
+REQUEST_SECONDS = 600
+# one plain address: no display name, list, quote, bracket or space (Frappe's own check takes "Mia <mia@x.com>")
+_ADDRESS = re.compile(r"[^\s@<>,;:\"'()\[\]\\]+@[^\s@<>,;:\"'()\[\]\\]+\.[^\s@<>,;:\"'()\[\]\\]{2,}")
+# a refusal that settles a link: anything else (a deadlock answered BUSY, a database error) leaves it to be used
+FINAL = frozenset({"NOT_A_MEMBER", "MEMBER_LINK_INVALID"})
 
 
 def digest(token: str) -> str:
@@ -46,9 +56,10 @@ def digest(token: str) -> str:
 
 
 def site_properties(site) -> list[str]:
+	"""The hotels the site sells: a hotel group's enabled ones (as the site's search, ``sites.selling_properties``)."""
 	from kamra.tex.services import sites
 
-	return sites.site_properties(site)
+	return sites.selling_properties(site)
 
 
 def site_programs(site) -> list[str]:
@@ -67,8 +78,11 @@ def site_enterprise(site) -> str | None:
 
 
 def _email(raw) -> str:
-	email = (raw or "").strip().lower()[:140]
-	if not email or not validate_email_address(email):
+	"""One plain address, in lower case: the limit, the profile and the mail are all keyed by it (review round 1:
+	Frappe's own check takes a display name, a list or an invisible character, each of which would differ)."""
+	email = str(raw or "").strip().lower()
+	if (len(email) > 140 or not _ADDRESS.fullmatch(email) or validate_email_address(email) != email
+			or any(unicodedata.category(c)[0] in "CZ" for c in email)):
 		frappe.throw(_("Please enter a valid e-mail address."), refusal("GUEST_EMAIL_INVALID"))
 	return email
 
@@ -92,15 +106,23 @@ def _cache():
 
 
 def _within_limit(site, email: str) -> bool:
-	"""At most ``LINKS_PER_ADDRESS`` mails to one address from one site an hour (a visitor cannot flood an inbox)."""
+	"""At most ``LINKS_PER_ADDRESS`` mails to one address from one site an hour (a visitor cannot flood an inbox). The
+	counter is made with its hour in one step, so it always expires (review round 1)."""
 	key = frappe.cache.make_key(f"{COUNT_KEY}{site.name}:{digest(email)}")
-	if not _cache().get(key):  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key above
-		_cache().setex(key, 3600, 0)
-	return _cache().incrby(key, 1) <= LINKS_PER_ADDRESS
+	_cache().set(key, 0, ex=3600, nx=True)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key above
+	return _cache().incrby(key, 1) <= LINKS_PER_ADDRESS  # nosemgrep: frappe-cache-breaks-multitenancy -- site-scoped
+
+
+def _first_request(site, key: str | None) -> bool:
+	"""False for a request retried with the same idempotency key within ``REQUEST_SECONDS`` (it sends no mail again)."""
+	if not key:
+		return True
+	k = frappe.cache.make_key(f"{REQUEST_KEY}{site.name}:{digest(str(key)[:140])}")
+	return bool(_cache().set(k, 1, ex=REQUEST_SECONDS, nx=True))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 
 
 def request_link(site, *, email, purpose: str, first_name=None, last_name=None, accepted=False,
-                 language: str = "en") -> None:
+                 language: str = "en", idempotency_key: str | None = None) -> None:
 	"""Send a sign-in or join link (module docstring). Refuses only what the visitor typed (an e-mail, a name, the
 	tick) and a site without a program; otherwise answers the same whatever the e-mail."""
 	if purpose not in PURPOSES:
@@ -114,7 +136,11 @@ def request_link(site, *, email, purpose: str, first_name=None, last_name=None, 
 		         "last_name": _name(last_name, "GUEST_LAST_NAME_REQUIRED")}
 		if not accepted:
 			frappe.throw(_("Please confirm that you join the loyalty program."), refusal("MEMBER_CONSENT_REQUIRED"))
-	if not _within_limit(site, email):
+	_send_link(site, email, purpose, names, language, idempotency_key)
+
+
+def _send_link(site, email: str, purpose: str, names: dict, language: str, idempotency_key: str | None) -> None:
+	if not _first_request(site, idempotency_key) or not _within_limit(site, email):
 		return                                         # the same answer: nobody learns the limit was reached
 	from kamra.tex.services import notify
 
@@ -127,8 +153,9 @@ def request_link(site, *, email, purpose: str, first_name=None, last_name=None, 
 	_cache().set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 		"site": site.name, "purpose": purpose, "email": email, "language": language,
 		"expires_at": str(add_to_date(now_datetime(), minutes=LINK_MINUTES)), **names}), ex=LINK_MINUTES * 60)
+	# greeted by the profile's own name, or by none: never by what a visitor typed for an address they may not own
 	notify.member_mail(site, email, "member_join" if purpose == "join" else "member_sign_in", token=token,
-	                   guest=profile, name=" ".join(names.values()) or None, language=language)
+	                   guest=profile, language=language)
 
 
 def _link_key(token: str) -> str:
@@ -152,22 +179,42 @@ def _take_link(site, token: str) -> dict:
 	return data
 
 
+def _put_back(token: str, data: dict) -> None:
+	"""A link taken by a request that failed before it was used (review round 1): usable again until it expires."""
+	left = int((get_datetime(data.get("expires_at")) - now_datetime()).total_seconds())
+	if left > 0:
+		_cache().set(_link_key(token), json.dumps(data), ex=left)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+
+
 def verify(site, token: str) -> dict:
 	"""Open a link: a session for its profile (made, for a join link, when there is none) → {"session", "expires_at",
-	"expires_in", "status"}. A join link joins the site's programs."""
+	"expires_in", "status"}. A join link joins the site's programs. The link is taken once, outside the part a
+	deadlock runs again (review round 1: the retry found it spent); a failure that did not settle it (BUSY, a
+	database error) leaves it usable."""
+	data = _take_link(site, token)
+	try:
+		return _open(site, data)
+	except Exception as e:
+		if getattr(e, "code", None) not in FINAL:
+			_put_back(token, data)
+		raise
+
+
+@retry_on_deadlock
+def _open(site, data: dict) -> dict:
 	from kamra.tex.crm.service import require_live_guest
 
-	data = _take_link(site, token)
 	enterprise = site_enterprise(site)
 	profile = _profile(data["email"], enterprise, lock=True)
 	if not profile:
-		if data["purpose"] != "join":
+		# a sign-in link, or a signed-in guest's join link whose profile is gone since: no profile to make
+		if data["purpose"] != "join" or not data.get("first_name") or not data.get("last_name"):
 			frappe.throw(_("There is no membership with this e-mail. You can join the program instead."),
 			             refusal("NOT_A_MEMBER"))
 		profile = frappe.get_doc({
 			"doctype": "Guest", "first_name": data["first_name"], "last_name": data["last_name"],
 			"email": data["email"], "tex_enterprise": enterprise,
-			"tex_language": (data.get("language") or "")[:10] or None}).insert(ignore_permissions=True).name
+			"tex_language": _language(data.get("language"))}).insert(ignore_permissions=True).name
 	require_live_guest(profile)                        # locked, as every write of its records
 	if frappe.db.get_value("Guest", profile, "tex_erased_at", for_update=True):
 		frappe.throw(_("There is no membership with this e-mail. You can join the program instead."),
@@ -228,26 +275,40 @@ def status(site, guest: str) -> dict:
 	        "email": g.get("email"), "member": bool(hotels), "hotels": sorted(hotels)}
 
 
+def _language(raw) -> str | None:
+	"""A language the booking app speaks, else none (review round 1: the value came from the visitor)."""
+	from kamra.tex.services import content
+
+	return content.guest_language(str(raw or "")[:10]) if raw else None
+
+
 def join_site(site, guest: str) -> None:
 	"""The guest joins the programs of the site's hotels: their own act on the web, proven by their e-mail
-	(``loyalty.join_web``). The membership is the site's hotel's, or, on a hotel group's site, the program's own
-	hotel's (none for a group's program)."""
+	(``loyalty.join_web``). The membership is the site's hotel's; on a hotel group's site, the first of its hotels
+	(by name) the program serves, so that hotel's staff see the join and the record (review round 1: a group's
+	program has no hotel of its own, and the join belonged to nobody)."""
+	props = site_properties(site)
 	for program in site_programs(site):
-		own = frappe.db.get_value("TEX Loyalty Program", program, "property")
-		loyalty.join_web(guest, program, property=site.property or own or None)
+		hotel = site.property or next((p for p in props if loyalty.program_for(p) == program), None)
+		loyalty.join_web(guest, program, property=hotel)
 
 
-def join_signed_in(site, token: str | None, accepted) -> dict:
+def join_signed_in(site, token: str | None, accepted, *, language: str = "en",
+                   idempotency_key: str | None = None) -> None:
+	"""A signed-in guest who is no member asks to join, with the tick: a join link goes to the profile's own e-mail,
+	as every web join is confirmed (the owner's choice; review round 1: a script that holds a session on the page
+	joins nobody)."""
 	guest = require_session(site, token)
 	if not accepted:
 		frappe.throw(_("Please confirm that you join the loyalty program."), refusal("MEMBER_CONSENT_REQUIRED"))
 	if not site_programs(site):
 		frappe.throw(_("This site has no loyalty program."), refusal("MEMBERSHIP_UNAVAILABLE"))
-	from kamra.tex.crm.service import require_live_guest
-
-	require_live_guest(guest)
-	join_site(site, guest)
-	return status(site, guest)
+	email = frappe.db.get_value("Guest", guest, "email")
+	try:
+		email = _email(email)
+	except frappe.ValidationError:
+		return                                         # a profile whose e-mail is not one address: nothing to send to
+	_send_link(site, email, "join", {}, language, idempotency_key)
 
 
 def sign_out(site, token: str | None) -> None:

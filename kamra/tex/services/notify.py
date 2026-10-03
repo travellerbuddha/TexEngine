@@ -117,7 +117,7 @@ def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], gu
 
 
 def member_mail(site, email: str, key: str, *, token: str | None = None, guest: str | None = None,
-                name: str | None = None, language: str = "en") -> dict:
+                language: str = "en") -> dict:
 	"""A web member's link (C-04, ADR-078): ``member_sign_in`` / ``member_join`` with the one-time token in the URL
 	fragment, or ``member_none`` (no membership with this e-mail: a link to joining, no token). Sent in the site's
 	hotel's name (a group site: its first hotel's). The token is in no log and no record of ours: only the outgoing
@@ -134,11 +134,10 @@ def member_mail(site, email: str, key: str, *, token: str | None = None, guest: 
 		hotel = (frappe.db.get_value("Property", property, "property_name") if property else None) or site.site_name
 		programs = [frappe.db.get_value("TEX Loyalty Program", p, "program_name") or "" for p in
 		            members.site_programs(site)]
-		if guest:
-			name = " ".join(x for x in frappe.db.get_value("Guest", guest, ["first_name", "last_name"]) or () if x)
 		link = sites.guest_url(site, f"member#token={token}") if token else sites.guest_url(site, "?join=1")
+		# greeted by no name: a visitor types the names for an address they may not own (review round 1)
 		subject, body = render(key, lang, link=link, hotel=escape_html(hotel), program=escape_html(", ".join(programs)),
-		                       name=escape_html((name or "").strip()), minutes=str(members.LINK_MINUTES))
+		                       minutes=str(members.LINK_MINUTES))
 	except Exception as e:
 		if transaction_lost(e):
 			raise
