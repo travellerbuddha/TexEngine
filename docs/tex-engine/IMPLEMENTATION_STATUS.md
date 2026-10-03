@@ -1797,3 +1797,80 @@ No owner decision was needed. LO-30 (left to this batch by Part 2G-3) is done he
   Option layer names no letter); a basket refused as expired offers Try again, not the expired flow's "Refresh
   prices"; a guest who leaves the price notice unaccepted for 25 minutes and books is stopped once more by the same
   notice (focused again), and the next submit books.
+
+## 6K6. Audit Part 2K-6 (2026-10-03)
+
+No owner decision was needed. Batches F (staff frontend) and G (tests, guards and tooling) of HANDOFF_LEFTOVERS §2, in
+one PR. Each card was verified in code first.
+
+- LO-34 **COMPLETE**: the CRS booking summary shows no "Due now" while the current method's summary loads (the
+  payment panel and the Call Center already did, O-29) · e2e `crs-actions` (the summary held after a method change).
+- LO-38 **COMPLETE**: a reservation's exchange-rate hint adds "bridging {provider}" when a manual rate stood in for a
+  stale or missing provider rate (`bridged_from`, ADR-069 manual rate bridge); the hint is
+  `reservations/lib/fxHint.ts`; one key in six staff catalogs · node `fx-hint`.
+- LO-40 **COMPLETE** (was not re-verified; verified STILL OPEN: the note only): the occupancy ladder's sample parties
+  count infants as `occupancy.check_capacity` does, from the version's `infants_count_as_children` and
+  `infants_count_as_occupants` (`workspace/occupancy.ts` `partyOptions`); with both on (the default) the parties are
+  the same as before; the note says the parties count that way (six catalogs) · node `workspace-occupancy`.
+- LO-45 **COMPLETE**: `minusAmount` and `isPositiveAmount` take any number of decimals (VND gave ".1000" and an
+  invalid pattern; KWD's third digit was refused); the bank-transfer, refund, allocate, transfer, manual-payment and
+  payment-link dialogs pass their currency's `minorUnits` to the input and the checks; the pure helpers are
+  `payments/amounts.ts` (`lib.ts` re-exports them); review: both apps' minor-unit tables say what the server's
+  `MINOR_UNITS` says (CLP and ISK were 0 on the screens, 2 on the server, so a dialog refused the server's own
+  amount; node `minor-units` reads `money.py`), and with no decimals the input takes no point (`ui/decimal.ts`)
+  · node `payment-amounts` (EUR, VND, KWD), `minor-units`, `decimal-input`.
+- LO-42(a) **COMPLETE** (was not re-verified; no written review text exists, each nit was verified in code): the
+  markup priority help says the higher priority wins within one scope, stacking rules apply lowest first and two
+  replacing rules of one scope and priority whose stays meet cannot both be live (G-53); the promotion kind MEMBER
+  reads "Member (label only)" and both kind selects (promotion policy, contract offer) say a kind never limits who
+  gets it (G-57); six rates catalogs · node `rates-copy`.
+- LO-27 **COMPLETE** (test only): `crm-abandoned.spec.ts` checks the abandoned list's contact links on rows in the
+  server's shape: `sms:` and `wa.me` (opened apart, no referrer, international numbers only) for the channels the
+  guest agreed to, no `tel:` link on any row (O-26), no contact on an anonymous row; red against the page made to
+  offer a call.
+- LO-46 **COMPLETE** (was not re-verified; verified STILL OPEN, the docstring listed the gaps): the nullable-date
+  guard reads the third and fourth positional filters (Frappe's `execute(fields, filters, or_filters)`, swapped when
+  the second is filters-shaped), scopes a query-builder `isnull()`/`notnull()` exemption to its own statement, and
+  lists (UNREADABLE) a call with a run-time doctype whose filters compare a nullable date with no `is` (review: a
+  call whose doctype is in a `**` mapping is named `api(**)`, not a crash) · unit `test_nullable_date_filters` (two
+  probe tests, red before; the repository has no such call, the guard stays green).
+- LO-36 **COMPLETE**: the concurrency cleanup deletes each child table's rows by parent before the versions and the
+  property's records (`_delete_children`); before, seven child tables of a version stayed on the site · integration
+  `test_concurrency.TestCleanupLeavesNoOrphans` (red with exactly those seven).
+- LO-44 **COMPLETE** (card corrected: nine specs were behind their JSON, not only TEX Payment Link, and
+  TEX Payment Transaction's spec lacked `last_reverified_at`, added to the JSON alone by Part 2K-4): the specs carry
+  each JSON's `modified` stamp and that field · unit `test_doctype_specs` (no bench: every spec is stamped at least as
+  late as its JSON and generates the JSON's content; red for both before).
+- LO-29 **COMPLETE**: p63 also masks a child table's Password fields in the rows a Version keeps whole (`added`,
+  `removed`; Frappe's `as_dict`). Latent: no child table has a Password field today, so p63 is not re-run. The live
+  Version hook needs no change: Frappe stores a Password field's dummy value before the Version is made
+  (`_save_passwords`, children too), and `mask_version` masks withheld fields, none in a child table · integration
+  `test_patches.TestP63` (a synthetic child Password field, a Custom Field row; red before).
+- LO-41 **COMPLETE**: of one group on equal priority the lowest id applies; a TEX Promotion's `PRM-` id now compares by its number
+  (`promotions.id_order`), so the older promotion still wins from PRM-100000 on; a contract offer's code compares as
+  text, as before, also when it reads `PRM-…` (review N3), and every id up to PRM-99999 keeps its text order
+  (ADR-068 addendum) · unit `test_promotions_extras`; `test_main_parity` unchanged (8/8).
+- LO-42(b) **COMPLETE** (was not re-verified; each nit verified in code; ADR-068 addendum):
+  - archiving a scheduled markup revision that hands a window back to the revision it replaced runs the tie check
+    on that window only (from the reopened markup's old end to its new one; review S1: not its whole window,
+    open-ended) and is refused naming the revision, the markup it would reopen and the one it would tie with;
+    archive takes activation's serialising lock · integration `test_commercial_flows.TestMarkupTies` (red: the
+    archive went through; review S1: red, a markup scheduled after the new end was taken for a tie);
+  - the tie check's locking read matches the hotel as is (blank: NULL or '') and reads in no order, so it is a range
+    of `tex_markup_prop_status` (property, tex_status) and locks that hotel's markups only (`tie_candidates`) · EXPLAIN
+    test, for a hotel and for none (red: PRIMARY, no possible key);
+  - a test for a tie on a scheduled activation (inside a live markup's window refused, after its end allowed); test
+    only, red with the check made to compare with now;
+  - the contract page's publish check has its own per-user budget (`HEAVY_LIMITS["publish"]`, 20 a minute, 2 at
+    once), not the workspace's live checks' (60, 3): `validate_version(purpose="publish")` with no unsaved data;
+    with data a call is a live check whatever it says · integration `test_pricing_workspace_api.TestHeavyReads`.
+- LO-43 **COMPLETE** (was not re-verified; verified STILL OPEN): a grid rate edit (one cell or several) on a room with
+  no price of its own in a period it touches is refused "<room> has no price in period <code>; add one first." (the
+  engine's `Unsellable` NO_ROOM_PRICE was raised raw); another `Unsellable` keeps its own message · integration
+  `test_inventory.TestGridRates`.
+- **Not done:** bundles not rebuilt (2Z); the nullable-date guard still lists, not reads, filters it cannot build
+  statically (from a parameter, a helper or a comprehension), as before; a payments dialog in a currency TEX has no
+  minor units for takes two decimals (`minorUnits`), and CLP and ISK are 2 on the server (ISO 4217 says 0: a
+  money-engine change, not made); the occupancy ladder's sample parties walk every band combination of a party size
+  that does not fit (inside a memo; about 20 ms for five bands, 400 ms for ten); the promotion kind stays a label,
+  no member-only price exists (G-57).

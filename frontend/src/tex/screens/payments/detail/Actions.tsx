@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { tex } from "../../../lib/api"
-import { money } from "../../../lib/format"
+import { minorUnits, money } from "../../../lib/format"
 import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Button, DecimalInput, Dialog, Field, InlineError, Input, Money, Notice, Segmented, Select, Textarea, useToast } from "../../../ui"
@@ -80,7 +80,8 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   const outside = mode === "outside"
-  const valid = isPositiveAmount(amount) && reason.trim().length > 2 && (!outside || reference.trim().length > 0)
+  // the currency's own decimals (VND none, KWD three): LO-45
+  const valid = isPositiveAmount(amount, minorUnits(ccy)) && reason.trim().length > 2 && (!outside || reference.trim().length > 0)
   const submit = async () => {
     if (!valid) return
     const r = await a.run(() =>
@@ -132,7 +133,7 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
         )}
         {outside && <Notice tone="info">{t("payments.refund.outside_desc")}</Notice>}
         <Field label={t("payments.amount")} required hint={t("payments.refund.amount_hint")}>
-          <DecimalInput value={amount} onValueChange={setAmount} suffix={ccy} data-autofocus />
+          <DecimalInput value={amount} onValueChange={setAmount} decimals={minorUnits(ccy)} suffix={ccy} data-autofocus />
         </Field>
         {bookings.length > 0 && txn.status === "Succeeded" && (
           <Field label={t("payments.refund.booking")} hint={t("payments.refund.booking_hint")}>
@@ -179,7 +180,7 @@ export function AllocateDialog({ open, onClose, txn, onDone }: { open: boolean; 
     setReason("")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
-  const valid = Boolean(booking) && isPositiveAmount(amount) && reason.trim().length > 2
+  const valid = Boolean(booking) && isPositiveAmount(amount, minorUnits(txn.currency)) && reason.trim().length > 2
   const submit = async () => {
     if (!valid) return
     const r = await a.run(() => tex("payments", "allocate", { transaction: txn.name, booking, amount, reason: reason.trim(), idempotency_key: key }, { post: true }))
@@ -203,7 +204,7 @@ export function AllocateDialog({ open, onClose, txn, onDone }: { open: boolean; 
         </p>
         <BookingPicker property={txn.property} value={booking} onChange={(b) => setBooking(b)} label={t("payments.allocate.booking")} required expectCurrency={txn.currency} autoFocus />
         <Field label={t("payments.amount")} required>
-          <DecimalInput value={amount} onValueChange={setAmount} suffix={txn.currency} />
+          <DecimalInput value={amount} onValueChange={setAmount} decimals={minorUnits(txn.currency)} suffix={txn.currency} />
         </Field>
         <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
           <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} autoComplete="off" />
@@ -235,7 +236,7 @@ export function TransferDialog({ open, onClose, txn, onDone }: { open: boolean; 
     setReason("")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
-  const valid = Boolean(from) && Boolean(to) && from !== to && isPositiveAmount(amount) && reason.trim().length > 2
+  const valid = Boolean(from) && Boolean(to) && from !== to && isPositiveAmount(amount, minorUnits(txn.currency)) && reason.trim().length > 2
   const submit = async () => {
     if (!valid) return
     const r = await a.run(() => tex("payments", "transfer", { transaction: txn.name, from_booking: from, to_booking: to, amount, reason: reason.trim(), idempotency_key: key }, { post: true }))
@@ -259,7 +260,7 @@ export function TransferDialog({ open, onClose, txn, onDone }: { open: boolean; 
         </Field>
         <BookingPicker property={txn.property} value={to} onChange={(b) => setTo(b)} label={t("payments.transfer.to")} required exclude={from} expectCurrency={txn.currency} />
         <Field label={t("payments.amount")} required hint={t("payments.transfer.amount_hint")}>
-          <DecimalInput value={amount} onValueChange={setAmount} suffix={txn.currency} />
+          <DecimalInput value={amount} onValueChange={setAmount} decimals={minorUnits(txn.currency)} suffix={txn.currency} />
         </Field>
         <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
           <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} autoComplete="off" />
@@ -290,7 +291,9 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
     }
   }, [open, today, txn.amount])
   const created = txn.created.slice(0, 10)
-  const short = isPositiveAmount(received) ? minusAmount(txn.amount, received) : null
+  // in the currency's own decimals (VND none, KWD three): LO-45
+  const decimals = minorUnits(txn.currency)
+  const short = isPositiveAmount(received, decimals) ? minusAmount(txn.amount, received, decimals) : null
   const receivedOk = short !== null && !short.startsWith("-")
   const valid = reference.trim().length > 0 && Boolean(valueDate) && valueDate <= today && valueDate >= created && receivedOk
   const submit = async () => {
@@ -336,7 +339,7 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
           hint={t("payments.bank.received_hint")}
           error={received.trim() && !receivedOk ? t("payments.bank.received_invalid") : undefined}
         >
-          <DecimalInput value={received} onValueChange={setReceived} suffix={txn.currency} />
+          <DecimalInput value={received} onValueChange={setReceived} decimals={decimals} suffix={txn.currency} />
         </Field>
         {/* a short transfer is allocated as it came: the booking still owes the rest (P1-11) */}
         {receivedOk && short && !isZero(short) && <Notice tone="info">{t("payments.bank.short", { amount: money(short, txn.currency) })}</Notice>}

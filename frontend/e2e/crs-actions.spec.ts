@@ -437,3 +437,47 @@ test("O-29: the quote summary of a payment method left meanwhile never shows", a
   await expect(page.getByRole("radio", { name: /Bank transfer/ })).toBeChecked()
   noErrors()
 })
+
+// ─── LO-34: the CRS page's booking summary ──────────────────────────────────
+
+test("LO-34: the CRS booking summary shows no amount due now while the new method's summary loads", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  await english(page)
+  await login(page, AGENT)
+  await page.goto(texPath("/tex/crs"))
+  const market = byLabel(page, "Market")
+  await market.focus()
+  await page.keyboard.type("Germ")
+  await expect(market).toHaveValue("DE")
+  const { checkIn } = stayDates(190, 2)
+  await byLabel(page, "Check-in").focus()
+  await page.keyboard.type(mdy(checkIn))
+  await expect(byLabel(page, "Check-out")).toHaveValue(addDays(checkIn, 2))
+  await Promise.all([
+    page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search") && r.ok()),
+    page.getByRole("button", { name: "Search", exact: true }).click(),
+  ])
+  await page.getByRole("button", { name: /^Select/ }).first().click()
+  const summary = page.getByRole("complementary", { name: "Booking summary" })
+  await summary.getByRole("button", { name: "Continue to guest" }).click()
+
+  // the card's summary: its amount due now is in the booking summary
+  await Promise.all([
+    page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary") && r.ok()),
+    page.getByRole("radio", { name: /Card/ }).check(),
+  ])
+  await expect(summary.getByText("Due now")).toBeVisible()
+  // bank transfer's summary is held: the card's amount due now is not bank transfer's, so none shows meanwhile
+  const { held, release } = await holdNext(page, "kamra.tex.api.ui_crs.quote_summary")
+  await page.getByRole("radio", { name: /Bank transfer/ }).check()
+  await held
+  await frames(page)
+  await expect(summary.getByText("Due now")).toHaveCount(0)
+  // and bank transfer's own shows once it is read
+  const answered = page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary"))
+  release()
+  await answered
+  await expect(summary.getByText("Due now")).toBeVisible()
+  noErrors()
+})
+

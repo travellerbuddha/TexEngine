@@ -3,10 +3,11 @@
 Eligibility is evaluated for every candidate and each one is reported as
 ``applied`` or ``rejected`` with a reason. Combination is deterministic:
 
-1. candidates sorted by (priority desc, promo_id); an eligible promotion the room cannot use
-   (a fixed amount without a rate to the sell currency; on the total or the extras, a value type
-   other than a percentage or a fixed amount, extras that are not there, or a fixed amount on a
-   booking's later room) is refused first, so it never excludes or closes out one it can (O-1);
+1. candidates sorted by (priority desc, promo_id; a TEX Promotion's PRM id by its number, ``id_order``); an eligible
+   promotion the room cannot use (a fixed amount without a rate to the sell currency; on the total or
+   the extras, a value type other than a percentage or a fixed amount, extras that are not there, or a
+   fixed amount on a booking's later room) is refused first, so it never excludes or closes out one it
+   can (O-1);
 2. if any eligible promotion is ``exclusive``, the highest-priority exclusive one is the
    only promotion applied; all others are rejected "excluded by <id>";
 3. otherwise, in order: a promotion in an ``incompatible group`` already used is rejected (of
@@ -20,6 +21,7 @@ Eligibility is evaluated for every candidate and each one is reported as
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
@@ -278,11 +280,25 @@ def basket_minimums(promos, ctx: PromoContext, usage: dict[str, tuple[int, int]]
 	return out
 
 
+_NAMED_ID = re.compile(r"PRM-(\d+)")
+
+
+def id_order(p: Promotion) -> tuple:
+	"""A promotion's id as the tie order compares it: a TEX Promotion (``PRM-.#####``) by its number, so the
+	older one comes first also from PRM-100000 on (LO-41); a contract offer by its code, as text, whatever it
+	reads (2D-1 0a). Every id up to PRM-99999 keeps its text order, against a contract offer's code too, as
+	before; a longer one comes after them all, in number order."""
+	m = _NAMED_ID.fullmatch(p.promo_id) if p.source != "contract" else None
+	if not m or len(m.group(1)) <= 5:
+		return (p.promo_id, 0, "")
+	return ("PRM-99999", len(m.group(1)), m.group(1))
+
+
 def select(promos: tuple[Promotion, ...], ctx: PromoContext,
            usage: dict[str, tuple[int, int]] | None = None) -> tuple[list[Promotion], list[PromoOutcome]]:
 	"""Choose the promotions to apply. → (to_apply in order, rejected outcomes)."""
 	usage = usage or {}
-	ordered = sorted(promos, key=lambda p: (-p.priority, p.promo_id))
+	ordered = sorted(promos, key=lambda p: (-p.priority, id_order(p)))
 	eligible: list[Promotion] = []
 	rejected: list[PromoOutcome] = []
 	for p in ordered:

@@ -124,7 +124,7 @@ function OfferForm({
         <Field label={t("rates.f.offer_name")}>
           <Input disabled={readOnly} value={s("offer_name")} onChange={(e) => onChange({ offer_name: e.target.value })} />
         </Field>
-        <Field label={t("rates.f.kind")}>
+        <Field label={t("rates.f.kind")} hint={t("rates.h.promo_kind")}>
           <Select disabled={readOnly} value={s("kind")} onChange={(e) => onChange({ kind: e.target.value })} options={enumOptions(t, "promo_kind", PROMO_KINDS)} />
         </Field>
         <Field label={t("rates.f.value_type")} hint={t(`rates.promo_value_help.${vt || "PERCENT"}`)}>

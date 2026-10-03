@@ -374,7 +374,8 @@ function SummaryCard({ flow, step, onGo, onBook }: { flow: BookingFlow; step: St
           {flow.summary && !flow.quoteStale ? (
             <>
               <Row strong label={t("crs.quote.total")} value={<Money amount={flow.summary.total} currency={flow.summary.currency} />} />
-              {flow.summary.due_now !== null && flow.method && (
+              {/* the amount due now is the method's: none while the current method's summary loads (LO-34) */}
+              {flow.summary.due_now !== null && flow.method && !flow.summaryLoading && (
                 <Row label={t("crs.pay.due_now")} value={<Money amount={flow.summary.due_now} currency={flow.summary.currency} />} />
               )}
               <QuoteExpiry className="mt-1" expiresAt={flow.summary.expires_at} onRequote={flow.booking ? undefined : () => void flow.requestQuotes()} />

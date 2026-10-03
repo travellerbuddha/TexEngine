@@ -3,6 +3,7 @@ import { tex } from "../../lib/api"
 import { useTexT } from "../../i18n"
 import { Button, DecimalInput, Dialog, Field, FormGrid, InlineError, Input, Notice, Select, Textarea, useToast } from "../../ui"
 import { BookingPicker } from "./components/BookingPicker"
+import { minorUnits } from "../../lib/format"
 import { isPositiveAmount, isZero, useEvent, useIntentKey } from "./lib"
 import type { BookingSummary } from "./types"
 
@@ -57,7 +58,9 @@ export function ManualPaymentDialog({
     if (s && !amount && !isZero(s.balance) && !s.balance.startsWith("-")) setAmount(s.balance)
   }
 
-  const valid = Boolean(booking) && isPositiveAmount(amount) && reference.trim().length > 0
+  // the booking currency's own decimals (LO-45); two until the booking is read
+  const decimals = summary ? minorUnits(summary.currency) : 2
+  const valid = Boolean(booking) && isPositiveAmount(amount, decimals) && reference.trim().length > 0
   const submit = async () => {
     if (!valid) return
     setPending(true)
@@ -103,7 +106,7 @@ export function ManualPaymentDialog({
         <BookingPicker property={property} value={booking} onChange={onBooking} label={t("payments.manual.booking")} required autoFocus />
         <FormGrid>
           <Field label={t("payments.amount")} required hint={summary ? t("payments.manual.currency_hint", { currency: summary.currency }) : undefined}>
-            <DecimalInput value={amount} onValueChange={setAmount} suffix={summary?.currency} />
+            <DecimalInput value={amount} onValueChange={setAmount} decimals={decimals} suffix={summary?.currency} />
           </Field>
           <Field label={t("payments.manual.method")} required>
             <Select value={method} onChange={(e) => setMethod(e.target.value)} options={MANUAL_METHODS.map((m) => ({ value: m, label: t(manualKey(m)) }))} />

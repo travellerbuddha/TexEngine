@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Check, Copy, KeyRound, Mail } from "lucide-react"
 import { tex, useTexQuery } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
-import { dateTime } from "../../../lib/format"
+import { dateTime, minorUnits } from "../../../lib/format"
 import { TEX_LANGS, useTexT } from "../../../i18n"
 import { Button, Checkbox, DecimalInput, Dialog, Field, FormGrid, InlineError, Input, Money, Notice, Select, Textarea, useToast } from "../../../ui"
 import { BookingPicker } from "../components/BookingPicker"
@@ -150,7 +150,9 @@ export function CreateLinkDialog({
   }
 
   const emailOk = !guestEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)
-  const valid = isPositiveAmount(amount) && Boolean(currency) && description.trim().length > 0 && emailOk && (!sendEmail || Boolean(guestEmail))
+  // the link currency's own decimals (LO-45)
+  const decimals = currency ? minorUnits(currency) : 2
+  const valid = isPositiveAmount(amount, decimals) && Boolean(currency) && description.trim().length > 0 && emailOk && (!sendEmail || Boolean(guestEmail))
   const submit = async () => {
     if (!valid) return
     setPending(true)
@@ -206,7 +208,7 @@ export function CreateLinkDialog({
       <div className="space-y-4">
         <FormGrid>
           <Field label={t("payments.amount")} required>
-            <DecimalInput value={amount} onValueChange={setAmount} suffix={currency} data-autofocus />
+            <DecimalInput value={amount} onValueChange={setAmount} decimals={decimals} suffix={currency} data-autofocus />
           </Field>
           <Field label={t("payments.currency")} required hint={booking ? t("payments.links.currency_from_booking") : undefined}>
             <Select value={currency} disabled={Boolean(booking)} onChange={(e) => setCurrency(e.target.value)} options={boot.currencies.map((c) => ({ value: c, label: c }))} />

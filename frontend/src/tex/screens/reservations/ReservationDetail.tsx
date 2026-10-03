@@ -35,6 +35,7 @@ import { GuestChangesCard } from "./components/GuestChanges"
 import { PaymentSummaryCard, RevisionTimeline } from "./components/DetailParts"
 import { ModifyDrawer } from "./components/ModifyDrawer"
 import { ADDON_STATUSES } from "./lib/addons"
+import { fxRateHint } from "./lib/fxHint"
 import type { ReservationDetail as Detail, GuestChangeRequest } from "./lib/types"
 
 const TERMINAL = ["Cancelled", "No Show", "Checked Out"]
@@ -330,9 +331,7 @@ function DetailView({
                             <dd
                               key={`${r.from}-${r.to}`}
                               className="text-zinc-800"
-                              title={[r.provider && `${r.provider} ${r.provider_rate ?? ""} ${r.rate_date ?? ""}`, r.policy_id, r.used_for.join(", ")]
-                                .filter(Boolean)
-                                .join(" · ")}
+                              title={fxRateHint(r, t)}
                             >
                               1 {r.from} = {r.sell_rate} {r.to}
                             </dd>

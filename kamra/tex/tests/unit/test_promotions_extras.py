@@ -250,6 +250,26 @@ class TestGroupRule(unittest.TestCase):
 		self.assertEqual({o.promo_id: o.applied for o in q.promotions}, {"EB15": True, "LS7": False})
 		self.assertEqual(q.totals["accommodation"], D("510.00"))
 
+	def test_the_older_promotion_wins_also_from_prm_100000_on(self):
+		"""LO-41: promotion ids are PRM-.##### (five digits, then six from PRM-100000). Compared as text,
+		PRM-100000 sorted before PRM-99999 and the newer promotion won the tie: they compare by number."""
+		old, new = P("PRM-99999", value="10", group="EB"), P("PRM-100000", value="25", group="EB")
+		self.assertEqual(self.price(new, old), (D("540.00"), {"PRM-99999": True, "PRM-100000": False}))
+		chosen, _rejected = promotions.select((new, old), pctx())
+		self.assertEqual([p.promo_id for p in chosen], ["PRM-99999"])
+
+	def test_a_contract_offer_coded_like_a_promotion_id_still_sorts_by_its_code(self):
+		"""2K-6 review N3: only a TEX Promotion's id compares by number; a contract offer's code compares as
+		text (2D-1 0a), also when it reads PRM-…. Of a hotel promotion up to PRM-99999 and a contract offer the
+		order is the text order, as before LO-41."""
+		a, b = P("PRM-100000", value="7", group="SAVE", source="contract"), P("PRM-99999", value="15", group="SAVE",
+		                                                                      source="contract")
+		chosen, _rejected = promotions.select((b, a), pctx())
+		self.assertEqual([p.promo_id for p in chosen], ["PRM-100000"])
+		hotel, offer = P("PRM-00005", value="7", group="MIX"), P("PRM-1A", value="15", group="MIX", source="contract")
+		chosen, _rejected = promotions.select((offer, hotel), pctx())
+		self.assertEqual([p.promo_id for p in chosen], ["PRM-00005"])
+
 	def test_a_top_member_refused_by_stacking_leaves_the_group_open(self):
 		"""The group closes only on a member that applies: its top member refused as not stackable (another
 		promotion already applies) lets the next member of the group apply."""

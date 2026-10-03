@@ -44,7 +44,8 @@ export function PublishDialog({
   const runCheck = () => {
     setChecking(true)
     setCheckErr(undefined)
-    tex<ValidationResult>("contracts", "validate_version", { name: version.name, ...optIn })
+    // the publish check has a budget of its own: the workspace's live checks never use it up (LO-42 b4)
+    tex<ValidationResult>("contracts", "validate_version", { name: version.name, ...optIn, purpose: "publish" })
       .then(setCheck)
       .catch((e: unknown) => setCheckErr(e instanceof TexApiError ? e : new TexApiError(String(e), 0, "Error")))
       .finally(() => setChecking(false))

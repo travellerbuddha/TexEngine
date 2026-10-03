@@ -2068,6 +2068,96 @@ class TestMarkupTies(TexTestCase):
 		policy_api.activate("TEX Markup Rule", revision)
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
 
+	def test_archiving_a_scheduled_revision_never_puts_a_tie_back_on_sale(self):
+		"""LO-42 (b1): archiving a scheduled revision puts the revision it was to replace back on sale (open again),
+		with no tie check: a markup activated meanwhile in that window could tie with it, and the engine would
+		take the newer silently. The archive is refused, naming both."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		revision = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": revision, "priority": 5})
+		at = add_to_date(now_datetime(), days=2)
+		policy_api.activate("TEX Markup Rule", revision, at=str(at))       # the first ends at ``at``
+		other = self.markup(value=9)
+		policy_api.activate("TEX Markup Rule", other, at=str(add_to_date(at, days=1)))   # no tie while the first ends
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.archive("TEX Markup Rule", revision, reason="LO-42 b1")
+		self.assertIn(first, str(refused.exception))
+		self.assertIn(other, str(refused.exception))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", first, "tex_status"), "Superseded")
+
+	def test_archiving_checks_only_the_window_it_hands_back(self):
+		"""2K-6 review S1: the archive's check covers the window the reopened revision gets back, from its old end to
+		its new one, not its whole window open-ended: a markup scheduled after that new end ties with nothing."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		t2 = add_to_date(now_datetime(), days=2)
+		t3 = add_to_date(now_datetime(), days=4)
+		second = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.activate("TEX Markup Rule", second, at=str(t2))        # the first ends at t2
+		third = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": third, "priority": 6})
+		policy_api.activate("TEX Markup Rule", third, at=str(t3))         # the second ends at t3
+		other = self.markup(value=9)
+		policy_api.activate("TEX Markup Rule", other, at=str(add_to_date(t3, days=1)))   # only the third is live then
+		policy_api.archive("TEX Markup Rule", second, reason="2K-6 review S1")   # the first is back until t3 only
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", second, "tex_status"), "Archived")
+		back = frappe.db.get_value("TEX Markup Rule", first, ["tex_status", "active_to"], as_dict=True)
+		self.assertEqual((back.tex_status, back.active_to), ("Superseded", t3))
+
+	def test_archiving_refuses_a_tie_inside_the_window_it_hands_back(self):
+		"""2K-6 review S1 (round 2): a markup scheduled inside that window, between the old end and the new one,
+		ties with the reopened revision: the archive is refused."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		t2 = add_to_date(now_datetime(), days=2)
+		t3 = add_to_date(now_datetime(), days=4)
+		second = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": second, "priority": 5})
+		policy_api.activate("TEX Markup Rule", second, at=str(t2))        # the first (priority 0) ends at t2
+		third = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": third, "priority": 6})
+		policy_api.activate("TEX Markup Rule", third, at=str(t3))         # the second ends at t3
+		other = self.markup(value=9)
+		policy_api.activate("TEX Markup Rule", other, at=str(add_to_date(t2, days=1)))   # no tie while the second sells
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.archive("TEX Markup Rule", second, reason="2K-6 review S1")
+		self.assertIn(first, str(refused.exception))
+		self.assertIn(other, str(refused.exception))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", second, "tex_status"), "Superseded")
+
+
+	def test_a_scheduled_markup_ties_inside_a_live_markups_window_only(self):
+		"""LO-42 (b3): the check compares the new markup's own start (``at``), not now: scheduled inside a live
+		markup's window it is refused, scheduled after that one ends it is activated."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		inside = self.markup(value=9)
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.activate("TEX Markup Rule", inside, at=str(add_to_date(now_datetime(), days=3)))
+		self.assertIn(f"live markup {first}", str(refused.exception))
+		ends = add_to_date(now_datetime(), days=5)
+		revision = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": revision, "priority": 2})
+		policy_api.activate("TEX Markup Rule", revision, at=str(ends))     # the first (priority 0) ends at ``ends``
+		after = self.markup(value=11)
+		policy_api.activate("TEX Markup Rule", after, at=str(add_to_date(ends, days=1)))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", after, "tex_status"), "Active")
+
+
+	def test_the_tie_check_reads_its_hotels_markups_only(self):
+		"""LO-42 (b2): the check is a locking read; its IFNULL(property, '') kept the (property, tex_status)
+		index out, so it scanned and locked every markup row of every hotel until the activation committed."""
+		from kamra.tex_commercial.doctype.tex_markup_rule import tex_markup_rule as controller
+
+		for prop in (fx.PROPERTY, ""):
+			with self.subTest(property=prop or "(none)"):
+				sql, args = controller.tie_candidates(prop, "x", now_datetime())
+				plan = frappe.db.sql(f"EXPLAIN {sql}", args, as_dict=True)[0]
+				self.assertIn("tex_markup_prop_status", plan.get("possible_keys") or "", plan)
+				self.assertIn(plan["type"], ("ref", "range", "ref_or_null"), plan)
+
 
 class TestPaymentMethodRules(TexTestCase):
 	"""O-15 (audit 2F-2, ADR-041): the hotel's payment method rules bind every booking, the guest's and staff's.

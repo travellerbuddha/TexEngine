@@ -325,6 +325,7 @@
  "res.snap.contract_label": "Contract",
  "res.snap.copy_hash": "Copy payload hash",
  "res.snap.fx": "Exchange rate",
+ "res.snap.fx_bridging": "bridging {provider}",
  "res.snap.hash": "Payload hash",
  "res.snap.override": "Price set manually to",
  "res.snap.promotions": "Promotions",

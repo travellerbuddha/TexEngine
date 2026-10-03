@@ -10,6 +10,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react"
 import { cn } from "../../lib/utils"
+import { decimalPattern } from "./decimal"
 
 const CONTROL =
   "block w-full rounded-lg border border-zinc-300 bg-white text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 " +
@@ -133,7 +134,7 @@ export const DecimalInput = forwardRef<
     suffix?: ReactNode
   }
 >(function DecimalInput({ value, onValueChange, decimals = 2, allowNegative, suffix, className, ...rest }, ref) {
-  const re = new RegExp(`^${allowNegative ? "-?" : ""}\\d*(\\.\\d{0,${decimals}})?$`)
+  const re = decimalPattern(decimals, allowNegative)
   return (
     <div className="relative">
       <input

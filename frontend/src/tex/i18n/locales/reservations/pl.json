@@ -333,6 +333,7 @@
  "res.snap.contract_label": "Umowa",
  "res.snap.copy_hash": "Kopiuj skrót danych",
  "res.snap.fx": "Kurs wymiany",
+ "res.snap.fx_bridging": "zamiast {provider}",
  "res.snap.hash": "Skrót danych (hash)",
  "res.snap.override": "Cena ustawiona ręcznie na",
  "res.snap.promotions": "Promocje",

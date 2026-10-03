@@ -6,8 +6,8 @@ tenant for a connection without a hotel. p18 encrypted only the column; p24 mask
 Account's history.
 
 For every DocType with a Password field (DocField or Custom Field), this masks those fields in its Version rows:
-``changed`` entries, and a child table's secret fields in ``row_changed`` entries (no child table has a Password
-field today; the rule is there for one that will). A value is masked unless it is already all asterisks (p24's
+``changed`` entries, and a child table's secret fields in ``row_changed`` entries and in the rows ``added`` and
+``removed`` keep whole (LO-29; no child table has a Password field today; the rule is there for one that will). A value is masked unless it is already all asterisks (p24's
 rule), so Frappe's own "********" stays as it is. Batches by name, without touching ``modified``; prints only the
 count, never a value; a second run masks none."""
 
@@ -46,13 +46,27 @@ def _mask_cells(cells, fields: set[str]) -> bool:
 	return hit
 
 
+def _mask_row(row: dict, fields: set[str]) -> bool:
+	hit = False
+	for field in fields:
+		if field in row:
+			row[field], masked = _mask_value(row[field])
+			hit = hit or masked
+	return hit
+
+
 def mask(data: dict, fields: set[str], tables: dict[str, set[str]]) -> bool:
-	"""Mask, in place, one Version's secrets: ``changed`` entries of ``fields``; in ``row_changed``, the entries of
-	a table field named in ``tables`` for that table's secret fields. → whether anything was masked."""
+	"""Mask, in place, one Version's secrets: ``changed`` entries of ``fields``; for a table field named in
+	``tables``, that table's secret fields in its ``row_changed`` entries and in the rows ``added`` and ``removed``
+	keep whole (Frappe's ``as_dict``, LO-29). → whether anything was masked."""
 	hit = _mask_cells(data.get("changed"), fields)
 	for row in data.get("row_changed") or []:
 		if isinstance(row, list) and len(row) >= 4 and row[0] in tables:
 			hit = _mask_cells(row[3], tables[row[0]]) or hit
+	for key in ("added", "removed"):
+		for entry in data.get(key) or []:
+			if isinstance(entry, list) and len(entry) >= 2 and entry[0] in tables and isinstance(entry[1], dict):
+				hit = _mask_row(entry[1], tables[entry[0]]) or hit
 	return hit
 
 
