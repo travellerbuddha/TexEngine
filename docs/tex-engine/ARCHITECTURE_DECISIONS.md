@@ -9518,8 +9518,9 @@ the versions the roll superseded the state their contract's later publishes woul
 - *Markups (G-53).* A REPLACE markup tying a live one (scope, priority, stay dates) is refused on activation (serialised);
   publishing from the contract page runs the workspace's board checks. `level()` and server defaults are unchanged.
 - New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.
-- *Addendum (Part 2K-6, LO-41, LO-42b).* The group rule's "lowest id" compares a `PRM-` id by its number (PRM-99999
-  before PRM-100000); a contract offer's code stays text order. Markup ties: archiving a scheduled revision that hands
+- *Addendum (Part 2K-6, LO-41, LO-42b).* The group rule's "lowest id" compares a TEX Promotion's `PRM-` id by its number
+  (PRM-99999 before PRM-100000; every id up to PRM-99999 keeps its text order, against a contract offer's code
+  too); a contract offer's code stays text order, also when it reads `PRM-…` (review N3). Markup ties: archiving a scheduled revision that hands
   its window back is a transition like activation (same serialising lock, tie check on the window the reopened
   markup gets back, from its old end to its new one, refused by name); the check's locking read matches the hotel as stored (blank is NULL or '') with no ORDER BY,
   so it locks one hotel's range of `tex_markup_prop_status`; the contract page's publish check has its own per-user

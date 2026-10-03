@@ -1842,9 +1842,10 @@ one PR. Each card was verified in code first.
   Version hook needs no change: Frappe stores a Password field's dummy value before the Version is made
   (`_save_passwords`, children too), and `mask_version` masks withheld fields, none in a child table · integration
   `test_patches.TestP63` (a synthetic child Password field, a Custom Field row; red before).
-- LO-41 **COMPLETE**: of one group on equal priority the lowest id applies; a `PRM-` id now compares by its number
+- LO-41 **COMPLETE**: of one group on equal priority the lowest id applies; a TEX Promotion's `PRM-` id now compares by its number
   (`promotions.id_order`), so the older promotion still wins from PRM-100000 on; a contract offer's code compares as
-  text, as before (ADR-068 addendum) · unit `test_promotions_extras`; `test_main_parity` unchanged (8/8).
+  text, as before, also when it reads `PRM-…` (review N3), and every id up to PRM-99999 keeps its text order
+  (ADR-068 addendum) · unit `test_promotions_extras`; `test_main_parity` unchanged (8/8).
 - LO-42(b) **COMPLETE** (was not re-verified; each nit verified in code; ADR-068 addendum):
   - archiving a scheduled markup revision that hands a window back to the revision it replaced runs the tie check
     on that window only (from the reopened markup's old end to its new one; review S1: not its whole window,
