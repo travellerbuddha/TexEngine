@@ -9849,9 +9849,10 @@ The owner answered four questions of HANDOFF_LEFTOVERS §3 on 2026-10-03.
   - ENGINE_VERSION unchanged, as for O-31.
 - *C-02: only who may set prices drops a price set by hand.* A stay a revenue manager priced by hand (D-9, ADR-065) is
   changed only by staff with `price.override` at the hotel: keeping the price set by hand needed it already, and now
-  taking the change's price (`reprice`) does too. Anyone else is refused before any lock or write (403,
-  `NOT_PERMITTED`; the message names revenue management); the modify drawer offers the change's price only to who may
-  set prices and tells anyone else to ask a revenue manager. Guests were refused already; add-ons keep the price set
+  taking the change's price (`reprice`) does too. Anyone else is refused whatever they chose (keep it, the change's
+  price, or neither), before the nights are locked or anything is written (403, `NOT_PERMITTED`; the message names
+  revenue management); the modify drawer offers the change's price only to who may set prices and tells anyone else
+  to ask a revenue manager. Guests were refused already; add-ons keep the price set
   by hand, as before.
 - *C-03: each contact of an abandoned case follows its own channel's consent.* A guest who agreed to SMS or WhatsApp
   but not to marketing e-mail is listed with the phone, so the team follows up on those channels (registering consent
@@ -9863,7 +9864,11 @@ The owner answered four questions of HANDOFF_LEFTOVERS §3 on 2026-10-03.
     lock) and in the list;
   - e-mail consent withdrawn while SMS or WhatsApp holds takes the e-mail off the cases and the hashes off the funnel
     (`forget_contact(keep_phone=True)`); the last consent withdrawn, or an e-mail or phone cleared, makes the cases
-    anonymous; the last phone channel withdrawn while e-mail holds takes the phone off (as before).
+    anonymous; the last phone channel withdrawn while e-mail holds takes the phone off (as before). A guest merge,
+    whose profile keeps only the consents both gave, does the same to the cases it moves (review round 1).
+  - The session's mark says the visitor agreed to marketing on some channel; which contact a case keeps is the
+    profile's own consent per channel. A visitor who ticked SMS while the profile had agreed to e-mail before is listed
+    with the e-mail too: that consent is the profile's, given on a channel where the guest proved it (ADR-046).
   - Segment facts count such a guest's abandoned cases, as they count any case that names its guest.
 - *C-01: a no-show keeps the points the stay was paid with.* A guest who paid part of a stay with loyalty points and
   did not come gets nothing back: the points stay with the hotel, as a fee keeps the points it took; a cancellation

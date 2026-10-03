@@ -3,8 +3,7 @@
 **Read this whole file before changing anything.** It replaces the 2026-10-01 handoff (that version is in git history).
 Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last; the Frappe v16.36.1 upgrade followed
 as 2Z-F (PR #30), the LOW leftovers that need no decision as 2L (PR #31), four owner decisions as 2M (PR #32). What is
-left waits for an owner decision,
-an external party, or is a LOW leftover listed below. The session that takes over implements, verifies its own work and
+left waits for an owner decision, an external party, or is a LOW leftover listed below. The session that takes over implements, verifies its own work and
 opens one pull request per batch; the owner, who writes in Turkish, reviews and merges. Never merge, never push to the
 base branch, never rebase or force-push a shared branch.
 
@@ -175,7 +174,7 @@ Per batch:
   use them. **Next free: p77.**
 - ADRs up to **ADR-076**. **Next free: ADR-077.**
 - `IMPLEMENTATION_STATUS.md` sections: 6, 6B, 6C1, 6C2, 6G1, 6D1, 6E1, 6I, 6E2, 6H1, 6D2, 6F1, 6H2, 6F2, 6G2, 6K1, 6K2,
-  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF, 6L. A new batch adds its own section at the END of the file.
+  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF, 6L, 6M. A new batch adds its own section at the END of the file.
 
 ## 7. Owner decisions
 
