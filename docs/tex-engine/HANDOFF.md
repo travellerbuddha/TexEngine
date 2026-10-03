@@ -1,10 +1,11 @@
-# TEX Engine — Handover after audit Part 2 (2026-10-03)
+# TEX Engine — Handover after audit Part 2 and C-04 (2026-10-04)
 
 **Read this whole file before changing anything.** It replaces the 2026-10-01 handoff (that version is in git history).
 Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last; the Frappe v16.36.1 upgrade followed
 as 2Z-F (PR #30), the LOW leftovers that need no decision as 2L (PR #31), four owner decisions as 2M (PR #32), members-only prices
-in the call centre as 2N-1 (C-04, first half, PR #33) and on the web as 2N-2 (C-04's second half). What is
-left waits for an owner decision, an external party, or is a LOW leftover listed below. The session that takes over implements, verifies its own work and
+in the call centre as 2N-1 (C-04, first half, PR #33) and on the web as 2N-2 (C-04's second half, PR #34). What is
+left waits for an owner decision, an external party, or is a LOW leftover listed below; the next batch is chosen with
+the owner (§2, §10). The session that takes over implements, verifies its own work and
 opens one pull request per batch; the owner, who writes in Turkish, reviews and merges. Never merge, never push to the
 base branch, never rebase or force-push a shared branch.
 
@@ -49,7 +50,7 @@ the descriptions of PRs #3–#34 (each has its items, fail-first evidence, revie
 | 2L LOW leftovers | #31 | G-99 (the payload digest only with cost, also in Desk / REST and the trail), overlays hidden until a pass after they open, D-14 recorded (§6L, ADR-075) |
 | 2M owner decisions | #32 | C-12 ŞEKER is SEKER, C-02 a price set by hand only with `price.override`, C-03 SMS / WhatsApp-only guests listed with the phone, C-01 a no-show keeps the points (§6M, ADR-076) |
 | 2N-1 members-only prices (call centre) | #33 | C-04: `TEX Loyalty Member`, who a member is, staff join / leave, members-only promotions live, the Call Center prices the caller as a member, a member's price books for a member only (§6N1, ADR-077) |
-| 2N-2 members on the web | #34 | C-04: sign-in and join on the booking site by a one-time e-mail link, `TEX Member Session` (30 days on the device), member prices on the web, "Member price" for anyone else, `MEMBERS_ONLY`, the booking app in six languages (§6N2, ADR-078) |
+| 2N-2 members on the web | #34 | C-04: sign-in and join on the booking site by a one-time e-mail link, `TEX Member Session` (30 days on a hotel's own host, the tab on the shared host), member prices on the web, "Member price" for anyone else, `MEMBERS_ONLY`, the booking app in six languages (§6N2, ADR-078) |
 
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
@@ -57,7 +58,10 @@ the descriptions of PRs #3–#34 (each has its items, fail-first evidence, revie
   203 passed, 9 skipped by design (212; 52 spec files); node unit 435; DOM 42; i18n complete in 6 languages; eval
   76/76; banquet 101; front-desk journey 13/13; pip-audit 61 reviewed advisories. After 2Z-F (Frappe v16.36.1, local
   runs): TEX unit 699; integration 49 modules, 1,306 tests; pip-audit 29 reviewed advisories; PR #30's description
-  has its CI runs.
+  has its CI runs. After 2N-2 (PR #34, local runs on its head): TEX unit 702; integration 51 modules, 1,380 tests
+  (`test_member_web` 35; `test_scheduler_smoke` differs only locally); node unit 446; DOM 45; Playwright 215 tests in
+  54 spec files (9 skipped by design); eval 76/76; banquet 101; front-desk journey 13/13. PR #34's description has its
+  CI runs.
 
 ## 2. What is left
 
@@ -71,6 +75,8 @@ Nothing planned remains. In order of likely need:
 | 4 | O-6 deadlines in hotel-local time for UTC+7 hotels; LO-37 (the `fx_bridged` WARN of a MANUAL-mode pair) | D-13 answered **no** for wave 1; ask again when Cam Ranh / Phuket are planned | C-05, LO-37 |
 | 5 | ~~Points policy for No Show~~ **answered** (PR #32, C-01): a no-show keeps the points the stay was paid with; who charges a no-show fee stays with D-15 | none | §6M, ADR-076 |
 | 6 | Smaller owner questions with defaults: C-02, C-03, C-12 **done** (PR #32); C-04 **done** (call centre 2N-1, PR #33; web 2N-2, PR #34); C-08 … C-11, C-13 … C-15 open (C-16 accepted) | owner | `HANDOFF_LEFTOVERS.md` §3 |
+| 6b | C-04 follow-up question (2N-2): a web join makes a membership staff ended active again; should one ended for a reason such as abuse stay ended (a "blocked" flag staff set)? | owner | §6N2 "Not done", ADR-078 |
+| 6c | C-04 LOW leftovers that need no decision: staff see and end a guest's web sessions in the CRM; a pending link dropped by an erasure; a signed-in join for a profile whose stored e-mail is not a plain ASCII address says so | none (LOW) | §6N2 "Not done" |
 | 7 | CLP and ISK: the server keeps them in 2 decimals (`money.MINOR_UNITS`), ISO 4217 says 0; the screens now follow the server (2K-6) | owner: a money-engine rounding change | §6K6 "Not done" |
 | 8 | ~~G-99: `get_contract` returns `payload_hash` to `price.view` callers~~ **done** (PR #31) | none | §6L, ADR-075 |
 | 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays keep their content hidden until a pass after they open | none | §6L, ADR-075 |
@@ -241,15 +247,31 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
 - The local and CI benches have no outgoing Email Account, so `frappe.sendmail` writes no Email Queue row (the
   failure is only an Error Log). An e2e that reads a mail turns on an outbox of its own and turns it off after
   (`member-web.spec`); integration tests use `ensure_test_outbox` or mock `notify._send`.
+- **Never run a DB test (bench run-tests) while Playwright runs**: both use the one site, and the integration
+  tests then die of real deadlocks (2N-2 lost a run this way). Run them one after the other.
+- **Never edit a Python file of the app while Playwright runs**: `bench serve` reloads on a change and the request
+  in flight ends with "socket hang up" (a spec then fails for nothing). Markdown and frontend sources are safe; build
+  the bundles only after the run (they are what the server serves).
+- The booking app's shared host: every hotel's `/book/<site>` page runs on one origin with its own tag containers.
+  Anything a guest's browser keeps there (tokens, member data) is readable by another hotel's scripts: keep it in
+  the tab and remove other sites' data at start (ADR-078, `lib/member.isolateMemberData`), or keep it on the server.
 - A Frappe tag move can change a contract TEX relies on: v16.36.1 stopped answering an expired password with the
   reset link (ADR-074). Run every suite on a Frappe move, and read the diff of `frappe/auth.py`, `frappe/oauth.py` and
   `frappe/integrations/oauth2.py` between the tags.
 
 ## 10. First steps for the session that takes over
 
-1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md`; skim the descriptions of
-   PRs #31–#34 (the latest complete batches).
-2. Set up the bench (`docs/tex-engine/DEV_ENVIRONMENT.md`) and run the pure unit tests and one integration module.
-3. Ask the owner, in Turkish, only what the next item needs (§2: D-15 and the open C-items need a decision; plain questions
-   with the consequence of each answer worked best, D-14). Never start an item that waits for an answer.
-4. Work as in §3; keep this file current: when a batch merges, mark it in §1 in your next batch's docs commit.
+1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md` (§6N1, §6N2); skim the
+   descriptions of PRs #31–#34 (the latest complete batches).
+2. Check on GitHub that PR #34 (2N-2) is merged. If it is still open, ask the owner first; never start the next batch
+   on an unmerged base, and never merge it yourself.
+3. Set up the bench (`docs/tex-engine/DEV_ENVIRONMENT.md`; after a container restart the services must be started
+   again, its "Cloud containers can restart" section) and run the pure unit tests and one integration module.
+4. Agree the next batch with the owner, in Turkish, with the options of §2 and the consequence of each (plain
+   questions worked best, D-14): D-15 (which PMS per hotel: the PMS adapters, SMS / WhatsApp, inbound events), the
+   C-04 follow-up (6b), the open C-items (C-08 … C-11, C-13 … C-15), CLP / ISK, or a LOW batch (6c and the "Not done"
+   lines of §6*). Never start an item that waits for an answer.
+5. Work as in §3; keep this file current: when a batch merges, mark it in §1 in your next batch's docs commit.
+
+The owner's opening message for a new session is kept in `NEXT_SESSION_PROMPT.md` (Turkish): the same steps and
+rules, to paste into the session that takes over.
