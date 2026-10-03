@@ -215,7 +215,7 @@ export const POLICY_KINDS: PolicyKind[] = [
         title: "rates.policy.section.offer",
         fields: [
           { key: "promotion_name", kind: "text", label: "rates.f.promotion_name", required: true },
-          { key: "kind", kind: "select", label: "rates.f.kind", options: PROMO_KINDS, group: "promo_kind" },
+          { key: "kind", kind: "select", label: "rates.f.kind", options: PROMO_KINDS, group: "promo_kind", help: "rates.h.promo_kind" },
           { key: "trigger", kind: "select", label: "rates.f.trigger", options: TRIGGERS, group: "trigger", helpByValue: "rates.trigger_help" },
           { key: "code", kind: "text", label: "rates.f.coupon_code", help: "rates.h.coupon_code", showIf: (d) => d.trigger === "Code", required: true },
           { key: "value_type", kind: "select", label: "rates.f.value_type", options: PROMO_VALUE, group: "promo_value", helpByValue: "rates.promo_value_help" },
