@@ -111,6 +111,7 @@ whole chain on a Kamra database.
 | `p74_outbox_order_index` | Creates the composite index `tex_outbox_ref_order` (connection, reference_name, status, creation) that the PMS outbox claim reads through (LO-10, ADR-015 addendum). | idempotent: only a missing index is created | `TestP03Indexes.test_p74_creates_the_outbox_order_index` |
 | `p75_payment_last_reverified` | Syncs TEX Payment Transaction (`last_reverified_at`): the re-verification job asks the least recently asked charge first (LO-22, ADR-066 addendum). | schema only | `TestSmallPatches.test_p11_p20_only_sync_their_doctypes` |
 | `p76_oauth_registration_off` | Switches Frappe's OAuth dynamic client registration off on a site installed before (new sites get it off at install). Deletes nothing; prints how many OAuth Clients a guest registered, the count only (Part 2Z, ADR-073). | once (`ran_before`) | `TestSmallPatches.test_p76_switches_frappe_oauth_registration_off_once` |
+| `p77_loyalty_member_index` | Creates the composite index `tex_member_guest_program` (guest, program) of the new `TEX Loyalty Member`, after the model sync made its table: a member-priced search and a merge read a profile's memberships through it (C-04, ADR-077). | idempotent: only a missing index is created | `TestP03Indexes.test_p77_creates_the_loyalty_member_index` |
 
 ## 3. Compatibility shims
 - `kamra.pricing.quote` remains for legacy callers (folio night posting, channel push, legacy

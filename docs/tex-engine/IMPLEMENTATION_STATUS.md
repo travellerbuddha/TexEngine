@@ -2047,3 +2047,41 @@ HANDOFF_LEFTOVERS §3 C-01, C-02, C-03, C-12 (each re-verified against the code 
     go-live, C-14, C-15) and D-15, CLP / ISK;
   - the promotion editor upper-cases a typed code; the folded key (ŞEKER → SEKER) shows once it is saved (LOW);
   - p60, kept at its O-31 key, reports no ŞEKER / SEKER clash on a site it would still run on (none: D-14).
+
+## 6N1. Audit Part 2N-1 — members-only prices: membership and the call centre (2026-10-03)
+
+The owner chose C-04 (members-only prices) as the next batch and answered its four questions (2026-10-03): a member
+is a guest who joined or who stayed and earned points; web and call centre; a non-member on the web sees "Member
+price"; web sign-in by a one-time e-mail link. Card: HANDOFF_LEFTOVERS §3 C-04 (re-verified: a members-only
+promotion was refused on save, G-57; no search took a member; the offer key and quote carried `member: false`).
+Split in two batches: 2N-1 (this) the membership, the call centre and staff; 2N-2 the web. ADR-077.
+
+- C-04a **COMPLETE**: `TEX Loyalty Member` (one per guest and program, Active / Left, Staff / Web, joined when, by
+  whom, at which hotel); `loyalty.member_of` / `is_member` (an Active membership, or with no record a matured earning;
+  Left overrides); staff join and leave (`crm.loyalty_join` / `loyalty_leave`: `crm.edit` on the profile and at a hotel
+  of the program, a reason to leave, both audited); the guest's loyalty summary lists a program joined without points
+  and says `member` and `membership` (another hotel's dates by month); tenancy as a ledger entry
+  (`perm.LOYALTY_DOCTYPES`); a merge keeps one membership per program; erasure ends them; a program with members does
+  not move; p77 creates the `(guest, program)` index. Tests: `test_loyalty_membership.TestMembership` (11; red: 10
+  errors, no `loyalty_join` / `is_member`; the move test: ValidationError not raised), `test_patches.test_p77_…` (red:
+  the index missing).
+- C-04b **COMPLETE**: a members-only promotion saves and goes live; `crs.search` / `ui_crs.search` take the caller
+  (`guest`, which the agent must see) and price a member as one at each hotel whose program they are a member of
+  (`member` per hotel, `member_price` per offer); an applied members-only promotion says so (`member_only` in its
+  outcome); `create_booking` books a member's price for a member only (checked before any lock or write, and again
+  under the profile's lock). Tests: `test_loyalty_membership.TestMemberPrices` (7; red: "A members-only promotion
+  cannot apply yet"), unit `TestMembersPrice` (2; red: no `member_only` on the outcome). Two base tests that pinned
+  G-57 are reversed by the owner's decision (declared in the PR).
+- C-04c **COMPLETE**: CRM → Loyalty shows each program's membership (member since, by their stays, left on) with
+  "Join program" / "End membership" (a reason) for staff who may edit the guest; the Call Center prices the search for
+  the caller picked (picking or clearing one prices the offers shown again), an offer says "Member price" and the
+  hotel that the caller is a member; the promotion editor always offers "Members only" with its new help (six
+  languages). Test: e2e `crm-membership.spec`.
+- **Not done:**
+  - 2N-2 (next batch, after this one is merged): the web — sign-in and join by a one-time e-mail link, a member's
+    session on the booking site, the "Member price" teaser for a guest who is not signed in, a guest refusal code for a
+    member's price booked by a non-member (`SEARCH_AGAIN` until then), the booking app's six languages;
+  - a change of a stay sold at a member's price re-prices it as a member's whatever the guest's membership is now
+    (the sale's terms; ADR-077);
+  - the CRS reservations page names no caller (the owner chose web and call centre);
+  - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.
