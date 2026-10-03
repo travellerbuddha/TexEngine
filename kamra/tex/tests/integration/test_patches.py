@@ -1943,4 +1943,26 @@ class TestP63VersionedPasswords(PatchCase):
 		self.assertTrue(p63.mask(data, {"api_key"}, {"keys": {"token"}}))
 		self.assertEqual(data, {"row_changed": [["keys", 0, "row1", [["token", "*****", "*****"], ["note", "a", "b"]]]],
 		                        "changed": [["api_key", "*****", "*****"]]})
+
+	def test_p63_masks_a_child_tables_secret_in_added_and_removed_rows(self):
+		"""LO-29: a child row added to or removed from the record is kept whole in ``added`` / ``removed``
+		(Frappe's ``as_dict``): its secret fields too. A synthetic Password field (a Custom Field row on a
+		child table; no column, as a patch reads only the field list) shows they are masked."""
+		from kamra.patches.tex import p63_versioned_passwords as p63
+
+		data = {"added": [["keys", {"name": "row1", "token": "plain-added", "note": "a"}]],
+		        "removed": [["keys", {"name": "row0", "token": "plain-removed", "note": "b"}]]}
+		self.assertTrue(p63.mask(data, set(), {"keys": {"token"}}))
+		self.assertEqual(data, {"added": [["keys", {"name": "row1", "token": "*****", "note": "a"}]],
+		                        "removed": [["keys", {"name": "row0", "token": "*****", "note": "b"}]]})
+		self.assertFalse(p63.mask(data, set(), {"keys": {"token"}}))      # a second pass masks none
+
+		put("Custom Field", name="TEX Booking Room-p63_token", dt="TEX Booking Room", fieldname="p63_token",
+		    fieldtype="Password", label="p63 token")
+		booking = put("TEX Booking", property=fx.PROPERTY)
+		row = {"name": "r1", "room_type": "STD", "p63_token": "plain-room-token"}
+		v = self.version("TEX Booking", booking, {"added": [["rooms", dict(row)]], "removed": [["rooms", dict(row)]]})
+		migrate(self.P63)
+		self.assertEqual(self.data(v), {"added": [["rooms", {**row, "p63_token": "*****"}]],
+		                                "removed": [["rooms", {**row, "p63_token": "*****"}]]})
 		self.assertFalse(p63.mask(data, {"api_key"}, {"keys": {"token"}}))     # masked already: no change
