@@ -500,7 +500,9 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 	guest_clean["nationality"] = _country(g.get("nationality"))
 	guest_clean.update({k: booking_svc.consent_given(g.get(k)) for k in ("consent_email", "consent_sms",
 	                                                                     "consent_whatsapp")})
-	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=guest_clean["consent_email"])
+	_track(s, session_id, "guest_details", {"email": g.get("email")},
+	       consent=any(guest_clean[k] for k in ("consent_email", "consent_sms", "consent_whatsapp")),
+	       email_consent=guest_clean["consent_email"])
 	method = payment_method or "Card"
 	# a retry key only counts within the visitor's own session (no cross-visitor replay)
 	result = booking_svc.create_booking(quote_ids=ids, guest=guest_clean, payment_method=method,
@@ -853,16 +855,18 @@ def _own_quotes(site, ids: list[str], session_id: str | None) -> list[str]:
 TRACK_SAVEPOINT = "tex_funnel_event"
 
 
-def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
+def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False,
+           email_consent: bool = False) -> None:
 	"""One funnel event (R-38). Analytics need no identity: an e-mail hash (the only link to a
-	person) is kept only when the visitor ticked marketing consent in that same step, and no
-	contact field of the payload is ever stored (G-81, ADR-056)."""
+	person) is kept only when the visitor ticked marketing e-mail consent in that same step
+	(``email_consent``), and no contact field of the payload is ever stored (G-81, ADR-056).
+	``consent``: the visitor ticked marketing consent on some channel (e-mail, SMS or WhatsApp; C-03)."""
 	if not session_id:
 		return
 	payload = _no_dob(payload) if isinstance(payload, dict) else {}
 	email = payload.get("email")
 	payload = {k: v for k, v in payload.items() if str(k).lower() not in FUNNEL_CONTACT_KEYS}
-	email = email.strip().lower() if consent and isinstance(email, str) and email.strip() else None
+	email = email.strip().lower() if consent and email_consent and isinstance(email, str) and email.strip() else None
 	frappe.db.savepoint(TRACK_SAVEPOINT)
 	try:
 		frappe.get_doc({
