@@ -3,6 +3,11 @@
 Companion to `docs/tex-engine/HANDOFF.md` (read that first). 2Z is the **last** batch: it rebuilds the committed
 frontend bundles once, after every frontend change of the other batches has merged.
 
+**Status (2026-10-03): done in Part 2Z (PR #29, IMPLEMENTATION_STATUS §6Z, ADR-073)**, items 1 and 3–6; item 2 (the
+Frappe upgrade) is its own PR after 2Z (owner). Corrections found while doing it: Semgrep was 1.179.0 by then, the
+reviewed advisories were 61, the next free patch and ADR were p76 and ADR-073, and the rates contract page's
+`RuleDialog` (item 5's list) is another component, already mounted per opening.
+
 Re-verified on 2026-10-01 at base `claude/inspiring-ptolemy-i6wdu2` @ **aac444a4** (merge of PR #16; its tree
 equals PR #16's tested head, so CI run #160 — run id 36877813099 — gives the current numbers). Facts checked on GitHub:
 the repository is **public**, and its **default branch is the base branch** (scheduled workflows run on it). Method:
