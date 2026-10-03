@@ -8,9 +8,9 @@ on:
   workflow_dispatch:        # run it on any branch from the Actions tab (a full run takes ~30-40 min)
 
 env:
-  # payments' develop moves (it already declares Frappe v17): the commit the Dockerfile and setup-local.sh
+  # payments' version-16 branch (develop declares Frappe v17) at the commit the Dockerfile and setup-local.sh
   # pin too (test_pins keeps them equal)
-  PAYMENTS_REF: 86fefa9faf8ad825fe6f08c4753acfe44817900b
+  PAYMENTS_REF: cca07d9f9392e2ea0e521c5975151db9e4b6c321
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -130,10 +130,9 @@ jobs:
       - name: Init bench
         run: |
           pip install frappe-bench==5.31.0
-          # pinned to the stable release tag: the version-16 branch tip
-          # currently ships an UnboundLocalError in frappe/locale.py
+          # a release tag, not the moving version-16 branch (2Z-F, ADR-074; test_pins keeps one tag everywhere)
           bench init --skip-redis-config-generation --skip-assets \
-            --frappe-branch v16.25.0 frappe-bench
+            --frappe-branch v16.36.1 frappe-bench
           cd frappe-bench
           bench set-config -g db_host 127.0.0.1
           bench set-config -g redis_cache redis://127.0.0.1:6379
@@ -143,7 +142,7 @@ jobs:
       - name: Install app & site
         run: |
           cd frappe-bench
-          bench get-app --branch develop payments
+          bench get-app --branch version-16 payments
           if [ "$(git -C apps/payments rev-parse HEAD)" != "$PAYMENTS_REF" ]; then
             git -C apps/payments fetch --quiet --depth 1 https://github.com/frappe/payments "$PAYMENTS_REF"
             git -C apps/payments checkout --quiet --detach FETCH_HEAD

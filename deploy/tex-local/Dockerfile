@@ -1,4 +1,4 @@
-# TEX Engine - local test image (Frappe v16.25.0 + payments + kamra/TEX).
+# TEX Engine - local test image (Frappe v16.36.1 + payments + kamra/TEX).
 #
 # FOR LOCAL TESTING ONLY: developer_mode on, Werkzeug dev server, demo users with
 # well-known passwords. Never expose it to the internet or use it for real data.
@@ -20,9 +20,9 @@ FROM ${NODE_IMAGE} AS node
 FROM ${PYTHON_IMAGE}
 
 ARG FRAPPE_REPO=https://github.com/frappe/frappe
-ARG FRAPPE_BRANCH=v16.25.0
+ARG FRAPPE_BRANCH=v16.36.1
 ARG PAYMENTS_REPO=https://github.com/frappe/payments
-ARG PAYMENTS_BRANCH=develop
+ARG PAYMENTS_BRANCH=version-16
 ARG BENCH_VERSION=5.31.0
 
 ENV LANG=C.UTF-8 \
@@ -76,11 +76,11 @@ RUN --mount=type=secret,id=extra_ca,required=false,uid=1000,mode=0444 \
 
 WORKDIR /home/frappe/frappe-bench
 
-# payments' develop branch moves (and already declares Frappe v17); pin the commit this
+# payments' version-16 branch moves (develop declares Frappe v17); pin the commit this
 # setup was verified with (a full commit SHA, tag or branch). PAYMENTS_REF= (empty) keeps
 # the tip of PAYMENTS_BRANCH instead. Declared here, not at the top, so that changing it
 # does not rebuild the layers above.
-ARG PAYMENTS_REF=86fefa9faf8ad825fe6f08c4753acfe44817900b
+ARG PAYMENTS_REF=cca07d9f9392e2ea0e521c5975151db9e4b6c321
 
 RUN --mount=type=secret,id=extra_ca,required=false,uid=1000,mode=0444 \
 	with-extra-ca bench get-app --skip-assets --branch "${PAYMENTS_BRANCH}" "${PAYMENTS_REPO}" \
