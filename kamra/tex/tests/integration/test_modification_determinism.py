@@ -342,6 +342,10 @@ class TestManualOverride(DeterminismCase):
 		p = modification.propose(res, {"check_out": str(fx.d(6, 13))})
 		with self.assertRaisesRegex(frappe.PermissionError, "set by hand.*revenue manager"):
 			crs_api.apply_modification(proposal_token=p["proposal_token"], reason="one more night")
+		# review round 2: keeping it is no way round either, and gets the same pointer to revenue management
+		with self.assertRaisesRegex(frappe.PermissionError, "set by hand.*revenue manager"):
+			crs_api.apply_modification(proposal_token=p["proposal_token"], reason="one more night",
+			                           override_amount=p["manual_price"]["amount"])
 		as_user("Administrator")
 		self.assertEqual(D(frappe.db.get_value("Reservation", res, "tex_total_amount")), D("380.00"))
 

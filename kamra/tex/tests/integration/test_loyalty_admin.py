@@ -837,8 +837,10 @@ class TestPointsBack(LoyaltyCase):
 		self.assertEqual((who, self.available(guest)), (guest, 567))
 		res = frappe.get_doc("Reservation", hotel["rooms"][0]["reservation"])
 		self.assertEqual(res.status, "Confirmed")
+		total = frappe.db.get_value("TEX Booking", hotel["booking"], "total_amount")
 		res.status = "No Show"
 		res.save()
+		self.assertEqual(frappe.db.get_value("TEX Booking", hotel["booking"], "total_amount"), total)   # nothing to give
 		self.assertEqual(frappe.db.get_value("Reservation", res.name, "status"), "No Show")
 		self.assertEqual(self.available(guest), 567)
 		self.assertEqual(self.reverse_rows(guest), [])
