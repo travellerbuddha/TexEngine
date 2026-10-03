@@ -9757,21 +9757,22 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   `setup-local.sh`, DEV_ENVIRONMENT) runs Frappe tag **v16.36.1** and payments' **`version-16`** branch at commit
   `cca07d9f9392e2ea0e521c5975151db9e4b6c321` (before: v16.25.0 and payments `develop` at 86fefa9). The owner made it
   its own pull request after 2Z (2026-10-03). Still a release tag, not the moving `version-16` branch of Frappe.
-- *Why payments' version-16.* `develop` declares `frappe >=17.0.0-dev,<18.0.0` (bench installed it on a v16 bench
-  with a warning only); `version-16` declares `>=16.0.0,<17.0.0`. The two differ in Razorpay code; TEX imports nothing from
+- *Why payments' version-16.* `develop` declares `frappe >=17.0.0-dev,<18.0.0` (bench installed it on a v16 bench with
+  a warning only); `version-16` declares `>=16.0.0,<17.0.0`. The two differ in Razorpay code; TEX imports nothing from
   payments (`required_apps` only). `test_pins` checks that the payments branch follows the Frappe tag's major.
 - *What the framework move brings.* Six Frappe patches (notification types and log backfills, the Contact Us
   acknowledgement switch, SMS settings roles), none on a TEX DocType; cryptography 50, Pillow 12.3, pypdf 6.15,
   sqlparse 0.6 with sql_metadata 3, Click 8.4, pyOpenSSL 26.4; duckdb and pyarrow are new; bleach is gone. TEX uses
   cryptography (the Sipay provider's AES) and Pillow (upload and ID-document checks), whose tests pass on the new
-  versions, and imports none of the others. Security fixes TEX benefits from: Frappe's OAuth provider drops the password grant, refuses a
-  disabled user's bearer token and takes POST only where it changes state; an API key or token now meets the user's
-  IP restriction; the Contact Us page (off on TEX sites, `is_disabled`) no longer echoes a message in its reply.
+  versions, and imports none of the others. Security fixes TEX benefits from: Frappe's OAuth provider drops the
+  password grant, refuses a disabled user's bearer token and takes POST only where it changes state; an API key or
+  token now meets the user's IP restriction; the Contact Us page (off on TEX sites, `is_disabled`) no longer echoes a
+  message in its reply.
 - *Two-factor reaches Administrator.* v16.25.0 exempted Administrator from two-factor sign-in; v16.36.1 does not.
   Saving System Settings with two-factor on marks the role "All", so Administrator then needs a code too; with the
-  authenticator app not yet set up, the set-up mail goes to Administrator's address. Give Administrator a mailbox
-  that is read, or set its app up, before two-factor is switched on (GO_LIVE_READINESS "Pins"). A two-factor user who
-  sets a new password from a reset link is sent to `/login` (code and new password) instead of being signed in.
+  authenticator app not yet set up, the set-up mail goes to Administrator's address. Give Administrator a mailbox that
+  is read, or set its app up, before two-factor is switched on (GO_LIVE_READINESS "Pins"). A two-factor user who sets
+  a new password from a reset link is sent to `/login` (code and new password) instead of being signed in.
 - *The one contract that changed for TEX.* An expired password (`force_user_to_reset_password`) was answered with the
   reset link (`redirect_to`), before the two-factor code: the password alone gave a reset key. Frappe v16.36.1 asks
   the code first and mails the link to the account's address; the answer is `message: "Password Reset"` without a
@@ -9784,5 +9785,5 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   payments: pypdf 11, PyJWT 13 and oauthlib 1 (Frappe moves those on `develop` only), WeasyPrint 2, pdfkit 1,
   setuptools 1. The oauthlib and PyJWT reviews were redone on v16.36.1 (its jwt calls are unchanged).
 - *Existing benches.* `setup-local.sh` keeps a bench it finds and now says when its Frappe differs; NATIVE.md §5 has
-  the in-place steps used on the development bench (fetch the tag and the commit, `bench setup requirements`,
-  build, migrate). The committed bundles do not depend on Frappe: a rebuild after the move is identical.
+  the in-place steps used on the development bench (fetch the tag and the commit, `bench setup requirements`, build,
+  migrate). The committed bundles do not depend on Frappe: a rebuild after the move is identical.
