@@ -59,7 +59,7 @@ Nothing planned remains. In order of likely need:
 | 5 | Points policy for No Show, a lower price and a channel's cancellation | owner | C-01 |
 | 6 | Smaller owner questions with defaults | owner | C-02 … C-16 |
 | 7 | CLP and ISK: the server keeps them in 2 decimals (`money.MINOR_UNITS`), ISO 4217 says 0; the screens now follow the server (2K-6) | owner: a money-engine rounding change | §6K6 "Not done" |
-| 8 | `get_contract` returns `payload_hash` to `price.view` callers (offline confirmation of guessed hidden values) | none (LOW) | FINAL_GAP_AUDIT §4 |
+| 8 | G-99: `get_contract` returns `payload_hash` to `price.view` callers (offline confirmation of guessed hidden values) | none (LOW) | FINAL_GAP_AUDIT §4 (#70b) |
 | 9 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" | none (LOW) | §6 … §6Z |
 
 Not in scope unless the owner asks: G-41r allotment × channel, G-54 surcharges by LOS/arrival, G-64 CRM campaigns.

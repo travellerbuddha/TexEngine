@@ -2,7 +2,7 @@
 
 ## Versions (match upstream CI)
 Frappe **v16.25.0**, Python **3.14**, Node **24**, MariaDB 10.11+/11.x, Redis, apps
-`payments` (develop) + `kamra` (this repo).
+`payments` at commit `86fefa9` (CI's `PAYMENTS_REF`) + `kamra` (this repo).
 
 ## Cloud-session bench (reproducible recipe)
 ```bash
@@ -76,8 +76,9 @@ Repeated runs book real inventory at the demo hotels; free it between series of 
 (cancels future test-run stays, keeps demo-seed bookings; refuses on production sites).
 CI starts from a fresh database each run.
 
-Specs: `shell`, `contract-admin`, `booking` (desktop + 390 px), `crs` (call centre, reservation
-change) and `critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
+Specs: the 52 `*.spec.ts` files in `frontend/e2e/` (CI runs them all), among them `shell`,
+`contract-admin`, `booking` (desktop + 390 px), `crs` (call centre, reservation change) and
+`critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
 (contracts, booking, reservations) and `e2e/helpers.ts`. The dev bench's System Settings
 time zone is Europe/Istanbul (the demo hotels are in Türkiye).
 
