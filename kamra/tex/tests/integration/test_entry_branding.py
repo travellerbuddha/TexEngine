@@ -818,16 +818,20 @@ class TestSignInContract(TexTestCase):
 			r = self.sign_in(usr=self.plain, pwd=self.PASSWORD)
 		self.assertEqual(r["message"], "Password Reset")
 		self.assertNotIn("redirect_to", r)                                   # the link is in the mailbox only
-		self.assertIn("/update-password?key=", self.reset_link(sendmail, self.plain))
+		link = self.reset_link(sendmail, self.plain)
+		self.assertIn("/update-password?key=", link)
+		self.assertIn("password_expired=true", link)
 		self.assertEqual(self.sessions, [])
 
 	def test_an_expired_password_of_a_two_factor_account_needs_its_code_first(self):
 		self.expire(self.user)
+		key = frappe.db.get_value("User", self.user, "reset_password_key")
 		with mock.patch("frappe.sendmail") as sendmail:
 			first = self.sign_in(usr=self.user, pwd=self.PASSWORD)
 			self.assertEqual(first["verification"], {"method": "OTP App", "setup": True})
 			self.assertNotIn("redirect_to", first)
-			sendmail.assert_not_called()                                     # the password alone resets nothing
+			sendmail.assert_not_called()                                     # the password alone resets nothing:
+			self.assertEqual(frappe.db.get_value("User", self.user, "reset_password_key"), key)  # no new key either
 			r = self.sign_in(otp=self.code(), tmp_id=first["tmp_id"])
 		self.assertEqual(r["message"], "Password Reset")
 		self.assertNotIn("redirect_to", r)
