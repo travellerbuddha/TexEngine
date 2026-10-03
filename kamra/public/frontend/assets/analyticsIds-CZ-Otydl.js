@@ -1,0 +1,1 @@
+const a={ga4:/^G-[A-Z0-9]{4,20}$/,gtm:/^GTM-[A-Z0-9]{4,12}$/,pixel:/^\d{6,20}$/},f=/^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;function x(u){return(u??"").replace(f,"")}function c(u,n){const t=x(n);return t&&a[u].test(t)?t:null}export{c as a,x as s};
