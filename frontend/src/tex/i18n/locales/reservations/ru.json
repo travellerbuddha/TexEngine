@@ -333,6 +333,7 @@
  "res.snap.contract_label": "Договор",
  "res.snap.copy_hash": "Копировать хеш данных",
  "res.snap.fx": "Курс валюты",
+ "res.snap.fx_bridging": "вместо {provider}",
  "res.snap.hash": "Хеш данных",
  "res.snap.override": "Цена задана вручную:",
  "res.snap.promotions": "Акции",

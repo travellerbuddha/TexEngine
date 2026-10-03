@@ -322,6 +322,7 @@
  "res.snap.contract_label": "Contract",
  "res.snap.copy_hash": "Copiază hash-ul datelor",
  "res.snap.fx": "Curs de schimb",
+ "res.snap.fx_bridging": "în locul {provider}",
  "res.snap.hash": "Hash-ul datelor",
  "res.snap.override": "Preț setat manual la",
  "res.snap.promotions": "Promoții",

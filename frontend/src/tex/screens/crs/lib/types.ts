@@ -176,6 +176,8 @@ export interface FxRate {
   used_for: string[]
   /** set when the rate was reused from a reservation's snapshot */
   origin?: string
+  /** the provider a manual rate stood in for (its rate was stale or missing: ADR-069 manual rate bridge); absent otherwise */
+  bridged_from?: string | null
 }
 
 // ─── search ────────────────────────────────────────────────────────────

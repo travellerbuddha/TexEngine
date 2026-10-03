@@ -325,6 +325,7 @@
  "res.snap.contract_label": "Kontrat",
  "res.snap.copy_hash": "Veri özetini kopyala",
  "res.snap.fx": "Döviz kuru",
+ "res.snap.fx_bridging": "{provider} yerine",
  "res.snap.hash": "Veri özeti (hash)",
  "res.snap.override": "Fiyat elle şu tutara ayarlandı:",
  "res.snap.promotions": "Promosyonlar",
