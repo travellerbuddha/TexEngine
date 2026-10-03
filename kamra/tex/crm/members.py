@@ -165,7 +165,13 @@ def _link_key(token: str) -> str:
 def _take_link(site, token: str) -> dict:
 	"""The link's data, once (read and deleted in one step: two opens of one link never both succeed): refused when
 	unknown, used, expired or of another site."""
-	raw = _cache().getdel(_link_key(token)) if token else None  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	raw = None
+	if token:
+		# read and deleted in one transaction (MULTI/EXEC: any Redis version, where GETDEL needs 6.2)
+		pipe = _cache().pipeline(transaction=True)
+		pipe.get(_link_key(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		pipe.delete(_link_key(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		raw = pipe.execute()[0]
 	try:
 		data = json.loads(raw) if raw else None
 	except ValueError:

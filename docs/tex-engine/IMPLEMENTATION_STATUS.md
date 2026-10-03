@@ -2152,9 +2152,34 @@ booked by a non-member was refused with `SEARCH_AGAIN`, the booking app had no m
   The e2e turns on an outgoing account of its own when the bench has none (CI's has none), which sends nothing (an
   SMTP host that does not resolve; the site's scheduler, which flushes the queue, is off in CI), and turns it off
   after.
+- Review round 1 **COMPLETE** (1 BLOCKER, 7 SHOULD, 20 NITs). B1, a 30-day session in origin-wide storage that
+  another hotel's tag container could read on the platform's shared host, went to the owner, who chose (2026-10-03)
+  30 days on a hotel's own host and the tab only on the shared host, where a site's page first removes every other
+  site's member data. Fixed: a signed-in guest's join is confirmed by a link (never by the session); one plain
+  address (no display name, list or invisible character); the link taken outside the deadlock retry and put back
+  when a failure did not settle it; `MEMBERS_ONLY` offers "refresh prices"; mails greet by no name; a group site's
+  join belongs to its first hotel the program serves; the search's member key is the session only; the tick says
+  "I want to become a member of …"; NITs (erased sessions counted apart, the mail language, the counter made with
+  its hour, disabled hotels left out, the member from-price in the hotel's currency, an idempotency key, the token
+  taken before the app starts and opened with a click, a spent link in a signed-in tab, the old session revoked,
+  other tabs' sign-in, ARIA tabs, the widget's link to the site, the e2e's mail accounts and clean-up; the link read
+  and deleted in one Redis transaction, which any Redis version serves). Tests: `test_member_web.TestReviewRound1`
+  (15) and the signed-in join test (expects the link), node unit (+2), e2e `member-web.spec` (the tab session, the
+  click, the spent link in a signed-in tab and in another browser). Red: 33 tests, failures=8 errors=3
+  (`TypeError … idempotency_key`, `KeyError: 'sessions_ended'`, `'MEMBER_LINK_INVALID' != 'BUSY'`, the retry
+  `MEMBER_LINK_INVALID`, the display name accepted, `'evil.example'` in the mail, `'zz-<b></b>'` stored, the
+  counter's TTL `-1`, the disabled hotel listed, the group join's property `None`, the signed-in join joined at
+  once); node unit: no export `isolateMemberData`.
 - **Not done:**
   - staff cannot see or end a guest's web sessions from the CRM (an erasure deletes them; LOW);
-  - the widget's frame hides the header's member control (the rates' "Member price" still opens the dialog there);
+  - a link not yet opened when its address is erased can still be opened within its 30 minutes (LOW);
+  - a web join makes a membership staff ended active again; whether one ended for a reason such as abuse should
+    stay ended is an owner question (ADR-078);
+  - on the platform's shared host a member stays signed in only while the tab is open (the owner's choice), and a
+    sign-in made in another tab there is not seen (tab storage);
+  - in the widget's frame a guest signs in on the hotel's site in a new tab (a session made in the frame would stay
+    there); the header's member control is hidden in the frame;
+  - the teaser prices such a search twice (bounded by the search rate limit);
   - a change of a stay through the manage page is priced by ADR-077's rule (the sale's terms), never by a session;
   - a guest asked for a link is not told when an address's limit was reached (by design: the same answer);
   - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.

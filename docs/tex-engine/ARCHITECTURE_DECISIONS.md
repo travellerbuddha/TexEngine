@@ -9941,58 +9941,77 @@ one-time link sent by e-mail. 2N-1 (this ADR) delivers the membership, the call 
 
 ## ADR-078 Members on the web: sign-in and join by a one-time e-mail link, member prices and "Member price" (C-04, audit Part 2N-2)
 The web half of C-04 (owner, 2026-10-03; ADR-077 has who a member is and the call centre). The owner also chose, for
-this batch, a session kept **on this device for 30 days** and a web join with **e-mail and name, confirmed by the
-link**.
+this batch, a session kept **on the device for 30 days** and a web join with **e-mail and name, confirmed by the
+link**; after review round 1 (B1), **30 days on a hotel's own host, the tab only on the platform's shared host**.
 - *Asking for a link* (`public.member_link` → `members.request_link`). A visitor gives an e-mail, to sign in, or an
-  e-mail, a first and a last name and an explicit tick of the program's terms, to join (`MEMBER_CONSENT_REQUIRED`
-  without it). Only what the visitor typed (`GUEST_EMAIL_INVALID`, the names) and a site without an enabled program
-  (`MEMBERSHIP_UNAVAILABLE`) are refused; otherwise the answer is the same `{"ok": true}` whatever the e-mail, so the
-  site never says whether an address has a profile or a membership. An address with no profile asked to sign in gets
-  a mail that says so and links to joining (`?join=1`), with no token. Limits: 10 requests per client per 10 minutes
-  (`tex_public_member_link_limit`), and at most 3 mails per address and site an hour (a counter by the address's
-  hash; the answer stays the same when it is reached).
+  e-mail, a first and a last name and an explicit tick ("I want to become a member of …"), to join
+  (`MEMBER_CONSENT_REQUIRED` without it). The e-mail must be one plain address, taken in lower case (review round 1:
+  Frappe's own check accepts a display name, a list or an invisible character, and each would key the limit, the
+  profile and the mail differently). Only what the visitor typed (`GUEST_EMAIL_INVALID`, the names) and a site
+  without an enabled program (`MEMBERSHIP_UNAVAILABLE`) are refused; otherwise the answer is the same `{"ok": true}`
+  whatever the e-mail, so the site never says whether an address has a profile or a membership. An address with no
+  profile asked to sign in gets a mail that says so and links to joining (`?join=1`), with no token. Limits: 10
+  requests per client per 10 minutes (`tex_public_member_link_limit`), at most 3 mails per address and site an hour (a
+  counter by the address's hash, made with its hour in one step; the answer stays the same when it is reached), and a
+  request retried with its idempotency key sends no second mail.
 - *The link.* A random token (`secrets.token_urlsafe(32)`) in the URL fragment of `<site>/member#token=…` (browsers
   never send a fragment to a server, so it is in no access log and no `Referer`); the server keeps only its SHA-256 in
-  the cache with what opening it needs (site, purpose, e-mail, names, language) for 30 minutes. Opening it
-  (`public.member_verify` → `members.verify`) reads and deletes that entry in one step (Redis `GETDEL`): two opens of
-  one link never both succeed, and a link of another site, unknown, used or expired is `MEMBER_LINK_INVALID`. The
-  booking app takes the token from the address bar at once (`history.replaceState`) and sends one request per token
-  even when React's StrictMode runs effects twice.
+  the cache with what opening it needs (site, purpose, e-mail, names, language) for 30 minutes. The booking app takes
+  the token out of the address bar before it starts (`main.tsx`, as an old payment link's, G-83), and the guest opens
+  the link with a click ("Continue": a mail scanner that runs the page must not spend it). Opening it
+  (`public.member_verify` → `members.verify`) reads and deletes that entry in one step (one Redis transaction, `MULTI`
+  `GET` `DEL` `EXEC`, so any Redis version serves): two opens of one link never both succeed, and a link of another site, unknown, used or expired is
+  `MEMBER_LINK_INVALID`. The link is taken once, outside the part a deadlock runs again; a failure that did not
+  settle it (BUSY, a database error) puts it back until it expires (review round 1). A spent link opened again in a
+  tab already signed in goes to the search.
 - *Join by the link.* The link proves the e-mail is the visitor's, so nobody is joined with someone else's address: a
-  join link joins the profile with that e-mail (`booking._find_profile`, the identity a booking uses), made then with
-  the names given when there is none, to every enabled program of the site's hotels (`loyalty.join_web`: source
-  "Web", audited `loyalty.member_join`); an erased profile is answered `NOT_A_MEMBER` and never joins. A sign-in link
-  for a profile that has no membership opens a session all the same (the guest is told and may join with a tick:
-  `public.member_join`, `MEMBER_CONSENT_REQUIRED` without it).
+  join link joins the profile with that e-mail (`booking._find_profile`, the identity a booking uses, in the site's
+  enterprise), made then with the names given when there is none, to every enabled program of the site's hotels
+  (`loyalty.join_web`: source "Web", audited `loyalty.member_join`). The membership is the site's hotel's; on a hotel
+  group's site, the first of its enabled hotels (by name) the program serves, so that hotel's staff see the join and
+  the record (review round 1: a group's program has no hotel, and the join belonged to nobody). An erased profile is
+  answered `NOT_A_MEMBER` and never joins. A signed-in guest who is no member asks to join with the tick
+  (`public.member_join`): a join link goes to their own e-mail, so a script that holds a session joins nobody (review
+  round 1). A web join makes a membership staff ended active again (a guest who asked to leave may come back); whether
+  a membership staff ended for a reason such as abuse should stay ended is an open owner question.
 - *The session* (`TEX Member Session`: site, hotel, guest, token hash, expires, revoked). A second random token, its
-  SHA-256 stored (unique); returned once with `expires_in` (seconds) beside `expires_at`: the booking app keeps it in
-  `localStorage` (`tex.member.<site>`) with its end by the device's clock (the server's time zone is not the
-  browser's) and forgets it when it ends, when the server answers `MEMBER_SESSION_ENDED`, or on "Sign out"
-  (`public.member_sign_out` revokes it). A session counts only on its own site, before its end, unrevoked, and for a
-  profile that still exists and is not erased (`members.session_guest`). Erasure deletes the guest's sessions
-  (`erase_traces`); a merge moves them to the profile that stays, as every link to a guest; sessions ended more than 30
-  days ago are purged daily. Tenancy: the row is the site's and its hotel's (`perm.SITE_DOCTYPES`,
-  `PROPERTY_DOCTYPES`), read-only to staff (audit permissions). p78 creates its `(guest, site)` index.
+  SHA-256 stored (unique); returned once with `expires_in` (seconds) beside `expires_at`, so the booking app keeps its
+  end by the device's clock (the server's time zone is not the browser's). **Where it is kept** (owner, 2026-10-03,
+  after review round 1 B1): on a hotel's own host (the page pinned to its site, ADR-035) in `localStorage`
+  (`tex.member.<site>`) for 30 days; on the platform's shared host, where every hotel's pages, and their tag
+  containers, run on one origin, in `sessionStorage` only, and a site's page removes every other site's member data
+  before anything else runs. The app forgets it when it ends, when the server answers `MEMBER_SESSION_ENDED`, or on
+  "Sign out" (`public.member_sign_out` revokes it); a new sign-in revokes the session the device held before. A
+  session counts only on its own site, before its end, unrevoked, and for a profile that still exists and is not
+  erased (`members.session_guest`). Erasure deletes the guest's sessions (`erase_traces`, `sessions_ended`); a merge
+  moves them to the profile that stays, as every link to a guest; sessions ended more than 30 days ago are purged
+  daily. Tenancy: the row is the site's and its hotel's (`perm.SITE_DOCTYPES`, `PROPERTY_DOCTYPES`), read-only to
+  staff (audit permissions). p78 creates its `(guest, site)` index.
 - *Member prices on the web* (`public.search(member_session=…)`). A session's guest is priced as a member at each of
   the site's hotels whose program they are a member of (`member_hotels`, the call centre's `quoting.search(member=…)`):
   an offer a members-only promotion priced says `member_price`, and the answer says `member {signed_in, hotels}`. The
-  booking app sends the session with every search; signing in, out or joining prices the search again and drops a
-  selection made at the other price.
+  booking app sends the session with every search; signing in or out prices the search again and drops a selection
+  made at the other price (the key is the session's tag, never its token; a reload keeps the selection).
 - *"Member price" for anyone else* (the owner's choice: shown, applied only signed in). At hotels whose program has a
   members-only promotion live (`members.teaser_hotels`) and where the visitor is no member, the same search is also
   priced as a member's and only its totals are taken: `member_total` on an offer and on each of its rooms where a
-  member pays less, `member_from_total` on a hotel. That search's offer keys and quotes never reach the visitor, so
-  every key a visitor holds is anyone's price. The rate shows "Member price: …" with "Sign in or join to get it" (or,
-  signed in without a membership there, "Join …").
+  member pays less, `member_from_total` on a hotel (in the hotel's own currency only). That search's offer keys and
+  quotes never reach the visitor, so every key a visitor holds is anyone's price. It is a second pricing pass for such
+  a search (bounded by the search rate limit). The rate shows "Member price: …" with "Sign in or join to get it" (or,
+  signed in without a membership there, "Join …"); in the widget's frame the link opens the hotel's site in a new tab
+  with the search, since a session made in the frame would stay in the frame.
 - *Booking.* A member's price is booked only for a member of the hotel's program (ADR-077, by the profile the booking
-  joins, i.e. its e-mail); anyone else now gets the guest code `MEMBERS_ONLY` (was `SEARCH_AGAIN`). The details step
-  fills in the member's name and e-mail once, and makes the e-mail read-only with a hint while a member's price is
-  chosen.
+  joins, i.e. its e-mail); anyone else gets the guest code `MEMBERS_ONLY` (was `SEARCH_AGAIN`), whose recovery is
+  "refresh the prices" (a membership that ended during the visit). The details step fills in the member's name and
+  e-mail once, and makes the e-mail read-only with a hint while a member's price is chosen.
 - *Mail.* `notify.member_mail` (texts `member_sign_in`, `member_join`, `member_none` in six languages, sent in the
-  site's hotel's name, recorded as every guest mail but without the link); a mail problem never changes the visitor's
-  answer. The token is in no log and no record of ours; only the outgoing mail carries it (Frappe's Email Queue, which
-  only a System Manager reads, until it is sent and purged), and it works once within 30 minutes.
-- *Alternatives not taken.* A password account (the owner chose the e-mail link); a session cookie (the booking app
-  runs on hotels' own hosts and in the widget's frame, where a third-party cookie is not kept; a token the app sends is
-  the same on every host); the session on the quote and the booking (they check the membership of the booking's
-  profile, which the e-mail names, as for the call centre: a session would only add a second identity to keep equal).
+  site's hotel's name, recorded as every guest mail but without the link, greeting by no name: a visitor types the
+  names for an address they may not own); a mail problem never changes the visitor's answer. The token is in no log
+  and no record of ours; only the outgoing mail carries it (Frappe's Email Queue, which only a System Manager reads,
+  until it is sent and purged), and it works once within 30 minutes. A link not yet opened when its address is
+  erased can still be opened within those 30 minutes (LOW, not done).
+- *Alternatives not taken.* A password account (the owner chose the e-mail link); a session cookie (a same-origin
+  script can use a cookie as well as read storage, and the app runs on hotels' own hosts and in the widget's frame);
+  the session on the quote and the booking (they check the membership of the booking's profile, which the e-mail
+  names, as for the call centre: a session would only add a second identity to keep equal); the platform's host
+  keeping the session 30 days (B1: another hotel's tag container could read it).

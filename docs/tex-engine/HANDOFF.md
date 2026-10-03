@@ -197,7 +197,9 @@ abandoned bookings with the phone; **C-12** a promotion code's Turkish letters a
 members get the members-only prices on the web and in the call centre; a guest not signed in on the web sees the
 member price as "Member price" (applied only when signed in); the web sign-in is a one-time link sent by e-mail
 (ADR-077; the call centre in 2N-1, the web in 2N-2). For the web (2N-2, ADR-078): a member stays signed in **on the
-device for 30 days**; a guest joins on the web with **e-mail and name, confirmed by the link**.
+device for 30 days on a hotel's own host, and only while the tab is open on the platform's shared host** (after
+review round 1 B1: another hotel's tag container runs on that origin); a guest joins on the web with **e-mail and
+name, confirmed by the link** (a signed-in guest's join too).
 
 Open (ask the owner when the work needs it; never guess): **D-15** (PMS per hotel; also who charges a no-show fee),
 C-08 … C-11, C-13 … C-15 with their defaults in `HANDOFF_LEFTOVERS.md` §3, and CLP/ISK minor units (§2 item 7).
