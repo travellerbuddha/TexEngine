@@ -9,7 +9,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).
 - GitHub CI (`ci.yml`) runs on every pull request to the base branch `claude/inspiring-ptolemy-i6wdu2`;
   PRs #1–#28 merged with it green. The last full run, CI #191 on 000d806 (PR #28, 2026-10-03): eval 76/76, upstream banquet 101,
-  TEX unit 694, integration 49 modules (1,301 tests), front-desk journey 13/13, Playwright 202 passed and 9 skipped (52 spec
+  TEX unit 694, integration 49 modules (1,301 tests), front-desk journey 13/13, Playwright 202 passed and 9 skipped (51 spec
   files), node unit 435, DOM checks 42, i18n complete in 6 languages; ruff 0.15.8; Linters (Semgrep 1.179.0) and Supply chain
   (gitleaks, audit-ci, pip-audit with 61 reviewed advisories) green beside it.
   No area is READY on CI evidence alone: the open items below still hold.

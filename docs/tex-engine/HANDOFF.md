@@ -47,7 +47,7 @@ the descriptions of PRs #3–#29 (each has its items, fail-first evidence, revie
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
   modules, 1,305 tests (`test_scheduler_smoke` differs only locally, on the demo booking domain's DNS); Playwright
-  203 passed, 9 skipped by design (212; 53 spec files); node unit 435; DOM 42; i18n complete in 6 languages; eval
+  203 passed, 9 skipped by design (212; 52 spec files); node unit 435; DOM 42; i18n complete in 6 languages; eval
   76/76; banquet 101; front-desk journey 13/13; pip-audit 61 reviewed advisories.
 
 ## 2. What is left
