@@ -549,11 +549,27 @@ def join(guest: str, program: str, *, property: str | None = None) -> dict:
 	require_live_guest(guest)                          # the profile locked first, as every write of its records
 	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=True):       # locked above: as committed now
 		frappe.throw(_("An erased profile cannot join a program."))
+	return _activate(guest, program, property=property, source="Staff", by=frappe.session.user)
+
+
+def join_web(guest: str, program: str, *, property: str | None = None) -> dict | None:
+	"""The guest joins on a booking site (C-04, ADR-078): their own act, proven by the link sent to their e-mail
+	(``members``), with no staff member. The profile is locked by the caller. A disabled program is skipped (None);
+	a membership the guest left is made active again (they asked for it); audited as a staff join is, its source
+	Web."""
+	if not frappe.db.get_value("TEX Loyalty Program", program, "enabled"):
+		return None
+	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=True):
+		return None
+	return _activate(guest, program, property=property, source="Web", by=None)
+
+
+def _activate(guest: str, program: str, *, property: str | None, source: str, by: str | None) -> dict:
+	"""The membership made, or made active again, the profile locked: an active one is returned as it is."""
 	m = membership(guest, program, lock=True)
 	if m and m.status == "Active":
 		return {"name": m.name, "status": m.status}
-	now = now_datetime()
-	values = {"status": "Active", "source": "Staff", "joined_at": now, "joined_by": frappe.session.user,
+	values = {"status": "Active", "source": source, "joined_at": now_datetime(), "joined_by": by,
 	          "property": property, "left_at": None, "left_reason": None}
 	if m:
 		frappe.db.set_value("TEX Loyalty Member", m.name, values)
@@ -562,7 +578,7 @@ def join(guest: str, program: str, *, property: str | None = None) -> dict:
 		name = frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest,
 		                       **values}).insert(ignore_permissions=True).name
 	audit("loyalty.member_join", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
-	      new={"guest": guest, "program": program, "source": "Staff"})
+	      new={"guest": guest, "program": program, "source": source})
 	return {"name": name, "status": "Active"}
 
 

@@ -9,6 +9,7 @@ import { Spinner } from "./ui/feedback"
 
 const ConfirmationPage = lazy(() => import("./pages/ConfirmationPage"))
 const ManagePage = lazy(() => import("./pages/ManagePage"))
+const MemberPage = lazy(() => import("./pages/MemberPage"))
 const PayLinkPage = lazy(() => import("./pages/PayLinkPage"))
 const MockPayPage = lazy(() => import("./pages/MockPayPage"))
 const PayReturnPage = lazy(() => import("./pages/PayReturnPage"))
@@ -41,8 +42,9 @@ function LegacyPayLink() {
  *  /:site                         search → rooms → extras → details → payment
  *  /:site/confirmation/:booking   after booking / payment return
  *  /:site/manage#token=…          self-service (magic link)
+ *  /:site/member#token=…          a loyalty member's sign-in or join link (C-04)
  *  On a hotel's own host, pinned to its site (basename /, ADR-035) the same pages
- *  without the :site prefix: /, /confirmation/:booking, /manage.
+ *  without the :site prefix: /, /confirmation/:booking, /manage, /member.
  *  Both:
  *  /pay#token=…                   payment link (the token never reaches a server log, G-83);
  *                                 an old /pay/:token link moves its token into the fragment
@@ -62,12 +64,14 @@ export default function BookingApp() {
           <>
             <Route path="/confirmation/:booking" element={<ConfirmationPage />} />
             <Route path="/manage" element={<ManagePage />} />
+            <Route path="/member" element={<MemberPage />} />
             <Route path="/" element={<SitePage />} />
           </>
         ) : (
           <>
             <Route path="/:site/confirmation/:booking" element={<ConfirmationPage />} />
             <Route path="/:site/manage" element={<ManagePage />} />
+            <Route path="/:site/member" element={<MemberPage />} />
             <Route path="/:site" element={<SitePage />} />
           </>
         )}

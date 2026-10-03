@@ -163,6 +163,15 @@ def site_properties(site) -> list[str]:
 	return sorted(frappe.get_all("Property", filters={"tex_hotel_group": site.hotel_group}, pluck="name"))
 
 
+def selling_properties(site) -> list[str]:
+	"""The hotels a booking site sells: its hotel, or its hotel group's enabled ones by name (``site_properties`` keeps
+	a disabled one: staff still edit the site for it)."""
+	if site.property:
+		return [site.property]
+	return frappe.get_all("Property", filters={"tex_hotel_group": site.hotel_group, "disabled": 0}, pluck="name",
+	                      order_by="property_name asc")
+
+
 def require_site(site_name: str, cap: str = "booking_site.edit"):
 	site = frappe.get_doc("TEX Booking Site", site_name)
 	props = site_properties(site)

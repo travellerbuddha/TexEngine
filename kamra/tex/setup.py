@@ -219,6 +219,8 @@ TEX_INDEXES = (
 	("TEX Loyalty Ledger", ["booking", "entry_type"], "tex_ledger_booking_type"),
 	# a guest's membership of a program, read on every member-priced search and moved by a merge (C-04)
 	("TEX Loyalty Member", ["guest", "program"], "tex_member_guest_program"),
+	# a guest's web sessions: moved by a merge, removed by an erasure (C-04 on the web, ADR-078)
+	("TEX Member Session", ["guest", "site"], "tex_member_session_guest"),
 	# a merge reads and moves a profile's records with locking reads: every Link to Guest has an index
 	# that starts with it, so those reads lock the profile's rows only (third review of ADR-056)
 	("TEX Booking", ["booker_guest", "property"], "tex_booking_guest_prop"),

@@ -82,11 +82,13 @@ def _site(slug: str | None = None, domain: str | None = None):
 	return site
 
 
+# ─── members (C-04 on the web, ADR-078) ─────────────────────────────────
+# a visitor asks for a sign-in or join link: each one sends a mail, so fewer per address (``members``) and per visitor
+MEMBER_LINK_LIMIT = {"limit": _limit(10, "tex_public_member_link_limit"), "seconds": 600}
+
+
 def _site_properties(site) -> list[str]:
-	if site.property:
-		return [site.property]
-	return frappe.get_all("Property", filters={"tex_hotel_group": site.hotel_group, "disabled": 0}, pluck="name",
-	                      order_by="property_name asc")
+	return sites.selling_properties(site)
 
 
 def _channel(site) -> str:
@@ -159,7 +161,15 @@ def site(slug: str | None = None, domain: str | None = None):
 		"analytics": {"ga4": s.ga4_measurement_id, "gtm": s.gtm_container_id, "meta_pixel": s.meta_pixel_id,
 		              "consent_banner": bool(s.consent_banner)},
 		"extras": _strip_names({p: loc.extras(p, rows) for p, rows in _public_extras(props).items()}),
+		# the site's loyalty programs, which a guest may sign in to or join on the web (C-04, ADR-078); None: none
+		"membership": _membership(s),
 	}
+
+
+def _membership(s) -> dict | None:
+	from kamra.tex.crm import members
+
+	return members.site_membership(s)
 
 
 def _public_extras(props: list[str]) -> dict:
@@ -235,7 +245,7 @@ def residency(market: versions.MarketDef | str | None) -> dict | None:
 # a reason by its code, the room it is about and the limit it names (MAX_ADULTS / MAX_CHILDREN / MAX_OCCUPANTS)
 _REASON_LIMITS = ("max_adults", "max_children", "max_occupants")
 # what the booking app shows of a promotion
-_PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added")
+_PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added", "member_only")
 
 
 def _guest_reasons(reasons) -> list[dict]:
@@ -295,7 +305,12 @@ def _guest_answer(out: dict) -> dict:
 @refusals.coded
 def search(site: str, check_in: str, check_out: str, rooms, currency: str | None = None,
            promo_code: str | None = None, market: str | None = None, country: str | None = None,
-           hotel: str | None = None, session_id: str | None = None):
+           hotel: str | None = None, session_id: str | None = None, member_session: str | None = None):
+	"""``member_session``: a member signed in on this site (C-04, ADR-078) is priced as one at the hotels whose program
+	they are a member of; anyone else is shown the member price as ``member_total`` (never an offer at it) where a
+	members-only promotion is live. ``member``: whether the session is signed in, and where it is a member."""
+	from kamra.tex.crm import members
+
 	s = _site(site)
 	props = _site_properties(s)
 	if hotel:
@@ -307,9 +322,18 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 		frappe.throw(_("Currency not offered."), refusal("CURRENCY_NOT_OFFERED"))
 	m = _market(s, market, country)
 	mkt = m.code
-	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
-	                     channel=_channel(s), currency=currency or s.default_currency or None,
-	                     promo_codes=[promo_code] if promo_code else (), internal=False)
+	guest = members.session_guest(s, text(member_session, 200))
+	members_at = members.member_hotels(s, guest) & set(props)
+	asked = {"properties": props, "check_in": check_in, "check_out": check_out, "rooms": rooms, "market": mkt,
+	         "channel": _channel(s), "currency": currency or s.default_currency or None,
+	         "promo_codes": [promo_code] if promo_code else (), "internal": False}
+	res = quoting.search(**asked, member=members_at)
+	_member_prices(res, members_at)
+	teaser = members.teaser_hotels(s, [p for p in props if p not in members_at])
+	if teaser:
+		# the same search as a member's where anyone may be shown the member price: its totals only, never its keys
+		_teaser(res, quoting.search(**{**asked, "properties": sorted(teaser)}, member=True))
+	res["member"] = {"signed_in": bool(guest), "hotels": sorted(members_at)}
 	# a residents-only market's prices: checkout asks the guest's country of residence (O-8)
 	res["residency"] = residency(m)
 	content.Localizer(content.guest_language()).search(res)
@@ -326,6 +350,112 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out,
 	                                  "rooms": [p.summary() for p in parties], "market": mkt})
 	return res
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])   # an e-mail: never in a URL
+@rate_limit(**MEMBER_LINK_LIMIT)
+@refusals.coded
+def member_link(site: str, email: str, purpose: str = "sign_in", first_name: str | None = None,
+                last_name: str | None = None, accepted=0, language: str | None = None,
+                idempotency_key: str | None = None):
+	"""Send a one-time link to sign in, or to join the site's loyalty program (with a name and the tick). The answer is
+	the same whatever the e-mail (``members.request_link``); a request retried with its idempotency key sends no
+	second mail."""
+	from kamra.tex.crm import members
+
+	s = _site(site)
+	members.request_link(s, email=text(email, 400), purpose=text(purpose, 20) or "", first_name=text(first_name, 140),
+	                     last_name=text(last_name, 140), accepted=_ticked(accepted), language=_member_language(language),
+	                     idempotency_key=text(idempotency_key, 140))
+	return {"ok": True}
+
+
+def _member_language(raw) -> str:
+	"""The mail's language: one the booking app speaks (the visitor's choice, else the request's), else English."""
+	return content.guest_language(text(raw, 10)) or content.guest_language() or "en"
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])   # the token in the body, never a query string (G-83)
+@rate_limit(**WRITE_LIMIT)
+@refusals.coded
+def member_verify(site: str, token: str):
+	"""Open a sign-in or join link: a session for 30 days (its token once, here) and the member's status. A deadlock
+	is run again inside, with the link taken once (``members.verify``)."""
+	from kamra.tex.crm import members
+
+	return members.verify(_site(site), text(token, 200) or "")
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**SEARCH_LIMIT)
+@refusals.coded
+def member_status(site: str, member_session: str):
+	from kamra.tex.crm import members
+
+	s = _site(site)
+	return members.status(s, members.require_session(s, text(member_session, 200)))
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**MEMBER_LINK_LIMIT)
+@refusals.coded
+def member_join(site: str, member_session: str, accepted=0, language: str | None = None,
+                idempotency_key: str | None = None):
+	"""A signed-in guest who is no member asks to join the site's program, with the tick: a join link goes to their
+	e-mail, which confirms it (``members.join_signed_in``)."""
+	from kamra.tex.crm import members
+
+	members.join_signed_in(_site(site), text(member_session, 200), _ticked(accepted),
+	                       language=_member_language(language), idempotency_key=text(idempotency_key, 140))
+	return {"ok": True}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+@refusals.coded
+def member_sign_out(site: str, member_session: str):
+	from kamra.tex.crm import members
+
+	members.sign_out(_site(site), text(member_session, 200))
+	return {"ok": True}
+
+
+def _ticked(value) -> bool:
+	return booking_svc.consent_given(value)
+
+
+def _member_prices(res: dict, members_at: set[str]) -> None:
+	"""Each offer says whether a members-only promotion priced it (``member_price``): the signed-in member's price."""
+	for p in res["properties"]:
+		for o in p["offers"] + p["unavailable"]:
+			o["member_price"] = p["property"] in members_at and any(
+				booking_svc.member_priced(r["quote"]) for r in o["rooms"])
+
+
+def _teaser(res: dict, as_member: dict) -> None:
+	"""The member price beside anyone's price ("Member price", applied only when signed in): ``member_total`` on an
+	offer and on each of its rooms where a member pays less, ``member_from_total`` on a hotel. Only totals are taken
+	from the member's search: its offer keys, quotes and the rest never reach the guest."""
+	key = lambda o: (o["room_type"], o["board"], o.get("rate_plan"))  # noqa: E731
+	theirs = {(p["property"], *key(o)): o for p in as_member["properties"] for o in p["offers"]}
+	from_total = {p["property"]: (p.get("from_total"), p.get("from_currency")) for p in as_member["properties"]}
+	for p in res["properties"]:
+		for o in p["offers"]:
+			m = theirs.get((p["property"], *key(o)))
+			if not m or not any(booking_svc.member_priced(r["quote"]) for r in m["rooms"]):
+				continue
+			if o.get("total") and m.get("total") and D(m["total"]) < D(o["total"]):
+				o["member_total"] = m["total"]
+			mine = {r["room_index"]: r for r in m["rooms"]}
+			for r in o["rooms"]:
+				t = (mine.get(r["room_index"]) or {}).get("quote", {}).get("totals", {}).get("total")
+				if t and D(t) < D(r["quote"]["totals"]["total"]):
+					r["member_total"] = t
+		low, currency = from_total.get(p["property"]) or (None, None)
+		# in the hotel's own currency only (review round 1: a from-price without a fixed currency may be another's)
+		if (low and p.get("from_total") and p.get("from_currency") and currency == p["from_currency"]
+				and D(low) < D(p["from_total"])):
+			p["member_from_total"] = low
 
 
 # a guest sees whether a limited extra can still be booked on a day, and "few left", never

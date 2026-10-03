@@ -41,6 +41,22 @@ export function removeItem(key: string, kind: "session" | "local" = "session") {
   }
 }
 
+/** The keys kept under a prefix (in the browser's storage, and in memory when it is blocked). */
+export function keysWithPrefix(prefix: string, kind: "session" | "local" = "session"): string[] {
+  const out = new Set<string>()
+  for (const k of memory.keys()) if (k.startsWith(`${kind}:${prefix}`)) out.add(k.slice(kind.length + 1))
+  try {
+    const st = store(kind)
+    for (let i = 0; st && i < st.length; i++) {
+      const k = st.key(i)
+      if (k?.startsWith(prefix)) out.add(k)
+    }
+  } catch {
+    /* blocked */
+  }
+  return [...out]
+}
+
 export function getJSON<T>(key: string, kind: "session" | "local" = "session"): T | null {
   const raw = getItem(key, kind)
   if (!raw) return null

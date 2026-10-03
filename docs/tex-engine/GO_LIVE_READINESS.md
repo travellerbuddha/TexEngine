@@ -160,6 +160,8 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - One query uses `FOR UPDATE SKIP LOCKED`: `close_links_of` in `kamra/tex/payments/service.py`
     (MariaDB 10.6+ supports it). Queue claims are conditional `UPDATE … LIMIT` with a token and
     lease, and inbound messages are row-locked with a status re-check.
+- **Members on the web** (ADR-078): sell from a hotel's own verified host where members sign in. On the platform's
+  shared host (`/book/<site>`) a member stays signed in only while the tab is open (owner, 2026-10-03).
 - **Scheduler** must be enabled in production. TEX jobs run every minute (channel
   distribution), every 5 minutes in two jobs (payments asked again, holds, links, e-mail delivery
   status; and the PMS outbox entry, which only queues its delivery on the RQ `long` queue, LO-08),
