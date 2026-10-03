@@ -1982,13 +1982,16 @@ HANDOFF §2 items 2, 8 and 9 (each re-verified first; G-99's card named one path
   install, so the pre-upgrade package (HANDOFF_LEFTOVERS C-06: O-34, O-35, O-36, O-39, P1-12 and the legacy-data
   leftovers) does not apply. The current systems' data reaches TEX by import at cut-over, a separate go-live item.
 - G-99 **COMPLETE**: the contract payload's digest reaches only who sees cost.
-  - TEX API: `get_contract` without cost names no version's `payload_hash`; `strip_internal` removes
-    `contract.payload_hash` (staff quotes, CRS search, a reservation's pricing, a modification preview).
+  - TEX API, without `price.view_cost` at the hotel: no digest in `get_contract`, `publish_version`, the CRS quote
+    answers, a simulation, a modification's proposed and sold contract, a reservation's pricing or a CRS search
+    (`strip_internal` and each answer); the audit trail masks the digests an event records; a refused reprice's
+    message no longer names their first 12 hex digits.
   - Desk / REST: `Reservation.tex_payload_hash` and `TEX Quote.payload_hash` are withheld fields (permlevel 1,
     `internals.INTERNAL_FIELDS`; masked in the change history). No patch (metadata syncs on migrate; D-14).
-  - Tests, `test_crm_privacy.TestPricingInternalsOutsideTex` (three new). Red before: a Front Desk clerk read the
-    digest through `frappe.client.get`; the change history kept both digests; `crs.reservation` named it to an agent
-    without cost.
+  - Tests, `test_crm_privacy.TestPricingInternalsOutsideTex` (six new). Red before: a Front Desk clerk read the
+    digest through `frappe.client.get`; the change history kept both digests; `crs.reservation` and `get_contract`
+    named it to an agent without cost; review round 1: the CRS quote answers, a simulation and a proposed change
+    still named it, the trail showed both digests, the refusal message their prefixes.
   - R-14 is COMPLETE (G-99 was its last gap).
 - Overlays' first frame **COMPLETE**: the design system's Dialog, modal Drawer and side panel keep their content
   hidden (`visibility: hidden`) until one passive-effect pass after they open (`useShown`), so a form its parent
@@ -1998,5 +2001,10 @@ HANDOFF §2 items 2, 8 and 9 (each re-verified first; G-99's card named one path
   `["last session", "last session", "fresh 1"]` for each of the three. Bundles rebuilt.
   The guest booking app's own dialog (`src/booking/ui/Dialog.tsx`) is not the design system's and is unchanged: none
   of its users resets a form when it opens.
-- **Not done:** nothing found in the batch.
+- **Not done:**
+  - a TEX Audit Event of a refused reprice still holds both digests for Desk readers of the trail (the Hotel Admin
+    role, read-scoped to its hotels; usually with `price.view_cost` in TEX); LOW, only after an integrity failure;
+  - the command palette (`TexShell.tsx`, not a design-system overlay) resets its query in a passive effect: one frame
+    of the last query, LOW;
+  - a content component that copies its props into state at mount is not covered by the overlay rule (ADR-075).
 

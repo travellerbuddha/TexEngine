@@ -9789,17 +9789,21 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   the in-place steps used on the development bench (fetch the tag and the commit, `bench setup requirements`, build,
   migrate). The committed bundles do not depend on Frappe: a rebuild after the move is identical.
 
-## ADR-075 LOW leftovers: the payload digest withheld, overlays show their content a pass late (audit Part 2L)
+## ADR-075 LOW leftovers: the payload digest withheld, overlays hidden until a pass after opening (audit Part 2L)
 - *D-14 (owner, 2026-10-03): no existing database is upgraded.* No Kamra or TEX pilot database with data to keep
   exists; every hotel starts from a fresh install. The pre-upgrade package (O-34, O-35, O-36, O-39, P1-12 and the
   legacy-data leftovers of HANDOFF_LEFTOVERS C-06) does not apply. The data of the current systems reaches TEX by
   import at cut-over, a separate go-live item.
-- *The contract payload's digest is a pricing internal (G-99).* `payload_hash` is a sha256 of the frozen payload,
-  cost and markups included: whoever holds it confirms a guess of those values offline. It goes only where the
-  payload's cost goes.
-  - TEX API: `get_contract` names it only to who sees cost (`_sees_cost`, as `get_version`); `strip_internal`
-    removes `contract.payload_hash`, so staff quotes, CRS searches, a reservation's pricing and a modification
-    preview carry none without `price.view_cost`.
+- *The contract payload's digest is a pricing internal (G-99).* `payload_hash` is a sha256 of the frozen payload
+  (its rates, offers and inherited policy rules): whoever holds it confirms a guess of those values offline. It goes
+  only to who holds `price.view_cost` at the hotel.
+  - TEX API: `strip_internal` removes `contract.payload_hash` (CRS search, a reservation's pricing, a modification's
+    proposed price); the CRS quote answers (`crs.quote`, `quote_rooms`), a simulation and a modification's sold
+    contract (`old.contract`) leave it out; `get_contract` and `publish_version` name it only with
+    `price.view_cost` (not `contract.edit`: an editor without cost is not shown inherited rules either).
+  - The audit trail (`audit_log`) masks the digests an event records (a refused reprice's `recorded_hash` and
+    `found_hash`, a publish's `payload_hash`) for a viewer without `price.view_cost` at its hotel; the stored event
+    keeps them. A refused reprice's message names the version, no longer the digests' first 12 hex digits.
   - Desk / REST: `Reservation.tex_payload_hash` and `TEX Quote.payload_hash` are withheld fields (ADR-056): permlevel
     1, left out of reads and generic-write responses, masked in the change history.
   - No patch: the field metadata syncs on migrate. Change-history rows written before keep their values; by D-14
@@ -9819,3 +9823,6 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
     the dialog right after the click's commit: the content and its refs must exist in the opening render.
   - A consumer that focuses into the content in the opening render reaches a hidden, unfocusable element; a scan of
     every Dialog / Drawer consumer found none (AddExtrasDialog focuses once its list has loaded).
+  - The content mounts, hidden, with the parent's state as it was: what it does on mount sees the last session's
+    props (a picker may fetch for them before the reset). State a content component copies from its props at mount
+    (`useState(prop)`) is not reset by the parent's effect: such a form is still mounted per opening (keyed).

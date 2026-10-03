@@ -45,7 +45,7 @@ the descriptions of PRs #3–#31 (each has its items, fail-first evidence, revie
 | 2K-6 staff frontend, tests and tooling | #28 | LO-34, LO-38, LO-40, LO-45, LO-42, LO-27, LO-46, LO-36, LO-44, LO-29, LO-41, LO-43 (§6K6) |
 | 2Z release hygiene | #29 | reproducible committed bundles + 2 CI checks, Frappe OAuth registration off (p76), CI pins, the drawer first-frame race (§6Z, ADR-073) |
 | 2Z-F Frappe v16.36.1 | #30 | Frappe v16.36.1 + payments `version-16`, pip-audit list 61 → 29, the sign-in contract of an expired password (§6ZF, ADR-074) |
-| 2L LOW leftovers | #31 | G-99 (the payload digest only with cost, also in Desk / REST), overlays show their content a pass after they open, D-14 recorded (§6L, ADR-075) |
+| 2L LOW leftovers | #31 | G-99 (the payload digest only with cost, also in Desk / REST and the trail), overlays hidden until a pass after they open, D-14 recorded (§6L, ADR-075) |
 
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
@@ -69,7 +69,7 @@ Nothing planned remains. In order of likely need:
 | 6 | Smaller owner questions with defaults | owner | C-02 … C-16 |
 | 7 | CLP and ISK: the server keeps them in 2 decimals (`money.MINOR_UNITS`), ISO 4217 says 0; the screens now follow the server (2K-6) | owner: a money-engine rounding change | §6K6 "Not done" |
 | 8 | ~~G-99: `get_contract` returns `payload_hash` to `price.view` callers~~ **done** (PR #31) | none | §6L, ADR-075 |
-| 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays show their content a pass after they open | none | §6L, ADR-075 |
+| 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays keep their content hidden until a pass after they open | none | §6L, ADR-075 |
 | 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" | none (LOW) | §6 … §6L |
 
 Not in scope unless the owner asks: G-41r allotment × channel, G-54 surcharges by LOS/arrival, G-64 CRM campaigns.
