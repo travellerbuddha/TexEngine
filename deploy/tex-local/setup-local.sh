@@ -582,13 +582,14 @@ if [ -z "$BENCH" ]; then
 	if [ -n "$UV_BIN" ] && [ -x "$UV_BIN/bench" ]; then BENCH="$UV_BIN/bench"; fi
 fi
 if [ -z "$BENCH" ]; then
-	if confirm "The Frappe 'bench' command is not installed. Install it now with 'uv tool install frappe-bench' (per user)?"; then
-		uv tool install frappe-bench
+	# the bench CLI CI and the Dockerfile use (test_pins keeps them equal); a bench already on PATH is used as it is
+	if confirm "The Frappe 'bench' command is not installed. Install it now with 'uv tool install frappe-bench==5.31.0' (per user)?"; then
+		uv tool install "frappe-bench==5.31.0"
 		UV_BIN=$(uv tool dir --bin)
 		BENCH="$UV_BIN/bench"
 		[ -x "$BENCH" ] || die "bench was installed but $BENCH is missing"
 	else
-		die "bench is required. Install it with: uv tool install frappe-bench   (or: pip install --user frappe-bench, with uv on PATH), then re-run."
+		die "bench is required. Install it with: uv tool install frappe-bench==5.31.0   (or: pip install --user frappe-bench==5.31.0, with uv on PATH), then re-run."
 	fi
 fi
 BENCH_ON_PATH=1

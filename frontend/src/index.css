@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* Tailwind reads the classes of src/ only (2Z, NEW-4): a test, a script or the widget demo never changes the
+   committed bundles. The DOM test pages add their own folder (tests/dom/harness.css). */
+@import "tailwindcss" source(none);
+@source "./";
 @import "./tex/tex.css";
 
 @theme {

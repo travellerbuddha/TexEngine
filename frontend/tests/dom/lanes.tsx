@@ -7,7 +7,7 @@
 // Open /tests/dom/lanes.html under `npx vite --config tests/dom/vite.config.ts` to try it by hand.
 import { StrictMode, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import "../../src/index.css"
+import "./harness.css"
 import { setTexLang, type TexLang } from "../../src/tex/i18n"
 import { KeyboardShortcuts } from "../../src/tex/screens/rates/workspace/BulkToolbar"
 import { focusHeaderLane, headerLaneKeyDown, useGridNavigation, useGridSelection, type GridNavigationApi } from "../../src/tex/ui"

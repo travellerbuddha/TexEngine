@@ -11,7 +11,8 @@ export const DEFAULT_SOURCE = "https://github.com/travellerbuddha/TexEngine"
 export const UPSTREAM = { name: "Kamra PMS", url: "https://github.com/Kamra-PMS/kamra-pms" }
 export const LICENSE = { name: "AGPL-3.0", url: "https://www.gnu.org/licenses/agpl-3.0.html" }
 
-/** The commit this bundle was built from (vite `define`; "" when the build could not tell). */
+/** The commit this bundle was built from, when the build was told (vite `define` of TEX_BUILD_COMMIT, e.g. an image
+ * build); "" for the committed and bench builds, whose pages name the running commit instead (ADR-073). */
 export const BUILD_COMMIT: string = typeof __TEX_BUILD_COMMIT__ === "string" ? __TEX_BUILD_COMMIT__ : ""
 
 function served(name: string): string | null {

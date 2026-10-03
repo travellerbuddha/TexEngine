@@ -99,9 +99,10 @@ A month of small work should usually be one or two PATCHes, not a MINOR.
       install during the marketplace build
 - [x] `required_apps = ["payments"]` in hooks
 - [x] `add_to_apps_screen` entry (logo, `/kamra` route)
-- [x] Prebuilt SPA committed under `kamra/public/frontend` (built by
-      `frontend/`'s `npm run build`; keep committing the build output —
-      marketplace benches don't run npm)
+- [x] Prebuilt SPA committed under `kamra/public/frontend` and the widget under
+      `kamra/public/tex` (built by `frontend/`'s `npm ci && npm run build`; keep
+      committing the build output — marketplace benches don't run npm). CI checks
+      that they equal a fresh build of the commit, stamp-free (ADR-073)
 - [x] Root `package.json` build script for Frappe Cloud
 - [x] README compatibility table (Kamra `main` releases ↔ Frappe v16)
 - [x] Publisher account on frappecloud.com; Marketplace App `kamra` exists

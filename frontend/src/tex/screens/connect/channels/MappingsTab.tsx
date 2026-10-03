@@ -137,8 +137,11 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
           ]}
         />
       )}
-      {lookups.data && (
+      {/* one drawer per opening (keyed): a new mapping starts blank in its first frame, never with the last one's
+          codes, so nothing typed at once is lost to a late reset (2Z; CI run 36315774106) */}
+      {lookups.data && editing && (
         <MappingDrawer
+          key={editing === "new" ? "new" : editing.name}
           mapping={editing}
           connection={connection}
           lookups={lookups.data}

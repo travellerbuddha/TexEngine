@@ -39,7 +39,10 @@ See [`RELEASING.md`](RELEASING.md) for the full release process.
 
 ## Before you open a PR
 
-- **Frontend:** `cd frontend && npm run build` must pass (typecheck + build).
+- **Frontend:** `cd frontend && npm ci && npm run build` must pass (typecheck + build). A change to the
+  frontend sources commits the rebuilt `kamra/public/frontend` and `kamra/public/tex`: CI checks that the
+  committed bundles equal a fresh build (ADR-073). Two pull requests that both rebuilt them: merge the base
+  and rebuild, never resolve the bundles by hand.
 - **Backend:** if you touched Python, run the eval harness locally —
   `bench --site <site> console`, then
   `from kamra.scripts.eval_harness import execute; execute()` — and confirm

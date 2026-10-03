@@ -1,6 +1,6 @@
 var C = Object.defineProperty;
-var D = (l, c, t) => c in l ? C(l, c, { enumerable: !0, configurable: !0, writable: !0, value: t }) : l[c] = t;
-var g = (l, c, t) => D(l, typeof c != "symbol" ? c + "" : c, t);
+var D = (l, c, e) => c in l ? C(l, c, { enumerable: !0, configurable: !0, writable: !0, value: e }) : l[c] = e;
+var u = (l, c, e) => D(l, typeof c != "symbol" ? c + "" : c, e);
 const v = {
   en: { ci: "Check-in", co: "Check-out", guests: "Guests", adults: "Adults", children: "Children", age: "Age of child {n}", pick: "Age", under1: "Under 1", search: "Search", book: "Book now", close: "Close", booking: "Booking", done: "Done", less: "Fewer {what}", more: "More {what}", errDates: "Choose check-in and check-out dates.", errOrder: "Check-out must be after check-in.", errAges: "Add the age of each child.", a: "{n} adult", as: "{n} adults", c: "{n} child", cs: "{n} children" },
   tr: { ci: "Giriş", co: "Çıkış", guests: "Misafirler", adults: "Yetişkin", children: "Çocuk", age: "{n}. çocuğun yaşı", pick: "Yaş", under1: "1 yaşından küçük", search: "Ara", book: "Rezervasyon yap", close: "Kapat", booking: "Rezervasyon", done: "Tamam", less: "{what} azalt", more: "{what} artır", errDates: "Giriş ve çıkış tarihlerini seçin.", errOrder: "Çıkış, girişten sonra olmalıdır.", errAges: "Her çocuğun yaşını ekleyin.", a: "{n} yetişkin", as: "{n} yetişkin", c: "{n} çocuk", cs: "{n} çocuk" },
@@ -56,34 +56,37 @@ dialog::backdrop{background:rgb(15 17 21/.55)}
 iframe{flex:1;width:100%;border:0;display:block}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `, E = (l) => `${l.getFullYear()}-${String(l.getMonth() + 1).padStart(2, "0")}-${String(l.getDate()).padStart(2, "0")}`, w = (l, c) => {
-  const [t, s, i] = l.split("-").map(Number);
-  return E(new Date(t, s - 1, i + c, 12));
+  const [e, s, t] = l.split("-").map(Number);
+  return E(new Date(e, s - 1, t + c, 12));
 }, d = (l) => l.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function A(l) {
-  const c = l.length === 4 ? l.slice(1).split("").map((o) => o + o).join("") : l.slice(1), [t, s, i] = [0, 2, 4].map((o) => parseInt(c.slice(o, o + 2), 16) / 255).map((o) => o <= 0.03928 ? o / 12.92 : ((o + 0.055) / 1.055) ** 2.4), e = 0.2126 * t + 0.7152 * s + 0.0722 * i;
-  return 1.05 / (e + 0.05) >= (e + 0.05) / 0.05 ? "#ffffff" : "#16181d";
+  const c = l.length === 4 ? l.slice(1).split("").map((o) => o + o).join("") : l.slice(1), [e, s, t] = [0, 2, 4].map((o) => parseInt(c.slice(o, o + 2), 16) / 255).map((o) => o <= 0.03928 ? o / 12.92 : ((o + 0.055) / 1.055) ** 2.4), i = 0.2126 * e + 0.7152 * s + 0.0722 * t;
+  return 1.05 / (i + 0.05) >= (i + 0.05) / 0.05 ? "#ffffff" : "#16181d";
 }
 const k = /* @__PURE__ */ new Map();
 class z extends HTMLElement {
   constructor() {
     super();
-    g(this, "root");
-    g(this, "adults", 2);
-    g(this, "ages", []);
-    g(this, "siteName", "");
-    g(this, "rendered", !1);
-    g(this, "onMessage", (t) => {
-      var i;
+    u(this, "root");
+    u(this, "adults", 2);
+    u(this, "ages", []);
+    u(this, "siteName", "");
+    /** the site's theme and texts once fetched: applied again after every render (G-44) */
+    u(this, "info", null);
+    u(this, "rendered", !1);
+    u(this, "onMessage", (e) => {
+      var t;
       const s = this.root.querySelector("iframe");
-      s && t.source === s.contentWindow && ((i = t.data) == null ? void 0 : i.type) === "tex-booking:close" && this.close();
+      s && e.source === s.contentWindow && ((t = e.data) == null ? void 0 : t.type) === "tex-booking:close" && this.close();
     });
-    g(this, "closeGuests", () => {
+    u(this, "closeGuests", () => {
     });
-    g(this, "opener", null);
-    g(this, "hostOverflow", "");
-    this.root = this.attachShadow({ mode: "open" }), this.root.addEventListener("click", (t) => {
-      const s = t.composedPath(), i = this.root.querySelector("#gp"), e = this.root.querySelector("#gb");
-      i && e && !s.includes(i) && !s.includes(e) && this.closeGuests();
+    u(this, "opener", null);
+    u(this, "hostOverflow", "");
+    u(this, "locked", !1);
+    this.root = this.attachShadow({ mode: "open" }), this.root.addEventListener("click", (e) => {
+      const s = e.composedPath(), t = this.root.querySelector("#gp"), i = this.root.querySelector("#gb");
+      t && i && !s.includes(t) && !s.includes(i) && this.closeGuests();
     });
   }
   get api() {
@@ -95,55 +98,62 @@ class z extends HTMLElement {
   get uiLang() {
     return [this.getAttribute("lang"), document.documentElement.lang, navigator.language].map((s) => (s || "").slice(0, 2).toLowerCase()).find((s) => s in v) || "en";
   }
-  t(t, s = {}) {
-    return (v[this.uiLang][t] ?? v.en[t]).replace(/\{(\w+)\}/g, (i, e) => String(s[e] ?? ""));
+  t(e, s = {}) {
+    return (v[this.uiLang][e] ?? v.en[e]).replace(/\{(\w+)\}/g, (t, i) => String(s[i] ?? ""));
   }
   connectedCallback() {
     window.addEventListener("message", this.onMessage), this.render(), this.loadTheme();
   }
   disconnectedCallback() {
-    window.removeEventListener("message", this.onMessage);
+    window.removeEventListener("message", this.onMessage), this.unlock();
   }
-  attributeChangedCallback(t, s, i) {
-    !this.rendered || s === i || (this.render(), (t === "site" || t === "api") && this.loadTheme());
+  attributeChangedCallback(e, s, t) {
+    if (!this.rendered || s === t) return;
+    const i = e === "site" || e === "api";
+    i && (this.info = null, this.siteName = ""), this.render(), i && this.loadTheme();
   }
   async loadTheme() {
     if (!this.site) return;
-    const t = `${this.api}|${this.site}`;
-    k.has(t) || k.set(
-      t,
-      fetch(`${this.api}/api/method/kamra.tex.api.public.site?slug=${encodeURIComponent(this.site)}`, { credentials: "omit" }).then((u) => u.ok ? u.json() : null).then((u) => (u == null ? void 0 : u.message) ?? null).catch(() => null)
+    const e = `${this.api}|${this.site}`;
+    k.has(e) || k.set(
+      e,
+      fetch(`${this.api}/api/method/kamra.tex.api.public.site?slug=${encodeURIComponent(this.site)}`, { credentials: "omit" }).then((t) => t.ok ? t.json() : null).then((t) => (t == null ? void 0 : t.message) ?? null).catch(() => null)
     );
-    const s = await k.get(t), i = this.root.querySelector(".w");
-    if (!s || !i) return;
-    this.siteName = s.name || "";
-    const e = s.branding || {};
-    e.primary && M.test(e.primary) && (i.style.setProperty("--p", e.primary), i.style.setProperty("--op", A(e.primary)), i.style.setProperty("--pi", A(e.primary) === "#ffffff" ? e.primary : "#16181d")), e.font && e.font in $ && i.style.setProperty("--f", `${$[e.font]}ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`), e.radius && e.radius in x && i.style.setProperty("--r", x[e.radius]), i.style.setProperty("--br", e.button_style === "pill" ? "999px" : x[e.radius ?? "md"] ?? "8px"), e.button_style === "outline" && (i.dataset.btn = "outline");
-    const o = this.root.querySelector(".mt");
-    o && (o.textContent = this.siteName || this.t("booking"));
-    const n = s.texts ?? {}, r = [this.uiLang, s.default_language].map((u) => {
-      var b;
-      return u ? (b = n[u]) == null ? void 0 : b.search_button : null;
-    }).find((u) => typeof u == "string" && u.trim()), f = this.root.querySelector(".go");
-    f && typeof r == "string" && (f.textContent = r.trim());
+    const s = await k.get(e);
+    !s || e !== `${this.api}|${this.site}` || (this.info = s, this.applyTheme());
   }
-  url(t, s) {
-    const i = new URLSearchParams(t);
-    i.set("lang", this.uiLang);
-    const e = this.getAttribute("hotel"), o = this.getAttribute("currency");
-    e && i.set("hotel", e), o && /^[A-Z]{3}$/.test(o) && i.set("currency", o);
+  /** The site's theme, title and button label on the current render (render() rebuilds `.w`). */
+  applyTheme() {
+    const e = this.info, s = this.root.querySelector(".w");
+    if (!e || !s) return;
+    this.siteName = e.name || "";
+    const t = e.branding || {};
+    t.primary && M.test(t.primary) && (s.style.setProperty("--p", t.primary), s.style.setProperty("--op", A(t.primary)), s.style.setProperty("--pi", A(t.primary) === "#ffffff" ? t.primary : "#16181d")), t.font && t.font in $ && s.style.setProperty("--f", `${$[t.font]}ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`), t.radius && t.radius in x && s.style.setProperty("--r", x[t.radius]), s.style.setProperty("--br", t.button_style === "pill" ? "999px" : x[t.radius ?? "md"] ?? "8px"), t.button_style === "outline" && (s.dataset.btn = "outline");
+    const i = this.root.querySelector(".mt");
+    i && (i.textContent = this.siteName || this.t("booking"));
+    const o = e.texts ?? {}, n = [this.uiLang, e.default_language].map((h) => {
+      var y;
+      return h ? (y = o[h]) == null ? void 0 : y.search_button : null;
+    }).find((h) => typeof h == "string" && h.trim()), r = this.root.querySelector(".go");
+    r && typeof n == "string" && (r.textContent = n.trim());
+  }
+  url(e, s) {
+    const t = new URLSearchParams(e);
+    t.set("lang", this.uiLang);
+    const i = this.getAttribute("hotel"), o = this.getAttribute("currency");
+    i && t.set("hotel", i), o && /^[A-Z]{3}$/.test(o) && t.set("currency", o);
     const n = (this.getAttribute("market") || "").trim(), r = (this.getAttribute("country") || "").trim();
-    return /^[A-Za-z0-9_-]{1,40}$/.test(n) && i.set("market", n), /^[A-Za-z]{2}$/.test(r) && i.set("country", r.toUpperCase()), s && i.set("embed", "1"), `${this.api}/book/${encodeURIComponent(this.site)}?${i}`;
+    return /^[A-Za-z0-9_-]{1,40}$/.test(n) && t.set("market", n), /^[A-Za-z]{2}$/.test(r) && t.set("country", r.toUpperCase()), s && t.set("embed", "1"), `${this.api}/book/${encodeURIComponent(this.site)}?${t}`;
   }
   guestsText() {
-    const t = this.ages.length;
-    return [this.t(this.adults === 1 ? "a" : "as", { n: this.adults }), t ? this.t(t === 1 ? "c" : "cs", { n: t }) : ""].filter(Boolean).join(", ");
+    const e = this.ages.length;
+    return [this.t(this.adults === 1 ? "a" : "as", { n: this.adults }), e ? this.t(e === 1 ? "c" : "cs", { n: e }) : ""].filter(Boolean).join(", ");
   }
   render() {
-    this.rendered = !0;
-    const t = this.getAttribute("mode") || "search", s = E(/* @__PURE__ */ new Date());
-    if (t === "button") {
-      this.root.innerHTML = `<style>${S}</style><div class="w" part="root"><button type="button" class="bk" part="button">${d(this.getAttribute("label") || this.t("book"))}</button>${this.modalHtml()}</div>`, this.root.querySelector(".bk").addEventListener("click", () => this.open(this.url({}, !0))), this.wireModal();
+    this.rendered = !0, this.unlock();
+    const e = this.getAttribute("mode") || "search", s = E(/* @__PURE__ */ new Date());
+    if (e === "button") {
+      this.root.innerHTML = `<style>${S}</style><div class="w" part="root"><button type="button" class="bk" part="button">${d(this.getAttribute("label") || this.t("book"))}</button>${this.modalHtml()}</div>`, this.root.querySelector(".bk").addEventListener("click", () => this.open(this.url({}, !0))), this.wireModal(), this.applyTheme();
       return;
     }
     this.root.innerHTML = `<style>${S}</style>
@@ -160,89 +170,92 @@ class z extends HTMLElement {
   </form>
   ${this.modalHtml()}
 </div>`;
-    const i = (a) => this.root.querySelector(a), e = i("#ci"), o = i("#co");
-    e.addEventListener("change", () => {
-      e.value && (o.min = w(e.value, 1), (!o.value || o.value <= e.value) && (o.value = w(e.value, 1)));
+    const t = (a) => this.root.querySelector(a), i = t("#ci"), o = t("#co");
+    i.addEventListener("change", () => {
+      i.value && (o.min = w(i.value, 1), (!o.value || o.value <= i.value) && (o.value = w(i.value, 1)));
     });
-    const n = i("#gb"), r = i("#gp");
+    const n = t("#gb"), r = t("#gp");
     n.textContent = this.guestsText();
-    const f = typeof r.showPopover == "function", u = () => f ? r.matches(":popover-open") : !r.hidden, b = () => {
+    const h = typeof r.showPopover == "function", y = () => h ? r.matches(":popover-open") : !r.hidden, f = () => {
       const a = n.getBoundingClientRect(), p = Math.min(320, window.innerWidth - 16);
       r.style.width = `${p}px`, r.style.left = `${Math.max(8, Math.min(a.left, window.innerWidth - p - 8))}px`;
-      const h = r.offsetHeight || 280, y = a.bottom + 6;
-      r.style.top = `${y + h > window.innerHeight - 8 && a.top - 6 - h > 8 ? a.top - 6 - h : y}px`;
-    }, m = (a, p = !0) => {
-      var h;
-      if (a !== u()) {
-        if (f) return a ? r.showPopover() : r.hidePopover();
-        r.hidden = !a, n.setAttribute("aria-expanded", String(a)), a ? (this.renderGuests(), (h = r.querySelector("button")) == null || h.focus()) : p && n.focus();
+      const g = r.offsetHeight || 280, m = a.bottom + 6;
+      r.style.top = `${m + g > window.innerHeight - 8 && a.top - 6 - g > 8 ? a.top - 6 - g : m}px`;
+    }, b = (a, p = !0) => {
+      var g;
+      if (a !== y()) {
+        if (h) return a ? r.showPopover() : r.hidePopover();
+        r.hidden = !a, n.setAttribute("aria-expanded", String(a)), a ? (this.renderGuests(), (g = r.querySelector("button")) == null || g.focus()) : p && n.focus();
       }
     };
-    f ? (r.setAttribute("popover", "auto"), r.hidden = !1, n.popoverTargetElement = r, r.addEventListener("beforetoggle", (a) => {
+    h ? (r.setAttribute("popover", "auto"), r.hidden = !1, n.popoverTargetElement = r, r.addEventListener("beforetoggle", (a) => {
       a.newState === "open" && this.renderGuests();
     }), r.addEventListener("toggle", (a) => {
-      var h;
+      var g;
       const p = a.newState === "open";
-      n.setAttribute("aria-expanded", String(p)), p ? (b(), window.addEventListener("scroll", b, { passive: !0 }), window.addEventListener("resize", b), (h = r.querySelector("button:not(:disabled)")) == null || h.focus()) : (window.removeEventListener("scroll", b), window.removeEventListener("resize", b));
-    })) : (n.addEventListener("click", () => m(r.hidden)), r.addEventListener("keydown", (a) => {
-      a.key === "Escape" && (a.stopPropagation(), m(!1));
-    }), this.closeGuests = () => m(!1, !1)), r.addEventListener("tex-done", () => {
-      m(!1), n.focus();
-    }), i("form").addEventListener("submit", (a) => {
+      n.setAttribute("aria-expanded", String(p)), p ? (f(), window.addEventListener("scroll", f, { passive: !0 }), window.addEventListener("resize", f), (g = r.querySelector("button:not(:disabled)")) == null || g.focus()) : (window.removeEventListener("scroll", f), window.removeEventListener("resize", f));
+    })) : (n.addEventListener("click", () => b(r.hidden)), r.addEventListener("keydown", (a) => {
+      a.key === "Escape" && (a.stopPropagation(), b(!1));
+    }), this.closeGuests = () => b(!1, !1)), r.addEventListener("tex-done", () => {
+      b(!1), n.focus();
+    }), t("form").addEventListener("submit", (a) => {
       a.preventDefault();
-      const p = i("#er");
-      if (p.textContent = "", !e.value || !o.value)
-        return p.textContent = this.t("errDates"), (e.value ? o : e).focus();
-      if (o.value <= e.value || e.value < s)
+      const p = t("#er");
+      if (p.textContent = "", !i.value || !o.value)
+        return p.textContent = this.t("errDates"), (i.value ? o : i).focus();
+      if (o.value <= i.value || i.value < s)
         return p.textContent = this.t("errOrder"), o.focus();
       if (this.ages.some((L) => L === null))
-        return p.textContent = this.t("errAges"), m(!0);
-      const h = this.ages.length ? `${this.adults}-${this.ages.join("_")}` : `${this.adults}`;
+        return p.textContent = this.t("errAges"), b(!0);
+      const g = this.ages.length ? `${this.adults}-${this.ages.join("_")}` : `${this.adults}`;
       this.dispatchEvent(
-        new CustomEvent("tex-booking:search", { bubbles: !0, composed: !0, detail: { checkIn: e.value, checkOut: o.value, adults: this.adults, children: this.ages.slice() } })
+        new CustomEvent("tex-booking:search", { bubbles: !0, composed: !0, detail: { checkIn: i.value, checkOut: o.value, adults: this.adults, children: this.ages.slice() } })
       );
-      const y = { checkin: e.value, checkout: o.value, rooms: h };
-      t === "redirect" ? window.location.assign(this.url(y, !1)) : this.open(this.url(y, !0));
-    }), this.wireModal();
+      const m = { checkin: i.value, checkout: o.value, rooms: g };
+      e === "redirect" ? window.location.assign(this.url(m, !1)) : this.open(this.url(m, !0));
+    }), this.wireModal(), this.applyTheme();
   }
   renderGuests() {
-    const t = this.root.querySelector("#gp"), s = (e, o, n, r, f) => `
-      <div class="row" role="group" aria-labelledby="${e}-l"><span id="${e}-l">${d(o)}</span>
-        <span class="st"><button type="button" data-k="${e}" data-d="-1" aria-label="${d(this.t("less", { what: o }))}" ${n <= r ? "disabled" : ""}>−</button>
+    const e = this.root.querySelector("#gp"), s = (i, o, n, r, h) => `
+      <div class="row" role="group" aria-labelledby="${i}-l"><span id="${i}-l">${d(o)}</span>
+        <span class="st"><button type="button" data-k="${i}" data-d="-1" aria-label="${d(this.t("less", { what: o }))}" ${n <= r ? "disabled" : ""}>−</button>
         <output aria-live="polite">${n}</output>
-        <button type="button" data-k="${e}" data-d="1" aria-label="${d(this.t("more", { what: o }))}" ${n >= f ? "disabled" : ""}>+</button></span></div>`, i = (e) => `<option value="">${d(this.t("pick"))}</option>` + Array.from({ length: 18 }, (o, n) => `<option value="${n}" ${e === n ? "selected" : ""}>${n === 0 ? d(this.t("under1")) : n}</option>`).join("");
-    t.innerHTML = s("ad", this.t("adults"), this.adults, 1, 8) + s("ch", this.t("children"), this.ages.length, 0, 6) + (this.ages.length ? `<div class="ages">${this.ages.map((e, o) => `<div class="f"><label for="age${o}">${d(this.t("age", { n: o + 1 }))}</label><select id="age${o}" data-i="${o}">${i(e)}</select></div>`).join("")}</div>` : "") + `<button type="button" class="dn">${d(this.t("done"))}</button>`, t.querySelectorAll("button[data-k]").forEach(
-      (e) => e.addEventListener("click", () => {
+        <button type="button" data-k="${i}" data-d="1" aria-label="${d(this.t("more", { what: o }))}" ${n >= h ? "disabled" : ""}>+</button></span></div>`, t = (i) => `<option value="">${d(this.t("pick"))}</option>` + Array.from({ length: 18 }, (o, n) => `<option value="${n}" ${i === n ? "selected" : ""}>${n === 0 ? d(this.t("under1")) : n}</option>`).join("");
+    e.innerHTML = s("ad", this.t("adults"), this.adults, 1, 8) + s("ch", this.t("children"), this.ages.length, 0, 6) + (this.ages.length ? `<div class="ages">${this.ages.map((i, o) => `<div class="f"><label for="age${o}">${d(this.t("age", { n: o + 1 }))}</label><select id="age${o}" data-i="${o}">${t(i)}</select></div>`).join("")}</div>` : "") + `<button type="button" class="dn">${d(this.t("done"))}</button>`, e.querySelectorAll("button[data-k]").forEach(
+      (i) => i.addEventListener("click", () => {
         var n;
-        const o = Number(e.dataset.d);
-        e.dataset.k === "ad" ? this.adults = Math.min(8, Math.max(1, this.adults + o)) : this.ages = o > 0 ? [...this.ages, null].slice(0, 6) : this.ages.slice(0, -1), this.renderGuests(), (n = this.root.querySelector(`button[data-k="${e.dataset.k}"][data-d="${o}"]`)) == null || n.focus(), this.root.querySelector("#gb").textContent = this.guestsText();
+        const o = Number(i.dataset.d);
+        i.dataset.k === "ad" ? this.adults = Math.min(8, Math.max(1, this.adults + o)) : this.ages = o > 0 ? [...this.ages, null].slice(0, 6) : this.ages.slice(0, -1), this.renderGuests(), (n = this.root.querySelector(`button[data-k="${i.dataset.k}"][data-d="${o}"]`)) == null || n.focus(), this.root.querySelector("#gb").textContent = this.guestsText();
       })
-    ), t.querySelectorAll("select").forEach(
-      (e) => e.addEventListener("change", () => {
-        this.ages[Number(e.dataset.i)] = e.value === "" ? null : Number(e.value);
+    ), e.querySelectorAll("select").forEach(
+      (i) => i.addEventListener("change", () => {
+        this.ages[Number(i.dataset.i)] = i.value === "" ? null : Number(i.value);
       })
-    ), t.querySelector(".dn").addEventListener("click", () => t.dispatchEvent(new Event("tex-done")));
+    ), e.querySelector(".dn").addEventListener("click", () => e.dispatchEvent(new Event("tex-done")));
   }
   modalHtml() {
     return `<dialog part="modal" aria-labelledby="mt"><div class="mb"><span class="mt" id="mt">${d(this.siteName || this.t("booking"))}</span><button type="button" class="x" aria-label="${d(this.t("close"))}">×</button></div><iframe title="${d(this.t("booking"))}" allow="payment"></iframe></dialog>`;
   }
   wireModal() {
-    const t = this.root.querySelector("dialog");
-    t.querySelector(".x").addEventListener("click", () => this.close()), t.addEventListener("cancel", (s) => {
+    const e = this.root.querySelector("dialog");
+    e.querySelector(".x").addEventListener("click", () => this.close()), e.addEventListener("cancel", (s) => {
       s.preventDefault(), this.close();
-    });
+    }), e.addEventListener("close", () => this.unlock());
   }
-  open(t) {
-    const s = this.root.querySelector("dialog"), i = s.querySelector("iframe");
-    i.getAttribute("src") !== t && i.setAttribute("src", t), this.opener = this.root.activeElement ?? null, this.hostOverflow = document.documentElement.style.overflow, document.documentElement.style.overflow = "hidden", s.showModal(), i.focus();
+  open(e) {
+    const s = this.root.querySelector("dialog"), t = s.querySelector("iframe");
+    t.getAttribute("src") !== e && t.setAttribute("src", e), this.opener = this.root.activeElement ?? null, this.locked || (this.hostOverflow = document.documentElement.style.overflow, document.documentElement.style.overflow = "hidden", this.locked = !0), s.showModal(), t.focus();
+  }
+  unlock() {
+    this.locked && (this.locked = !1, document.documentElement.style.overflow = this.hostOverflow);
   }
   close() {
     var s;
-    const t = this.root.querySelector("dialog");
-    t != null && t.open && (t.close(), document.documentElement.style.overflow = this.hostOverflow, (s = this.opener) == null || s.focus());
+    const e = this.root.querySelector("dialog");
+    e != null && e.open && (e.close(), this.unlock(), (s = this.opener) == null || s.focus());
   }
 }
-g(z, "observedAttributes", ["site", "api", "lang", "mode", "hotel", "currency", "market", "country", "label"]);
+u(z, "observedAttributes", ["site", "api", "lang", "mode", "hotel", "currency", "market", "country", "label"]);
 customElements.get("tex-booking-widget") || customElements.define("tex-booking-widget", z);
 export {
   z as TexBookingWidget

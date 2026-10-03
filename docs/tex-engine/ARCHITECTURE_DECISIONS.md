@@ -4240,6 +4240,9 @@ each fix has a test written first (the fail-first counts are at the end).
     checkout), else the app checkout's HEAD, read from `.git` without running git (a worktree's
     `gitdir:` file and `packed-refs` included), once per process. With neither: the repository.
   - The bundles carry their build commit (a Vite `define`), for a page that has no other address.
+    *Amended in Part 2Z (ADR-073):* only when the build is told (`TEX_BUILD_COMMIT`, e.g. an image build). The
+    committed and bench builds carry none, so they are a function of the source; the served pages name the
+    running commit (`source_meta`), so only the Vite dev server falls back to the repository.
   - Guests: "Booking engine by TEX Engine · AGPL-3.0 · Source code" on every booking-engine page
     (the site, booking, confirmation, manage, payment and error pages) and in the widget's modal
     (the framed page shows it without the hotel footer). It comes from TEX, not from the site's
@@ -9714,3 +9717,34 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
     (`policies.READ_CAP`, G-11); the navigation's rule entries and the rules' tabs carry the same requirement
     (`nav.ts` `ruleVisible`), and an area whose own page the role may not open links to its first visible
     sub-section (`areaEntry`). Hiding is a convenience only: the server's checks are unchanged.
+
+## ADR-073 Release hygiene: the committed bundles equal the source, OAuth registration off, pinned CI (audit Part 2Z)
+- *Bundles = source (NEW-4).* The committed bundles (`kamra/public/frontend`, `kamra/public/tex`) are what
+  tex-local, `bench get-app --skip-assets` and a bench without node serve. A build is a function of the source alone:
+  no commit stamp unless `TEX_BUILD_COMMIT` is set (ADR-060 amended); Tailwind reads `src/` only (a test or a script
+  never changes the admin CSS; the DOM test pages add their own folder in `tests/dom/harness.css`); the root build runs
+  `npm ci` (it never rewrites `frontend/package-lock.json`); what bench writes into the app root (`yarn.lock`, the
+  `kamra/public/node_modules` link) is ignored. Two CI checks: the frontend job's fresh build leaves `kamra/public`
+  unchanged (`git status --porcelain --untracked-files=all`, so a new hashed file counts), and a bench install leaves
+  `apps/kamra` clean (`bench update` refuses a dirty app checkout). Every frontend change commits its rebuilt bundles;
+  two pull requests that both rebuilt them are reconciled by merging the base and rebuilding, never by hand.
+- *Frappe OAuth provider.* Dynamic client registration (on by default; `register_client` is a guest endpoint) is
+  switched off at install and by p76, once, written with `get_single().save()` (`set_single_value` on a never-saved
+  Single blanks its other fields). TEX uses no Frappe OAuth client; its MCP login is its own. An administrator may
+  switch it on for a reviewed integration; p76 prints how many clients a guest registered, never a name.
+- *Pins.* Semgrep's rules (frappe/semgrep-rules, semgrep/semgrep-rules `python/lang/correctness`) and CLI are pinned,
+  fetched outside the workspace; a Monday run scans with the newest rules, so a new upstream rule turns that run red,
+  not a pull request. payments is installed at one commit and frappe-bench at one version in CI, the supply-chain
+  check, the Dockerfile and setup-local.sh (which installs that version when no bench is on PATH; `test_pins` keeps
+  them equal). CI, Linters and Supply chain also run on
+  pushes to the audit base, so a merge that combines two pull requests is checked again.
+- *A drawer starts from what it opens.* A form kept mounted while closed and reset by a passive effect after it opens
+  shows the last session's values for a frame and loses what is typed then (the channels.spec "already mapped"
+  flake). Such a form is mounted per opening (keyed) or reset in a layout effect, before its first frame is painted.
+  Part 2Z fixed the components HANDOFF_RELEASE §5 listed. About thirty more dialogs follow the same pattern (the
+  payment transaction actions, the reservation action dialogs, the payment-link dialogs, the loyalty, communication
+  and duplicates dialogs, the contract and version dialogs, the user invite dialog): one frame of the last session's
+  values, LOW. The proposed fix is one change in the design system's Dialog and Drawer (show the content one effect
+  pass after `open`, so a parent's reset lands before the first visible frame), not thirty.
+- The Frappe v16.36.1 upgrade (it closes 32 of the reviewed advisories, none of PR #11's PyJWT/oauthlib ones) is its
+  own pull request after 2Z (owner, 2026-10-03). ENGINE_VERSION, prices and schema unchanged.

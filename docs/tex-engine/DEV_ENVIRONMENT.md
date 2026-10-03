@@ -2,7 +2,7 @@
 
 ## Versions (match upstream CI)
 Frappe **v16.25.0**, Python **3.14**, Node **24**, MariaDB 10.11+/11.x, Redis, apps
-`payments` (develop) + `kamra` (this repo).
+`payments` at commit `86fefa9` (CI's `PAYMENTS_REF`) + `kamra` (this repo).
 
 ## Cloud-session bench (reproducible recipe)
 ```bash
@@ -18,7 +18,8 @@ bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.25.0
   --python /opt/py314/bin/python3.14 frappe-bench
 cd frappe-bench
 bench set-config -g db_host 127.0.0.1 (+ redis_cache/queue/socketio)
-git clone --depth 1 -b develop https://github.com/frappe/payments apps/payments
+git init -q apps/payments && git -C apps/payments fetch -q --depth 1 https://github.com/frappe/payments \
+  86fefa9faf8ad825fe6f08c4753acfe44817900b && git -C apps/payments checkout -q FETCH_HEAD   # CI's PAYMENTS_REF (test_pins)
 ln -s /home/user/TexEngine apps/kamra
 uv pip install --python env/bin/python -e apps/payments -e apps/kamra
 bench setup requirements --dev kamra     # freezegun: the scheduler smoke test (ADR-064)
@@ -75,8 +76,9 @@ Repeated runs book real inventory at the demo hotels; free it between series of 
 (cancels future test-run stays, keeps demo-seed bookings; refuses on production sites).
 CI starts from a fresh database each run.
 
-Specs: `shell`, `contract-admin`, `booking` (desktop + 390 px), `crs` (call centre, reservation
-change) and `critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
+Specs: the 52 `*.spec.ts` files in `frontend/e2e/` (CI runs them all), among them `shell`,
+`contract-admin`, `booking` (desktop + 390 px), `crs` (call centre, reservation change) and
+`critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
 (contracts, booking, reservations) and `e2e/helpers.ts`. The dev bench's System Settings
 time zone is Europe/Istanbul (the demo hotels are in Türkiye).
 

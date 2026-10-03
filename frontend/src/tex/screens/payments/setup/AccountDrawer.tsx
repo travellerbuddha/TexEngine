@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { KeyRound, ShieldAlert } from "lucide-react"
 import { useTexMutation } from "../../../lib/api"
 import { useTexT } from "../../../i18n"
@@ -65,19 +65,12 @@ export function AccountDrawer({
 }) {
   const { t } = useTexT()
   const toast = useToast()
+  // mounted per opening (Setup): the form starts from the account it opens (2Z)
   const [form, setForm] = useState<Form>(() => formOf(account))
   const save = useTexMutation<{ property: string; data: Record<string, unknown> }, { name: string }>("payments", "save_account")
   const close = useEvent(() => {
     if (!save.pending) onClose()
   })
-  useEffect(() => {
-    if (open) {
-      setForm(formOf(account))
-      save.clearError()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, account])
-
   const spec = FIELDS[form.provider]
   const gateway = GATEWAYS.includes(form.provider)
   const mockProd = form.provider === "Mock" && form.environment === "Production"

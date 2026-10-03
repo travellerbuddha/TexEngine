@@ -113,6 +113,8 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | SQL injection | Parameterised queries only (`%(name)s`); no string-built SQL with user input |
 | Brute force / scraping | `frappe.rate_limiter.rate_limit` on public search/quote/book/token endpoints |
 | Secret leakage | Frappe `Password` fields (encrypted at rest); never returned by APIs; never logged |
+| A guest-registered OAuth client (consent phishing) | Frappe's OAuth provider registers no client for a guest on a TEX site: dynamic client registration is off at install and by p76 (ADR-073); TEX uses no Frappe OAuth client; an administrator may switch it on for a reviewed integration |
+| A new upstream lint rule or an unpinned dependency changing CI overnight | Semgrep's rules and CLI, payments and frappe-bench pinned (`test_pins`); a Monday drift run scans with the newest rules (ADR-073) |
 | Audit tampering | `TEX Audit Event` has no write/delete permission for any role; inserted only by server code |
 | Embedding abuse (clickjacking) | Booking iframe allowed only for `allowed_embed_origins` via CSP `frame-ancestors` |
 | Uploads | Checked on the server (ADR-046 and review): TEX branding images by their bytes (PNG/JPEG/GIF/WebP, every frame decoded, 2 MB) through `admin.upload_site_image`; the public folder serves only an allow-list (images, video, audio, PDF, office documents, fonts, zip) judged on the name File stores, on every path, before anything is written (File controller extension); everything else is private |

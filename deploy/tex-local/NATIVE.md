@@ -39,7 +39,7 @@ seconds.
 | Disk / RAM | ~3 GB / 4 GB free | |
 
 The script also needs the `bench` command (`frappe-bench`). If it is missing, the script
-offers to install it with `uv tool install frappe-bench`. It does the same for Python 3.14
+offers to install it with `uv tool install frappe-bench==5.31.0` (the bench CLI CI pins). It does the same for Python 3.14
 with `uv python install 3.14`. Both installs are for your user only, and the script asks
 before each one unless you pass `--yes`. The script never runs `sudo`. When something is
 missing, it prints the install command for you to run.
@@ -226,8 +226,9 @@ deploy/tex-local/setup-local.sh --redis redis://127.0.0.1:6379/2        # use yo
     again. See "Time zone" below.
 12. **Builds assets**: `bench build --apps frappe,payments`. The TEX staff app and booking
     engine bundles are already committed in `kamra/public`, so there is no npm build for
-    TEX. Never run a plain `bench build` here. It would run kamra's npm build and rewrite
-    those committed bundles.
+    TEX. A plain `bench build` would run kamra's npm build too; it rewrites nothing while the
+    committed bundles are current (CI checks they equal a fresh build, ADR-073), it only takes
+    longer.
 
 At the end it prints the time each step took, the URLs, the logins and how to start the bench.
 

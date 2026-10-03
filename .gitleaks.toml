@@ -18,7 +18,7 @@ paths = [
 
 [[allowlists]]
 description = """kamra/public/: the built bundles of frontend/ (minified, with the libraries bundled into them;
-regenerated in Part 2Z), the logos, and one hand-written Desk script (js/tex_source.js). Minified code trips the
+kept equal to a fresh build of the source by CI, ADR-073), the logos, and one hand-written Desk script (js/tex_source.js). Minified code trips the
 generic rule; the bundles' sources are scanned. Only the generic rule is silenced here: a token of a known shape
 is still reported, in the hand-written script too."""
 targetRules = ["generic-api-key"]

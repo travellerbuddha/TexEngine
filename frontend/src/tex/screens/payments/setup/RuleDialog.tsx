@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
@@ -54,19 +54,12 @@ export function RuleDialog({
   const { t } = useTexT()
   const toast = useToast()
   const { boot } = useSession()
+  // mounted per opening (Setup): the form starts from the rule it opens (2Z)
   const [form, setForm] = useState<Form>(() => formOf(rule))
   const save = useTexMutation<{ property: string; data: Record<string, unknown> }, { name: string }>("payments", "save_rule")
   const close = useEvent(() => {
     if (!save.pending) onClose()
   })
-  useEffect(() => {
-    if (open) {
-      setForm(formOf(rule))
-      save.clearError()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, rule])
-
   const usable = accounts.filter((a) => SERVES[form.method].includes(a.provider))
   const needsAccount = form.method !== "Pay at Hotel"
   const priorityOk = /^-?\d{1,4}$/.test(form.priority.trim())

@@ -272,3 +272,18 @@ def after_install() -> None:
 	ensure_system_segments()                     # the CRM presets (G-23)
 	frappe.db.set_single_value("TEX Settings", "strict_tenancy", 1)
 	frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 0)
+	close_oauth_registration()
+
+
+def close_oauth_registration() -> None:
+	"""Frappe's OAuth provider registers no client for a guest on a TEX site (ADR-073): its dynamic client
+	registration is on by default and ``register_client`` is a guest endpoint, while TEX uses no Frappe OAuth
+	client. An administrator may switch it on again for a reviewed integration. Written with
+	``get_single().save()``: ``set_single_value`` on a Single never saved stores that one field, and its other
+	fields (both metadata switches, the resource name) would then read as blank."""
+	if not frappe.db.exists("DocType", "OAuth Settings"):
+		return
+	settings = frappe.get_single("OAuth Settings")
+	if settings.enable_dynamic_client_registration:
+		settings.enable_dynamic_client_registration = 0
+		settings.save(ignore_permissions=True)

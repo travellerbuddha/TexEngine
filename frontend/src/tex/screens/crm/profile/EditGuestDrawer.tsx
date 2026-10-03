@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { TEX_LANGS, useTexT } from "../../../i18n"
@@ -59,19 +59,12 @@ export function EditGuestDrawer({ guest, open, onClose, onSaved }: { guest: Gues
   const { t } = useTexT()
   const toast = useToast()
   const { boot } = useSession()
+  // mounted per opening (GuestProfile): the form starts from the guest as the drawer opens (2Z)
   const [form, setForm] = useState<Editable>(() => fromGuest(guest))
   const save = useTexMutation<{ name: string; data: Record<string, unknown> }, { changed: string[] }>("crm", "update_guest")
   const close = useEvent(() => {
     if (!save.pending) onClose()
   })
-
-  useEffect(() => {
-    if (open) {
-      setForm(fromGuest(guest))
-      save.clearError()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, guest])
 
   const initial = useMemo(() => fromGuest(guest), [guest])
   const diff = useMemo(() => {

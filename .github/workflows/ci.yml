@@ -2,9 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    # the audit base too: a merge that combines two pull requests is checked again (2Z)
+    branches: [main, develop, claude/inspiring-ptolemy-i6wdu2]
   pull_request:
   workflow_dispatch:        # run it on any branch from the Actions tab (a full run takes ~30-40 min)
+
+env:
+  # payments' develop moves (it already declares Frappe v17): the commit the Dockerfile and setup-local.sh
+  # pin too (test_pins keeps them equal)
+  PAYMENTS_REF: 86fefa9faf8ad825fe6f08c4753acfe44817900b
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -38,6 +44,18 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      - name: Committed bundles equal this build (NEW-4, ADR-073)
+        # kamra/public/frontend and kamra/public/tex are what tex-local, `bench get-app --skip-assets` installs and
+        # a bench without node serve: a source change commits its rebuilt bundles (cd frontend && npm ci && npm run
+        # build). The build carries no commit stamp here (TEX_BUILD_COMMIT unset), so it is a function of the source.
+        # `git status`, not `git diff`: a new hashed asset is an untracked file.
+        run: |
+          changes=$(git status --porcelain --untracked-files=all -- kamra/public)
+          if [ -n "$changes" ]; then
+            echo "::error::kamra/public differs from a fresh build: run 'cd frontend && npm ci && npm run build' and commit kamra/public"
+            echo "$changes" | head -60
+            exit 1
+          fi
       - name: Frontend pure unit tests (node --test)
         run: npm run test:unit
         working-directory: frontend
@@ -111,7 +129,7 @@ jobs:
 
       - name: Init bench
         run: |
-          pip install frappe-bench
+          pip install frappe-bench==5.31.0
           # pinned to the stable release tag: the version-16 branch tip
           # currently ships an UnboundLocalError in frappe/locale.py
           bench init --skip-redis-config-generation --skip-assets \
@@ -125,7 +143,14 @@ jobs:
       - name: Install app & site
         run: |
           cd frappe-bench
-          bench get-app payments
+          bench get-app --branch develop payments
+          if [ "$(git -C apps/payments rev-parse HEAD)" != "$PAYMENTS_REF" ]; then
+            git -C apps/payments fetch --quiet --depth 1 https://github.com/frappe/payments "$PAYMENTS_REF"
+            git -C apps/payments checkout --quiet --detach FETCH_HEAD
+            env/bin/pip install --quiet -e apps/payments
+            bench build --app payments
+          fi
+          echo "payments at $(git -C apps/payments rev-parse HEAD)"
           bench get-app kamra "${GITHUB_WORKSPACE}/apps/kamra"
           # kamra's dev dependencies (freezegun: the scheduler smoke test freezes the clock, ADR-064)
           bench setup requirements --dev kamra
@@ -134,6 +159,17 @@ jobs:
             --db-root-password root --admin-password admin
           bench --site test.localhost install-app kamra
           bench --site test.localhost set-config developer_mode 1
+
+      - name: A bench install leaves the app checkout clean (NEW-4, ADR-073)
+        # bench get-app ran kamra's root build (yarn build) and linked its assets; `bench update` refuses an app
+        # checkout with local changes, so the committed bundles must equal the build bench makes
+        run: |
+          changes=$(git -C frappe-bench/apps/kamra status --porcelain --untracked-files=all)
+          if [ -n "$changes" ]; then
+            echo "::error::bench left changes in apps/kamra (rebuild and commit kamra/public, or ignore what bench writes)"
+            echo "$changes" | head -60
+            exit 1
+          fi
 
       - name: Run eval harness
         run: |
@@ -198,6 +234,8 @@ jobs:
           assert os.path.exists(frappe.get_app_path("kamra","www","kamra.py")), "SPA boot page missing"
           rules = str(frappe.get_hooks("website_route_rules"))
           assert "/kamra/<path:app_path>" in rules, "/kamra route rule missing"
+          # Frappe's OAuth provider registers no client for a guest on a TEX site (ADR-073)
+          assert not frappe.get_single("OAuth Settings").enable_dynamic_client_registration, "OAuth dynamic client registration is on"
           print("FRESH-INSTALL CHECKS PASSED")
           PY
           printf 'exec(open("/tmp/fresh_check.py").read())\nexit\n' \
@@ -224,7 +262,8 @@ jobs:
           echo "::add-mask::$TEX_E2E_2FA_SECRET"
           export TEX_E2E_2FA_USER TEX_E2E_2FA_SECRET
           echo "127.0.0.1 test.localhost" | sudo tee -a /etc/hosts
-          # --skip-assets: link the app's committed bundles where the web server looks
+          # bench get-app built kamra from this source and linked its assets (kamra/public, which the step "A bench
+          # install leaves the app checkout clean" checks equal the committed bundles); link them if it did not
           mkdir -p sites/assets
           [ -e sites/assets/kamra ] || ln -s "$(pwd)/apps/kamra/kamra/public" sites/assets/kamra
           # a paid guest change and a refund are made by a job (queue short): a worker runs them.

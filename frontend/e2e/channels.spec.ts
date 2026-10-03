@@ -77,7 +77,17 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
 
   try {
     await test.step("Connections: a sandbox channel connection with a secret", async () => {
-      await page.getByRole("button", { name: "New connection" }).first().click()
+      // a new connection's drawer shows its starting form in its first frame (the hotel already chosen): a reset
+      // after it would drop what was typed first (2Z)
+      await expect(page.getByRole("button", { name: "New connection" }).first()).toBeEnabled()
+      const firstFrame = await page.evaluate(async () => {
+        const add = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "New connection")
+        add?.click()
+        await Promise.resolve() // React commits the click's update in a microtask
+        const dialog = document.querySelector('[role="dialog"]')
+        return { name: dialog?.querySelector<HTMLInputElement>("input[data-autofocus]")?.value ?? null, hotel: dialog?.querySelector("select")?.value ?? null }
+      })
+      expect(firstFrame).toEqual({ name: "", hotel: expect.stringMatching(/.+/) })
       const drawer = page.getByRole("dialog", { name: "New connection" })
       await expect(drawer).toBeVisible()
       await byLabel(drawer, "Name").fill(label)
@@ -121,8 +131,17 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
       await expect(row.getByText("Enabled", { exact: true })).toBeVisible()
       // Delete is offered only once a mapping is switched off
       await expect(row.getByRole("button", { name: `Delete mapping ${codes.room} / ${codes.rate}` })).toHaveCount(0)
-      // the same code pair cannot be mapped twice on one connection (server-side check)
-      await panel(page).getByRole("button", { name: "Add mapping" }).first().click()
+      // the same code pair cannot be mapped twice on one connection (server-side check). A new mapping starts
+      // blank in its first frame: nothing typed into it is lost to a late reset (2Z: the drawer showed the last
+      // mapping's codes for a frame, then wiped what was typed; CI run 36315774106)
+      await expect(panel(page).getByRole("button", { name: "Add mapping" }).first()).toBeEnabled()
+      const firstFrame = await page.evaluate(async () => {
+        const add = [...document.querySelectorAll<HTMLButtonElement>('[role="tabpanel"] button')].find((b) => b.textContent?.trim() === "Add mapping")
+        add?.click()
+        await Promise.resolve() // React commits the click's update in a microtask
+        return document.querySelector<HTMLInputElement>('[role="dialog"] input[data-autofocus]')?.value ?? null
+      })
+      expect(firstFrame).toBe("")
       const again = page.getByRole("dialog", { name: "Add mapping" })
       await fillMapping(again, codes)
       await again.getByRole("button", { name: "Save", exact: true }).click()
