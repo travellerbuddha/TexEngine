@@ -89,6 +89,7 @@ export function MappingDrawer({
   const current = mapping && mapping !== "new" ? mapping : null
   const save = useTexMutation<{ data: MappingInput }, { name: string }>("distribution", "save_mapping")
   const defaults = newDefaults(lookups, boot.settings.default_market)
+  // mounted per opening (MappingsTab): the form starts from the mapping it opens
   const [form, setForm] = useState<Form>(() => toForm(current, lookups, defaults))
   const [touched, setTouched] = useState(false)
   const errorRef = useRef<HTMLDivElement>(null)
@@ -96,14 +97,6 @@ export function MappingDrawer({
   useEffect(() => {
     if (save.error) errorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }, [save.error])
-
-  useEffect(() => {
-    if (!mapping) return
-    setForm(toForm(current, lookups, defaults))
-    setTouched(false)
-    save.clearError()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapping])
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }))
 

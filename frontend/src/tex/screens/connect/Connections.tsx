@@ -184,19 +184,24 @@ export default function Connections() {
         </Card>
         <FxCard />
       </div>
-      <ConnectionDrawer
-        name={editing}
-        adapters={adapters.data ?? []}
-        onClose={() => setEditing(null)}
-        onSaved={(n) => {
-          list.reload()
-          if (n) setEditing(n)
-        }}
-        onDeleted={() => {
-          setEditing(null)
-          list.reload()
-        }}
-      />
+      {/* one drawer per opening (keyed): its form starts from the record it opens, never from the last one's for a
+          frame, so nothing typed at once is lost to a late reset (2Z) */}
+      {editing && (
+        <ConnectionDrawer
+          key={editing}
+          name={editing}
+          adapters={adapters.data ?? []}
+          onClose={() => setEditing(null)}
+          onSaved={(n) => {
+            list.reload()
+            if (n) setEditing(n)
+          }}
+          onDeleted={() => {
+            setEditing(null)
+            list.reload()
+          }}
+        />
+      )}
     </ConnectFrame>
   )
 }
@@ -313,24 +318,15 @@ function ConnectionDrawer({
   const isNew = name === "new"
   const doc = useTexQuery<ConnDoc>("policies", "get_record", { doctype: DOCTYPE, name }, [name], !!name && !isNew)
   const save = useTexMutation<{ doctype: string; data: Record<string, unknown> }, ConnDoc>("policies", "save_record")
-  const [form, setForm] = useState<Form>(EMPTY)
-  const [initial, setInitial] = useState<Form>(EMPTY)
+  // a new connection starts at the current hotel; a saved one is read first (its fields wait for it)
+  const start = (): Form => (isNew ? { ...EMPTY, property: property?.name ?? "" } : EMPTY)
+  const [form, setForm] = useState<Form>(start)
+  const [initial, setInitial] = useState<Form>(start)
   const [touched, setTouched] = useState(false)
   const [test, setTest] = useState<TestResult | null>(null)
   const [testing, setTesting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  useEffect(() => {
-    setTouched(false)
-    setTest(null)
-    save.clearError()
-    if (isNew) {
-      const f = { ...EMPTY, property: property?.name ?? "" }
-      setForm(f)
-      setInitial(f)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name])
   useEffect(() => {
     if (doc.data && !isNew) {
       const f = toForm(doc.data)

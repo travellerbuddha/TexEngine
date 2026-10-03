@@ -32,6 +32,12 @@ export function stayDates(offsetDays: number, nights: number) {
 export function trackErrors(page: Page) {
   const errors: string[] = []
   page.on("pageerror", (e) => errors.push(e.message))
+  // diagnostics only (2Z): a request the browser could not complete names its transport error in the test's
+  // output (net::ERR_EMPTY_RESPONSE …); a navigation's cancelled fetches (ERR_ABORTED) are expected
+  page.on("requestfailed", (r) => {
+    const failure = r.failure()?.errorText
+    if (failure && !failure.includes("ERR_ABORTED")) console.log(`[requestfailed] ${failure} ${r.method()} ${r.url()}`)
+  })
   return () => expect(errors, errors.join("\n")).toEqual([])
 }
 
