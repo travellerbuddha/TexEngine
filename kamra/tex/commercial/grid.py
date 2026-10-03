@@ -367,6 +367,15 @@ def _write_plan(v, steps, taken: set[str], alias: dict[str, str]) -> tuple[list[
 def _plan_or_throw(terms, start, end, weekdays, room_types, op, value):
 	try:
 		return ratesplit.plan(terms, getdate(start), getdate(end), weekdays, room_types, Op(op), value)
+	except Unsellable as e:
+		# the room's price in a period it changes cannot be read (LO-43): it has none there, or its
+		# derivation is broken; said by name, not as the engine's exception
+		if e.code == "NO_ROOM_PRICE":
+			room = e.params.get("room_type")
+			frappe.throw(_("{0} has no price in period {1}; add one first.").format(
+				frappe.db.get_value("Room Type", room, "room_type_name") or room, e.params.get("period")),
+				title=_("Rate change refused"))
+		frappe.throw(str(e), title=_("Rate change refused"))
 	except ratesplit.RateSplitError as e:
 		if e.code == "NO_PERIOD":
 			frappe.throw(_("No stay period covers {0}; add one first.").format(e.ref["night"]))

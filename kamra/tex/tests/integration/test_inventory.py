@@ -636,6 +636,23 @@ class TestGridRates(InventoryCase):
 		row = next(r for r in out["rows"] if r["room_type"] == (room_type or self.std))
 		return {c["date"]: c for c in row["cells"]}
 
+	def test_a_room_without_a_price_in_the_period_is_refused_by_name(self):
+		"""LO-43: a rate edit on a room that has no price of its own in a period (and derives none) raised the
+		engine's Unsellable (NO_ROOM_PRICE) unexplained, out of the grid call. It is refused by name, and the
+		staff are told to add a price for the period first."""
+		from kamra.tex.commercial import contracts
+
+		v = frappe.get_doc("TEX Contract Version", contracts.new_draft(self.contract))
+		for r in list(v.period_rates):
+			if r.room_type == self.std and r.period_code == "HIGH":
+				v.remove(r)
+		v.save(ignore_permissions=True)
+		with self.assertRaises(frappe.ValidationError) as e:
+			self.edit("ABSOLUTE", "150", start=fx.d(7, 1), end=fx.d(7, 31), weekdays=None)
+		name = frappe.db.get_value("Room Type", self.std, "room_type_name")
+		self.assertIn(f"{name} has no price in period HIGH", str(e.exception))
+		self.assertIn("add one first", str(e.exception))
+
 	def test_two_weekend_edits_publish(self):
 		first = self.edit("ABSOLUTE", "150")
 		made = self.periods()
