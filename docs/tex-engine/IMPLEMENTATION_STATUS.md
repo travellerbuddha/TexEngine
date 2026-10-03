@@ -1815,7 +1815,10 @@ one PR. Each card was verified in code first.
 - LO-45 **COMPLETE**: `minusAmount` and `isPositiveAmount` take any number of decimals (VND gave ".1000" and an
   invalid pattern; KWD's third digit was refused); the bank-transfer, refund, allocate, transfer, manual-payment and
   payment-link dialogs pass their currency's `minorUnits` to the input and the checks; the pure helpers are
-  `payments/amounts.ts` (`lib.ts` re-exports them) · node `payment-amounts` (EUR, VND, KWD).
+  `payments/amounts.ts` (`lib.ts` re-exports them); review: both apps' minor-unit tables say what the server's
+  `MINOR_UNITS` says (CLP and ISK were 0 on the screens, 2 on the server, so a dialog refused the server's own
+  amount; node `minor-units` reads `money.py`), and with no decimals the input takes no point (`ui/decimal.ts`)
+  · node `payment-amounts` (EUR, VND, KWD), `minor-units`, `decimal-input`.
 - LO-42(a) **COMPLETE** (was not re-verified; no written review text exists, each nit was verified in code): the
   markup priority help says the higher priority wins within one scope, stacking rules apply lowest first and two
   replacing rules of one scope and priority whose stays meet cannot both be live (G-53); the promotion kind MEMBER
@@ -1828,8 +1831,9 @@ one PR. Each card was verified in code first.
 - LO-46 **COMPLETE** (was not re-verified; verified STILL OPEN, the docstring listed the gaps): the nullable-date
   guard reads the third and fourth positional filters (Frappe's `execute(fields, filters, or_filters)`, swapped when
   the second is filters-shaped), scopes a query-builder `isnull()`/`notnull()` exemption to its own statement, and
-  lists (UNREADABLE) a call with a run-time doctype whose filters compare a nullable date with no `is` · unit
-  `test_nullable_date_filters` (a probe test, red before; the repository has no such call, the guard stays green).
+  lists (UNREADABLE) a call with a run-time doctype whose filters compare a nullable date with no `is` (review: a
+  call whose doctype is in a `**` mapping is named `api(**)`, not a crash) · unit `test_nullable_date_filters` (two
+  probe tests, red before; the repository has no such call, the guard stays green).
 - LO-36 **COMPLETE**: the concurrency cleanup deletes each child table's rows by parent before the versions and the
   property's records (`_delete_children`); before, seven child tables of a version stayed on the site · integration
   `test_concurrency.TestCleanupLeavesNoOrphans` (red with exactly those seven).
@@ -1866,5 +1870,7 @@ one PR. Each card was verified in code first.
   `test_inventory.TestGridRates`.
 - **Not done:** bundles not rebuilt (2Z); the nullable-date guard still lists, not reads, filters it cannot build
   statically (from a parameter, a helper or a comprehension), as before; a payments dialog in a currency TEX has no
-  minor units for takes two decimals (`minorUnits`); the promotion kind stays a label, no member-only price exists
-  (G-57).
+  minor units for takes two decimals (`minorUnits`), and CLP and ISK are 2 on the server (ISO 4217 says 0: a
+  money-engine change, not made); the occupancy ladder's sample parties walk every band combination of a party size
+  that does not fit (inside a memo; about 20 ms for five bands, 400 ms for ten); the promotion kind stays a label,
+  no member-only price exists (G-57).
