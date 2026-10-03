@@ -9945,9 +9945,11 @@ this batch, a session kept **on the device for 30 days** and a web join with **e
 link**; after review round 1 (B1), **30 days on a hotel's own host, the tab only on the platform's shared host**.
 - *Asking for a link* (`public.member_link` → `members.request_link`). A visitor gives an e-mail, to sign in, or an
   e-mail, a first and a last name and an explicit tick ("I want to become a member of …"), to join
-  (`MEMBER_CONSENT_REQUIRED` without it). The e-mail must be one plain address, taken in lower case (review round 1:
-  Frappe's own check accepts a display name, a list or an invisible character, and each would key the limit, the
-  profile and the mail differently). Only what the visitor typed (`GUEST_EMAIL_INVALID`, the names) and a site
+  (`MEMBER_CONSENT_REQUIRED` without it). The e-mail must be one plain address in ASCII, the whole string Frappe's own
+  address pattern, taken in lower case (review round 1: Frappe's check accepts a display name, a list or an invisible
+  character, and each would key the limit, the profile and the mail differently; round 2: an apostrophe is an
+  address's, and an accented domain is refused, as the database compares accents away and would find an ASCII
+  member's profile for it). Only what the visitor typed (`GUEST_EMAIL_INVALID`, the names) and a site
   without an enabled program (`MEMBERSHIP_UNAVAILABLE`) are refused; otherwise the answer is the same `{"ok": true}`
   whatever the e-mail, so the site never says whether an address has a profile or a membership. An address with no
   profile asked to sign in gets a mail that says so and links to joining (`?join=1`), with no token. Limits: 10
@@ -9962,7 +9964,8 @@ link**; after review round 1 (B1), **30 days on a hotel's own host, the tab only
   (`public.member_verify` → `members.verify`) reads and deletes that entry in one step (one Redis transaction, `MULTI`
   `GET` `DEL` `EXEC`, so any Redis version serves): two opens of one link never both succeed, and a link of another site, unknown, used or expired is
   `MEMBER_LINK_INVALID`. The link is taken once, outside the part a deadlock runs again; a failure that did not
-  settle it (BUSY, a database error) puts it back until it expires (review round 1). A spent link opened again in a
+  settle it (BUSY, a database error) puts it back until it expires (review round 1). A request that fails after the
+  link was opened but before Frappe commits loses it (rare; the guest asks for another). A spent link opened again in a
   tab already signed in goes to the search.
 - *Join by the link.* The link proves the e-mail is the visitor's, so nobody is joined with someone else's address: a
   join link joins the profile with that e-mail (`booking._find_profile`, the identity a booking uses, in the site's
@@ -9981,7 +9984,9 @@ link**; after review round 1 (B1), **30 days on a hotel's own host, the tab only
   (`tex.member.<site>`) for 30 days; on the platform's shared host, where every hotel's pages, and their tag
   containers, run on one origin, in `sessionStorage` only, and a site's page removes every other site's member data
   before anything else runs. The app forgets it when it ends, when the server answers `MEMBER_SESSION_ENDED`, or on
-  "Sign out" (`public.member_sign_out` revokes it); a new sign-in revokes the session the device held before. A
+  "Sign out" (`public.member_sign_out` revokes it); a new sign-in revokes the session the device (on the shared host:
+  the tab) held before. The search a link was asked from is kept where the session is (on the shared host a link
+  opened in a new tab starts at the site's search). A
   session counts only on its own site, before its end, unrevoked, and for a profile that still exists and is not
   erased (`members.session_guest`). Erasure deletes the guest's sessions (`erase_traces`, `sessions_ended`); a merge
   moves them to the profile that stays, as every link to a guest; sessions ended more than 30 days ago are purged

@@ -492,3 +492,22 @@ class TestReviewRound1(WebMemberCase):
 		frappe.db.set_value("TEX Member Session", {"token_hash": members.digest(session)}, "revoked_at",
 		                    add_days(now_datetime(), -(members.PURGE_AFTER_DAYS + 1)))
 		self.assertEqual(members.purge_sessions(), 1)
+
+
+class TestReviewRound2(WebMemberCase):
+	"""2N-2 review round 2 (ADR-078): the address is Frappe's own pattern, in ASCII."""
+
+	def test_r2_an_apostrophe_is_part_of_an_address(self):
+		"""o'brien@example.ie books, so it signs in and joins too (round 1's deny-list refused it)."""
+		email = "o'brien.r2@example.ie"
+		self.assertEqual(self.ask(email, "join", first_name="Sean", last_name="O'Brien", accepted=1), {"ok": True})
+		self.assertEqual(self.mails[-1][0], email)
+		self.verify(self.token())
+		self.assertTrue(frappe.db.exists("Guest", {"email": email}))
+
+	def test_r2_an_address_outside_ascii_is_refused(self):
+		"""The database compares accents away (utf8mb4_unicode_ci): an accented domain would find an ASCII member's
+		profile and mail its sign-in link to the look-alike address."""
+		for raw in ("x@mail.exämple.de", "anna@mail.exámple.de", "ſam@example.com", "x@gmail.cöm"):
+			self.assertEqual(self.refused(public.member_link, site=SLUG, email=raw), "GUEST_EMAIL_INVALID", repr(raw))
+		self.assertEqual(self.mails, [])

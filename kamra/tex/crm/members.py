@@ -24,13 +24,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import secrets
-import unicodedata
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, get_datetime, now_datetime, validate_email_address
+from frappe.utils import EMAIL_MATCH_PATTERN, add_days, add_to_date, get_datetime, now_datetime
 
 from kamra.tex.crm import loyalty
 from kamra.tex.services.refusals import refusal
@@ -45,8 +43,6 @@ LINK_KEY = "tex:member_link:"                # + the token's hash
 COUNT_KEY = "tex:member_links:"              # + site and the address's hash
 REQUEST_KEY = "tex:member_request:"          # + site and the idempotency key's hash
 REQUEST_SECONDS = 600
-# one plain address: no display name, list, quote, bracket or space (Frappe's own check takes "Mia <mia@x.com>")
-_ADDRESS = re.compile(r"[^\s@<>,;:\"'()\[\]\\]+@[^\s@<>,;:\"'()\[\]\\]+\.[^\s@<>,;:\"'()\[\]\\]{2,}")
 # a refusal that settles a link: anything else (a deadlock answered BUSY, a database error) leaves it to be used
 FINAL = frozenset({"NOT_A_MEMBER", "MEMBER_LINK_INVALID"})
 
@@ -78,11 +74,13 @@ def site_enterprise(site) -> str | None:
 
 
 def _email(raw) -> str:
-	"""One plain address, in lower case: the limit, the profile and the mail are all keyed by it (review round 1:
-	Frappe's own check takes a display name, a list or an invisible character, each of which would differ)."""
+	"""One plain address in ASCII, in lower case: the limit, the profile and the mail are all keyed by it. The whole
+	string must be Frappe's own address pattern (review round 1: its check takes a display name, a list or an invisible
+	character, each of which would differ; round 2: an apostrophe is an address's, o'brien@…). ASCII only, as the
+	database compares accents away (utf8mb4_unicode_ci): an accented domain would find an ASCII member's profile and
+	have its link mailed to the look-alike address (round 2)."""
 	email = str(raw or "").strip().lower()
-	if (len(email) > 140 or not _ADDRESS.fullmatch(email) or validate_email_address(email) != email
-			or any(unicodedata.category(c)[0] in "CZ" for c in email)):
+	if len(email) > 140 or not email.isascii() or not EMAIL_MATCH_PATTERN.fullmatch(email):
 		frappe.throw(_("Please enter a valid e-mail address."), refusal("GUEST_EMAIL_INVALID"))
 	return email
 

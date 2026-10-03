@@ -2170,13 +2170,23 @@ booked by a non-member was refused with `SEARCH_AGAIN`, the booking app had no m
   `MEMBER_LINK_INVALID`, the display name accepted, `'evil.example'` in the mail, `'zz-<b></b>'` stored, the
   counter's TTL `-1`, the disabled hotel listed, the group join's property `None`, the signed-in join joined at
   once); node unit: no export `isolateMemberData`.
+- Review round 2 **COMPLETE** (no BLOCKER; every round-1 finding verified fixed or documented; 2 SHOULD, 6 NITs):
+  the address is Frappe's own pattern over the whole string, in ASCII (an apostrophe, o'brien@…, was refused; an
+  accented look-alike domain matched an ASCII member's profile, as the database compares accents away); on the
+  shared host the search a link was asked from is kept in the tab, as the session; the header offers "Sign out"
+  when the status could not be read. Tests: `test_member_web.TestReviewRound2` (2), node unit (+1:
+  `slugFromLocation`, `isMemberPath`). Red: o'brien@… `GUEST_EMAIL_INVALID`; `x@mail.exämple.de` accepted.
 - **Not done:**
   - staff cannot see or end a guest's web sessions from the CRM (an erasure deletes them; LOW);
+  - a signed-in guest's join for a profile whose stored e-mail is not one plain ASCII address answers as sent and
+    sends nothing (LOW: staff-entered addresses);
+  - a request that fails after the link was opened but before the commit loses the link (rare; LOW);
   - a link not yet opened when its address is erased can still be opened within its 30 minutes (LOW);
   - a web join makes a membership staff ended active again; whether one ended for a reason such as abuse should
     stay ended is an owner question (ADR-078);
-  - on the platform's shared host a member stays signed in only while the tab is open (the owner's choice), and a
-    sign-in made in another tab there is not seen (tab storage);
+  - on the platform's shared host a member stays signed in only while the tab is open (the owner's choice), a
+    sign-in made in another tab there is not seen, and a link opened in a new tab starts at the site's search (tab
+    storage);
   - in the widget's frame a guest signs in on the hotel's site in a new tab (a session made in the frame would stay
     there); the header's member control is hidden in the frame;
   - the teaser prices such a search twice (bounded by the search rate limit);

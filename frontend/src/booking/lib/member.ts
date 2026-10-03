@@ -33,8 +33,7 @@ export function isolateMemberData(current: string | null) {
     const rest = k.slice(PREFIX.length)
     return rest.startsWith("back.") ? rest.slice(5) : rest
   }
-  const isBack = (k: string) => k.startsWith(`${PREFIX}back.`)
-  for (const k of keysWithPrefix(PREFIX, "local")) if (!isBack(k) || siteOf(k) !== current) removeItem(k, "local")
+  for (const k of keysWithPrefix(PREFIX, "local")) removeItem(k, "local")
   for (const k of keysWithPrefix(PREFIX, "session")) if (siteOf(k) !== current) removeItem(k, "session")
 }
 
@@ -78,20 +77,22 @@ export function forgetMemberSession(slug: string) {
 const BACK_MS = 60 * 60 * 1000
 
 /** The search a guest asks for a link from ("?checkin=…"), kept to return to once the link is opened (the step and
- * the dialog's own parameters are left out: the member chooses their rooms again, at a member's price). It is kept
- * on the device even on the platform's host (the link opens in a new tab): dates and a party, no personal data. */
+ * the dialog's own parameters are left out: the member chooses their rooms again, at a member's price). Kept where
+ * the session is: on the device on a hotel's own host; in the tab on the platform's shared host (review round 2: a
+ * search, and that a member link was asked for, are this visitor's), so there a link opened in a new tab starts at
+ * the site's search. */
 export function rememberMemberReturn(slug: string, search: string, now = Date.now()) {
   const q = new URLSearchParams(search)
   for (const k of ["step", "join", "sign_in"]) q.delete(k)
   const s = q.toString()
-  if (s) setJSON(backKey(slug), { q: `?${s}`, at: now }, "local")
-  else removeItem(backKey(slug), "local")
+  if (s) setJSON(backKey(slug), { q: `?${s}`, at: now }, kind)
+  else removeItem(backKey(slug), kind)
 }
 
 /** Take the search to return to after a link is opened, or null (none, or asked for too long ago). */
 export function memberReturn(slug: string, now = Date.now()): string | null {
-  const b = getJSON<{ q?: unknown; at?: unknown }>(backKey(slug), "local")
-  removeItem(backKey(slug), "local")
+  const b = getJSON<{ q?: unknown; at?: unknown }>(backKey(slug), kind)
+  removeItem(backKey(slug), kind)
   if (!b || typeof b.q !== "string" || !b.q.startsWith("?") || typeof b.at !== "number" || now - b.at > BACK_MS || b.at > now) return null
   return b.q
 }

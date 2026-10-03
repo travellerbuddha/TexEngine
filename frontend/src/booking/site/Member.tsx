@@ -27,6 +27,8 @@ interface MemberCtx {
   /** the session token sent with searches, or null */
   session: string | null
   status: MemberStatus | null
+  /** the server could not say who the session signs in (a network error): it is kept, and can be signed out */
+  unread: boolean
   /** changes when the session changes: a search is priced again ("" signed out) */
   key: string
   openDialog: (tab?: MemberTab) => void
@@ -51,6 +53,7 @@ export function MemberProvider({ children }: { children: ReactNode }) {
   const available = programs.length > 0
   const [session, setSession] = useState<string | null>(() => (available ? memberSession(site.slug) : null))
   const [status, setStatus] = useState<MemberStatus | null>(null)
+  const [unread, setUnread] = useState(false)
   const [dialog, setDialog] = useState<{ open: boolean; tab: MemberTab }>({ open: false, tab: "sign_in" })
   const [params, setParams] = useSearchParams()
 
@@ -63,12 +66,15 @@ export function MemberProvider({ children }: { children: ReactNode }) {
   // the session kept here: who it signs in, as the server says now (an ended one is forgotten)
   useEffect(() => {
     setStatus(null)
+    setUnread(false)
     if (!session) return
     let live = true
     pub<MemberStatus>("member_status", { site: site.slug, member_session: session })
       .then((s) => live && setStatus(s))
       .catch((e: unknown) => {
-        if (live && ended(e)) forget()
+        if (!live) return
+        if (ended(e)) forget()
+        else setUnread(true)
       })
     return () => {
       live = false
@@ -119,12 +125,13 @@ export function MemberProvider({ children }: { children: ReactNode }) {
       program: programs.join(", "),
       session,
       status,
+      unread,
       key: session ? sessionTag(session) : "",
       openDialog: (tab: MemberTab = "sign_in") => setDialog({ open: true, tab }),
       signOut,
       join,
     }),
-    [available, programs, session, status, signOut, join],
+    [available, programs, session, status, unread, signOut, join],
   )
   return (
     <Ctx.Provider value={value}>
@@ -147,7 +154,14 @@ export function MemberButton() {
         {t("member.signIn")}
       </Button>
     )
-  if (!m.status) return null
+  if (!m.status)
+    // the status could not be read (a network error): the guest can still sign out; nothing while it is read
+    return m.unread ? (
+      <Button variant="ghost" size="sm" onClick={() => void m.signOut()} aria-label={t("member.signOut")}>
+        <LogOut className="size-4" aria-hidden />
+        <span className="hidden sm:inline">{t("member.signOut")}</span>
+      </Button>
+    ) : null
   return (
     <div className="flex items-center gap-1.5">
       <span className="hidden items-center gap-1.5 text-sm font-medium sm:inline-flex" data-testid="member-hello">

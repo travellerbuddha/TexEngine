@@ -119,15 +119,17 @@ test("on the platform's shared host a site's page keeps no other site's member d
   setJSON("tex.member.aurora", { token: "ours", expires: now + 1000 }, "session")
   setJSON("tex.member.borealis", { token: "kept-on-device", expires: now + 1000 }, "local")
   setJSON("tex.member.aurora", { token: "kept-on-device", expires: now + 1000 }, "local")
+  keepSessionsOnDevice(false)
   rememberMemberReturn("aurora", "?checkin=2026-11-01", now)
   rememberMemberReturn("borealis", "?checkin=2026-12-01", now)
+  setJSON("tex.member.back.borealis", { q: "?checkin=2026-12-01", at: now }, "local")
   isolateMemberData("aurora")
-  keepSessionsOnDevice(false)
   assert.equal(memberSession("aurora", now), "ours")
   assert.equal(memberSession("borealis", now), null)
-  // nothing of a session stays on the device there; the search to return to is this site's only
+  // nothing of a member stays on the device there; the search to return to is this site's only, in the tab
   assert.equal(getItem("tex.member.aurora", "local"), null)
   assert.equal(getItem("tex.member.borealis", "local"), null)
+  assert.equal(getItem("tex.member.back.borealis", "local"), null)
   assert.equal(memberReturn("borealis", now), null)
   assert.equal(memberReturn("aurora", now), "?checkin=2026-11-01")
   // a site-less page (a payment link) keeps none
@@ -135,4 +137,18 @@ test("on the platform's shared host a site's page keeps no other site's member d
   isolateMemberData(null)
   assert.equal(memberSession("aurora", now), null)
   keepSessionsOnDevice(true)
+})
+
+test("the site and the member page of the address a page opened at, before the router runs", async () => {
+  const { isMemberPath, slugFromLocation } = await import("../../src/booking/lib/mount.ts")
+  assert.equal(slugFromLocation("/book/aurora"), "aurora")
+  assert.equal(slugFromLocation("/book/Aurora/member"), "aurora")
+  assert.equal(slugFromLocation("/book/pay"), null)                         // a site-less payment page
+  assert.equal(slugFromLocation("/book/pay/return"), null)
+  assert.equal(slugFromLocation("/book/a%20b"), null)                       // not a slug
+  assert.equal(slugFromLocation("/kamra/tex"), null)
+  assert.equal(isMemberPath("/book/aurora/member"), true)
+  assert.equal(isMemberPath("/member"), true)                               // a hotel's own host
+  assert.equal(isMemberPath("/book/aurora/member/x"), false)
+  assert.equal(isMemberPath("/book/aurora/manage"), false)
 })
