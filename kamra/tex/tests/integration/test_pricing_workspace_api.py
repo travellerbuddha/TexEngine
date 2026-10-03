@@ -1144,6 +1144,25 @@ class TestHeavyReads(WorkspaceCase):
 		self.as_user(EDITOR)
 		self.assertTrue(wapi.validate_version(self.v, data=as_json(data))["ok"])
 
+	def test_a_publish_check_has_a_budget_of_its_own(self):
+		"""LO-42 (b4): the contract page's publish dialog checks the version with the workspace's flag (G-53), so
+		its one check shared the budget of the workspace's live checks: with the workspace open, publishing could
+		be refused "Too many price checks". The dialog's check (purpose "publish", never with unsaved data) has a
+		budget of its own; it is still bounded."""
+		data = as_json(self.payload())
+		self.as_user(EDITOR)
+		with mock.patch.object(api, "_in_request", return_value=True), \
+		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (1, 3), "publish": (2, 1)}):
+			self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])      # the live checks' budget is used up
+			with self.assertRaises(frappe.RateLimitExceededError):
+				wapi.validate_version(self.v, data=data)
+			for _ in range(2):
+				self.assertTrue(api.validate_version(self.v, workspace=1, purpose="publish")["ok"])
+			with self.assertRaises(frappe.RateLimitExceededError):            # bounded too
+				api.validate_version(self.v, workspace=1, purpose="publish")
+			with self.assertRaises(frappe.RateLimitExceededError):            # unsaved data is the live check's
+				api.validate_version(self.v, data=data, purpose="publish")
+
 	def test_calls_running_at_once(self):
 		data = as_json(self.payload())
 		self.as_user(EDITOR)

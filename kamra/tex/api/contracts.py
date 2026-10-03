@@ -38,9 +38,10 @@ OVERLAY_MAX_ROWS = 5000
 # per user (ADR-061, S16 review): the calls a minute and the calls running at once of the workspace's
 # heavy reads — "validate": validate_version (10–16 s near the row cap, with or without data);
 # "matrix": price_matrix with unsaved data or sample parties; "preview": preview_price with unsaved
-# data (the same overlay; the price test's Live mode). An aborted fetch does not stop the server, so
-# the client's one-call-in-flight is no bound.
-HEAVY_LIMITS = {"validate": (60, 3), "matrix": (120, 6), "preview": (120, 6)}
+# data (the same overlay; the price test's Live mode); "publish": a publish dialog's check of the saved
+# version (validate_version purpose "publish", LO-42 b4), its own budget so the workspace's live checks
+# never use it up. An aborted fetch does not stop the server, so the client's one-call-in-flight is no bound.
+HEAVY_LIMITS = {"validate": (60, 3), "matrix": (120, 6), "preview": (120, 6), "publish": (20, 2)}
 HEAVY_WINDOW = 60              # seconds of a budget
 HEAVY_RUNNING_TTL = 300        # a crashed call's slot is freed this many seconds after the call started
 # the budget in one step: counted, and given its window when it has none. Two separate steps (SET NX
@@ -460,18 +461,21 @@ def _heavy(kind: str):
 
 
 @frappe.whitelist()
-def validate_version(name: str, data=None, workspace=None):
+def validate_version(name: str, data=None, workspace=None, purpose=None):
 	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061).
 	For the workspace (``workspace`` or ``data``, opt-in): its board checks (GAP-5), each issue's
 	``ref`` (D9), and bounded per user (``_heavy``: near the row cap one call takes 10–16 s).
-	Without them the issues are main's and the call is not bounded, as on main.
+	Without them the issues are main's and the call is not bounded, as on main. A publish dialog's check of
+	the saved version (``purpose`` "publish") has a budget of its own (LO-42 b4); with unsaved data a call is
+	the workspace's live check whatever it says.
 
 	A viewer without ``price.view_cost`` gets no issue whose presence depends on the value of an
 	inherited pricing-policy rule (its formula is cost, G-11): an overlay probe rule would otherwise
 	find it by bisection without a save or an audit entry (S16 review; ``validate_terms(hidden=…)``).
 	A security fix: it holds for every caller."""
 	ws = _workspace(workspace, data)
-	with _heavy("validate") if ws else nullcontext():
+	kind = "publish" if str(purpose or "") == "publish" and not _has_data(data) else "validate"
+	with _heavy(kind) if ws else nullcontext():
 		formula = scope.has_capability("price.view_cost", scope.property_of("TEX Contract Version", name))
 		if _has_data(data):
 			return svc.validate_doc(_overlay(name, data), formula=formula, workspace=True)
