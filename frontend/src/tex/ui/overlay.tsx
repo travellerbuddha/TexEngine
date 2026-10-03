@@ -11,6 +11,23 @@ import { tabbables, useIsPhone } from "./popover"
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
 
+/**
+ * `open`, one passive-effect pass late; closing is at once. An overlay renders its content as soon as it
+ * opens but keeps it hidden (`visibility: hidden`: not painted, not focusable, not in the accessibility
+ * tree) until then. A parent that resets its form in a passive effect when its overlay opens
+ * (`useEffect(() => { if (open) setForm(...) }, [open])`, about thirty TEX dialogs) does so in that same
+ * pass, so the content is first seen, and first typed into, with the reset form, never with the last
+ * session's values (ADR-073, 2L). Its refs exist from the opening render; focus and the modal behaviour
+ * start when it is shown.
+ */
+function useShown(open: boolean) {
+  const [shown, setShown] = useState(false)
+  useEffect(() => setShown(open), [open])
+  return open && shown
+}
+
+const UNTIL_SHOWN = { visibility: "hidden" } as const
+
 /** Focus trap + Esc + restore focus on close (WAI-ARIA dialog pattern). */
 function useModal(open: boolean, onClose: () => void) {
   const panel = useRef<HTMLDivElement>(null)
@@ -71,14 +88,18 @@ export function Dialog({
   footer?: ReactNode
   size?: "sm" | "md" | "lg" | "xl"
 }) {
-  const panel = useModal(open, onClose)
+  const shown = useShown(open)
+  const panel = useModal(shown, onClose)
   const titleId = useId()
   const descId = useId()
   const { t } = useTexT()
   if (!open) return null
   const width = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" }[size]
   return createPortal(
-    <div className="tex-root fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div
+      className="tex-root fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+      style={shown ? undefined : UNTIL_SHOWN}
+    >
       <div className="absolute inset-0 bg-black/40" aria-hidden onClick={onClose} />
       <div
         ref={panel}
@@ -173,11 +194,12 @@ function DrawerBody({ titleId, title, onClose, children, footer }: { titleId: st
 }
 
 function ModalDrawer({ open, onClose, title, children, footer, width }: DrawerProps) {
-  const panel = useModal(open, onClose)
+  const shown = useShown(open)
+  const panel = useModal(shown, onClose)
   const titleId = useId()
   if (!open) return null
   return createPortal(
-    <div className="tex-root fixed inset-0 z-50 flex justify-end">
+    <div className="tex-root fixed inset-0 z-50 flex justify-end" style={shown ? undefined : UNTIL_SHOWN}>
       <div className="absolute inset-0 bg-black/30" aria-hidden onClick={onClose} />
       <div
         ref={panel}
@@ -216,22 +238,23 @@ function syncSidePanels() {
 }
 
 function SidePanel({ open, onClose, title, children, footer, width }: DrawerProps) {
+  const shown = useShown(open)
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   useEffect(() => {
-    if (!open) return
+    if (!shown) return
     openPanels.push(width)
     syncSidePanels()
     return () => {
       openPanels.splice(openPanels.indexOf(width), 1)
       syncSidePanels()
     }
-  }, [open, width])
+  }, [shown, width])
   useEffect(() => {
     const el = panel.current
-    if (!open || !el) return
+    if (!shown || !el) return
     const opener = document.activeElement as HTMLElement | null
     const first = el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>(FOCUSABLE)
     ;(first ?? el).focus({ preventScroll: true })
@@ -254,7 +277,7 @@ function SidePanel({ open, onClose, title, children, footer, width }: DrawerProp
       if (now && now !== document.body && !el.contains(now)) return
       if (opener?.isConnected) opener.focus({ preventScroll: true })
     }
-  }, [open])
+  }, [shown])
   if (!open) return null
   return createPortal(
     <div
@@ -269,6 +292,7 @@ function SidePanel({ open, onClose, title, children, footer, width }: DrawerProp
         closeRef.current()
       }}
       className={cn("tex-root fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-zinc-200 bg-white shadow-tex-pop outline-none", DRAWER_WIDTH[width])}
+      style={shown ? undefined : UNTIL_SHOWN}
     >
       <DrawerBody titleId={titleId} title={title} onClose={onClose} footer={footer}>
         {children}

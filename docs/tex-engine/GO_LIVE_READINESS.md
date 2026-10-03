@@ -146,8 +146,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     not re-verified, and a blank value saved by another caller is stored as 0.
 15. Audit Part 2 owner decisions. Answered: D-5, markets and residency (ADR-070; O-8 done); D-12,
     loyalty is live at go-live (IMPLEMENTATION_STATUS §6K2); D-13, no UTC+7 hotel in wave 1 (O-6 not
-    opened, LO-37 deferred, §6K4). Still open: D-14, will an existing Kamra or pilot database be
-    upgraded (O-34, O-35, O-36, O-39, P1-12); D-15, which PMS runs each go-live hotel (G-69r) (HANDOFF.md §7).
+    opened, LO-37 deferred, §6K4); D-14, no existing Kamra or pilot database is upgraded: every hotel
+    starts from a fresh install, so the pre-upgrade items (O-34, O-35, O-36, O-39, P1-12) do not apply
+    (2026-10-03, §6L). Still open: D-15, which PMS runs each go-live hotel (G-69r) (HANDOFF.md §7).
 
 ## 4. Platform notes
 

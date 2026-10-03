@@ -22,7 +22,7 @@ EXT = {
 		F("tex_room_index", "Int", "Room # in booking"),
 		F("tex_contract", "Link", "Contract", "TEX Contract"),
 		F("tex_contract_version", "Link", "Contract version", "TEX Contract Version"),
-		F("tex_payload_hash", "Data", "Contract payload hash", read_only=1),
+		F("tex_payload_hash", "Data", "Contract payload hash", read_only=1, permlevel=1),   # G-99
 		F("tex_market", "Link", "Market", "TEX Market", in_standard_filter=1),
 		F("tex_sales_channel", "Link", "Sales channel", "TEX Sales Channel", in_standard_filter=1),
 		F("tex_board", "Data", "Board"),

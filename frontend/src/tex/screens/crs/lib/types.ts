@@ -115,7 +115,8 @@ export interface ContractRef {
   name: string
   version: string
   version_no: number
-  payload_hash: string
+  /** only for who sees cost (G-99) */
+  payload_hash?: string
   market: string
   currency: string
   basis: string

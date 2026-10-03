@@ -850,7 +850,7 @@ BOOKING_SPECS = [
 		F("total_amount", "Currency", "Total", options="currency", in_list_view=1),
 		CB(),
 		F("contract_version", "Link", "Contract version", "TEX Contract Version"),
-		F("payload_hash", "Data", "Payload hash"),
+		F("payload_hash", "Data", "Payload hash", permlevel=1),        # the payload's digest (G-99, ADR-075)
 		F("expires_at", "Datetime", "Expires", in_list_view=1),
 		F("booking", "Link", "Booking", "TEX Booking"),
 		F("session_hash", "Data", "Session (hash)"),
@@ -859,7 +859,7 @@ BOOKING_SPECS = [
 		F("request_json", "Code", "Request", "JSON"),
 		F("result_json", "Long Text", "Result", permlevel=1),          # pricing internals (G-95, ADR-056)
 	], perms=[*IMMUTABLE_LOG, INTERNALS], autoname="hash", track_changes=False, sort_field="creation",
-	   in_create=True, extra={"modified": "2026-09-24 14:00:00.000000"}),  # the JSON's own stamp (LO-44)
+	   in_create=True, extra={"modified": "2026-10-03 16:00:00.000000"}),  # payload_hash withheld (G-99)
 
 	dt("TEX Reservation Revision", B, [
 		F("reservation", "Link", "Reservation", "Reservation", reqd=1, in_list_view=1, in_standard_filter=1),

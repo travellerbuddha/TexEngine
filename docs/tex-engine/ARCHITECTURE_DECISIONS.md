@@ -9749,6 +9749,7 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   and duplicates dialogs, the contract and version dialogs, the user invite dialog): one frame of the last session's
   values, LOW. The proposed fix is one change in the design system's Dialog and Drawer (show the content one effect
   pass after `open`, so a parent's reset lands before the first visible frame), not thirty.
+  *Done in Part 2L (ADR-075).*
 - The Frappe v16.36.1 upgrade (it closes 32 of the reviewed advisories, none of PR #11's PyJWT/oauthlib ones) is its
   own pull request after 2Z (owner, 2026-10-03). ENGINE_VERSION, prices and schema unchanged.
 
@@ -9787,3 +9788,45 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
 - *Existing benches.* `setup-local.sh` keeps a bench it finds and now says when its Frappe differs; NATIVE.md §5 has
   the in-place steps used on the development bench (fetch the tag and the commit, `bench setup requirements`, build,
   migrate). The committed bundles do not depend on Frappe: a rebuild after the move is identical.
+
+## ADR-075 LOW leftovers: the payload digest withheld, overlays hidden until a pass after opening (audit Part 2L)
+- *D-14 (owner, 2026-10-03): no existing database is upgraded.* No Kamra or TEX pilot database with data to keep
+  exists; every hotel starts from a fresh install. The pre-upgrade package (O-34, O-35, O-36, O-39, P1-12 and the
+  legacy-data leftovers of HANDOFF_LEFTOVERS C-06) does not apply. The data of the current systems reaches TEX by
+  import at cut-over, a separate go-live item.
+- *The contract payload's digest is a pricing internal (G-99).* `payload_hash` is a sha256 of the frozen payload
+  (its rates, offers and inherited policy rules): whoever holds it confirms a guess of those values offline. It goes
+  where the version's rates go.
+  - Selling and reservations, `price.view_cost` at the hotel: `strip_internal` removes `contract.payload_hash` (CRS
+    search, a reservation's pricing, a modification's proposed price); the CRS quote answers (`crs.quote`,
+    `quote_rooms`), a simulation and a modification's sold contract (`old.contract`) leave it out.
+  - The contracts API, who sees the version's rates (`_sees_cost`: `price.view_cost` or `contract.edit`, as
+    `get_version` shows them): `get_contract` and `publish_version` leave it out otherwise; `get_version` keeps
+    main's answer for an editor (ADR-061 parity, pinned by `test_existing_semantics`). An editor without cost, a
+    custom profile only (every default profile with `contract.edit` holds `price.view_cost`), thereby holds the
+    digest over inherited policy rules it is not shown (LOW, IMPLEMENTATION_STATUS §6L).
+  - The audit trail (`audit_log`) masks the digests an event records (a refused reprice's `recorded_hash` and
+    `found_hash`, a publish's `payload_hash`) for a viewer without `price.view_cost` at its hotel; the stored event
+    keeps them. A refused reprice's message names the version, no longer the digests' first 12 hex digits.
+  - Desk / REST: `Reservation.tex_payload_hash` and `TEX Quote.payload_hash` are withheld fields (ADR-056): permlevel
+    1, left out of reads and generic-write responses, masked in the change history.
+  - No patch: the field metadata syncs on migrate. Change-history rows written before keep their values; by D-14
+    no such database goes live.
+  - Server code that ties a booking to its version (booking, modification, `sold_terms`) reads the digest from the
+    internal quote or the stored record, as before.
+- *An overlay keeps its content hidden until one effect pass after it opens (ADR-073's proposal).* About thirty dialogs
+  keep their form mounted while closed and reset it in a passive effect when they open, so the content was first
+  seen, and could be typed into, with the last session's values. The design system's Dialog, modal Drawer and side
+  panel render their content in the opening render, as before, but with `visibility: hidden` (not painted, not
+  focusable, not in the accessibility tree) until `open` has been true for one passive-effect pass (`useShown`);
+  closing is at once. The parent's reset runs in that same pass, so the content is first seen with the reset form.
+  Focus, Escape, the scroll lock and the side panel's page width start when it is shown. Mounting per opening
+  (keyed) or a layout-effect reset stay the patterns for a new form; the overlay's rule covers what does not follow
+  them.
+  - Rendering nothing until that pass (the first version, 391c530) broke the 2Z first-frame e2e checks, which read
+    the dialog right after the click's commit: the content and its refs must exist in the opening render.
+  - A consumer that focuses into the content in the opening render reaches a hidden, unfocusable element; a scan of
+    every Dialog / Drawer consumer found none (AddExtrasDialog focuses once its list has loaded).
+  - The content mounts, hidden, with the parent's state as it was: what it does on mount sees the last session's
+    props (a picker may fetch for them before the reset). State a content component copies from its props at mount
+    (`useState(prop)`) is not reset by the parent's effect: such a form is still mounted per opening (keyed).

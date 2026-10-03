@@ -475,7 +475,10 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		"reservation": res.name,
 		"basis": basis, "basis_detail": how, "pricing_sale_at": str(at),
 		"old": {"total": to_str(old_total), "currency": old_ccy, "request": snap["request"],
-		        "contract": snap.get("contract"), "lines": snap.get("lines"), "totals": old_totals},
+		        # the sold payload's digest only for who sees cost (G-99, ADR-075)
+		        "contract": snap.get("contract") if internal or not snap.get("contract")
+		        else {k: v for k, v in snap["contract"].items() if k != "payload_hash"},
+		        "lines": snap.get("lines"), "totals": old_totals},
 		"proposed": new,
 		"sellable": sellable_otherwise and not violations,
 		# the restrictions the change breaks; staff with ``restriction.edit`` may override them when
@@ -789,12 +792,15 @@ def simulate(reservation: str, sale_at) -> dict:
 		sold_terms.refuse(res, snap, e, use="simulate", version=pick[1])
 	internal = scope.has_capability("price.view_cost", res.property)
 	actual = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")
+	simulated = quote.to_dict(internal=internal)
+	if not internal and isinstance(simulated.get("contract"), dict):
+		simulated["contract"].pop("payload_hash", None)        # the payload's digest (G-99, ADR-075)
 	return {
 		"reservation": res.name, "simulated_sale_at": str(at), "contract_version": pick[1],
 		"contract": {"contract": pick[0].name, "code": pick[0].contract_code, "status_now": pick[0].status_now},
 		"actual": {"total": to_str(actual), "currency": res.tex_currency, "sale_at": str(res.tex_sale_at),
 		           "priced_at": str(priced_at(res, snap)), "version": snap["contract"]["version"]},
-		"simulated": quote.to_dict(internal=internal),
+		"simulated": simulated,
 		"difference": to_str(quote.total - actual) if quote.sellable and quote.currency == res.tex_currency else None,
 	}
 

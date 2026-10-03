@@ -436,6 +436,19 @@ def adapters():
 
 # ─── audit trail ─────────────────────────────────────────────────────────
 
+# a contract payload's digest, as events record it (a refused reprice, a publish): it confirms a guess of the
+# payload's rates offline, so the trail shows it only to who sees cost at the event's hotel (G-99, ADR-075)
+DIGEST_KEYS = frozenset({"payload_hash", "recorded_hash", "found_hash"})
+
+
+def _without_digests(value):
+	if isinstance(value, dict):
+		return {k: ("*****" if k in DIGEST_KEYS and v else _without_digests(v)) for k, v in value.items()}
+	if isinstance(value, list):
+		return [_without_digests(v) for v in value]
+	return value
+
+
 # A record's trail, read by reference, needs what reading the record itself needs (Y-1): a contract's
 # events carry its rates (a publish's collections, a draft's edits) and are cost (G-11: who sees cost
 # or edits contracts, ``contracts._sees_cost``); a payment's carry amounts, the provider and the bank
@@ -567,13 +580,18 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 	                        order_by="property asc") if wide else ():
 		reached.setdefault(s.event, []).append(s.property)
 	visible = None if scope.is_platform_admin() else scope.permitted_properties()
+	cost: dict[str | None, bool] = {}
 	for r in rows:
 		r["event_time"] = str(r["event_time"])
+		if visible is not None and r.property not in cost:
+			cost[r.property] = bool(r.property) and scope.has_capability("price.view_cost", r.property)
 		for k in ("old_value", "new_value"):
 			try:
 				r[k] = json.loads(r[k]) if r[k] else None
 			except ValueError:
 				pass
+			if visible is not None and not cost[r.property]:
+				r[k] = _without_digests(r[k])
 		hotels = reached.get(r.name, [])
 		r["hotels"] = hotels if visible is None else [h for h in hotels if h in visible]
 		r["other_hotels"] = len(hotels) - len(r["hotels"])
