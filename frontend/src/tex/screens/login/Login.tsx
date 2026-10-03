@@ -89,7 +89,8 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
   /** Frappe answers 200 without a session too (frappe/auth.py): only "Logged In" signs in to the
    * admin app (M1). A two-factor account first gives its code, an expired password is renewed on
-   * Frappe's page (on this site only), a website user goes to the portal; anything else is told. */
+   * Frappe's page (on this site only: a `redirect_to` answer, or the link Frappe v16.36.1 mails), a
+   * website user goes to the portal; anything else is told. */
   function settle(r: LoginResult) {
     if (r.message === "Logged In") {
       sessionStorage.removeItem("kamra_session_ended")
