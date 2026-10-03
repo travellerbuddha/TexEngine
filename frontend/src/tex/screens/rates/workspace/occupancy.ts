@@ -937,14 +937,32 @@ export const PARTY_OPTIONS_MAX = 60
 export const PARTY_ADULTS_MAX = 12
 export const PARTY_CHILDREN_MAX = 8
 
-/** The sample parties a room can host (validCombinations, within the server's party limits), each
- * child in every band: the multisets of band codes in band order. Adults-only parties when there
- * are no bands. When there are more than PARTY_OPTIONS_MAX, the common ones are kept (adults only,
- * then the smallest parties, two adults first); they are listed in the usual order either way. */
-export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[]): PartyOption[] {
+/** How the version counts infants (O-2, ADR-067): the version settings infants_count_as_children and
+ * infants_count_as_occupants, both 1 by default. */
+export interface InfantRules {
+  /** off: max_children and a combination count the other children only, and infants are numbered after them */
+  infantsAsChildren?: boolean
+  /** off: max_occupants leaves infants out */
+  infantsAsOccupants?: boolean
+}
+
+/** The sample parties a room can host (within the server's party limits), each child in every band: the multisets
+ * of band codes in band order. A party fits as the server's capacity check counts it (occupancy.check_capacity):
+ * children over max_children and guests over max_occupants, infants left out where the version says so (LO-40); by
+ * default every child counts, the parties of validCombinations. Adults-only parties when there are no bands. When
+ * there are more than PARTY_OPTIONS_MAX, the common ones are kept (adults only, then the smallest parties, two
+ * adults first); they are listed in the usual order either way: adults only first, then by adults and children. */
+export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[], rules: InfantRules = {}): PartyOption[] {
+  const asChildren = rules.infantsAsChildren ?? true
+  const asOccupants = rules.infantsAsOccupants ?? true
   const codes = [...new Set(bands.map(bandCode).filter(Boolean))]
-  const cap = { ...capacity, max_adults: Math.min(int(capacity.max_adults), PARTY_ADULTS_MAX), max_children: Math.min(int(capacity.max_children), PARTY_CHILDREN_MAX) }
-  const combos = validCombinations([cap]).filter((c) => c.children === 0 || codes.length > 0)
+  const infantCodes = new Set(bands.filter((b) => isSet(b.is_infant)).map(bandCode).filter(Boolean))
+  const maxChildren = int(capacity.max_children)
+  const maxOccupants = int(capacity.max_occupants)
+  const fits = (adults: number, children: readonly string[]) => {
+    const infants = children.filter((c) => infantCodes.has(c)).length
+    return children.length - (asChildren ? 0 : infants) <= maxChildren && adults + children.length - (asOccupants ? 0 : infants) <= maxOccupants
+  }
   // the band multisets of n children, lazily (a large room with many bands has very many)
   function* multisets(n: number, from: number): Generator<string[]> {
     if (n === 0) {
@@ -953,7 +971,15 @@ export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[])
     }
     for (let i = from; i < codes.length; i++) for (const rest of multisets(n - 1, i)) yield [codes[i], ...rest]
   }
-  const commonness = (c: ValidCombination) => [c.children > 0 ? 1 : 0, c.adults + c.children, Math.abs(c.adults - 2), c.children]
+  const some = (n: number, adults: number) => {
+    for (const children of multisets(n, 0)) if (fits(adults, children)) return true
+    return false
+  }
+  const combos: { adults: number; children: number }[] = []
+  for (let a = Math.max(1, int(capacity.min_adults)); a <= Math.min(int(capacity.max_adults), PARTY_ADULTS_MAX); a++)
+    for (let c = 0; c <= (codes.length ? PARTY_CHILDREN_MAX : 0); c++) if (some(c, a)) combos.push({ adults: a, children: c })
+  combos.sort((x, y) => Number(x.children > 0) - Number(y.children > 0) || x.adults - y.adults || x.children - y.children)
+  const commonness = (c: { adults: number; children: number }) => [c.children > 0 ? 1 : 0, c.adults + c.children, Math.abs(c.adults - 2), c.children]
   const byCommon = combos.map((c, i) => ({ c, i })).sort((x, y) => {
     const [a, b] = [commonness(x.c), commonness(y.c)]
     for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return a[k] - b[k]
@@ -963,6 +989,7 @@ export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[])
   fill: for (const { c, i } of byCommon) {
     let seq = 0
     for (const children of multisets(c.children, 0)) {
+      if (!fits(c.adults, children)) continue
       if (kept.length >= PARTY_OPTIONS_MAX) break fill
       kept.push({ party: { id: `${c.adults}+${children.join(",")}`, adults: c.adults, children }, combo: i, seq: seq++ })
     }

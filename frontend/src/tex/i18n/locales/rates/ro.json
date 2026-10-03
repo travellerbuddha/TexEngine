@@ -1603,7 +1603,7 @@
  "rates.occ.ladder.single_sub": "toată camera, din {unit}",
  "rates.occ.ladder.unit_sub": "din {unit}",
  "rates.occ.ladder.no_bands": "Nu există grupe de vârstă pentru copii: copiii nu pot primi încă preț. Adăugați-le cu Vârstele copiilor…",
- "rates.occ.ladder.infants_not_children": "Această versiune nu consideră bebelușii copii: un bebeluș nu schimbă combinația sau poziția celorlalți copii și este calculat după ei, după regula propriei grupe de vârstă. Scara de mai jos numără în continuare fiecare copil; testul de preț arată ce se încasează.",
+ "rates.occ.ladder.infants_not_children": "Această versiune nu consideră bebelușii copii: un bebeluș nu schimbă combinația sau poziția celorlalți copii și este calculat după ei, după regula propriei grupe de vârstă. Grupurile exemplu numără copiii la fel; testul de preț arată ce se încasează.",
  "rates.occ.ladder.inherited_bands": "Grupele de vârstă provin din: {source}.",
  "rates.occ.ladder.party": "Grup exemplu",
  "rates.occ.ladder.party_unsaved": "Salvați ciorna pentru a vedea totalurile acestei camere: previzualizarea arată ciorna salvată, care încă nu o conține.",

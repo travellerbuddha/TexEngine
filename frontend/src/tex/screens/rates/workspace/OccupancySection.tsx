@@ -207,11 +207,14 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
   // ─── the resolved line's sample party (price_matrix parties, GAP-2b) ─────
   const partyRoom = scope || baseRoom || rooms[0] || ""
   const partyCap = partyRoom ? capOf(partyRoom) : null
+  // the parties are counted as the version counts infants (O-2, LO-40)
+  const infantsAsChildren = Number(settings.infants_count_as_children ?? 1) !== 0
+  const infantsAsOccupants = Number(settings.infants_count_as_occupants ?? 1) !== 0
   const parties = useMemo(
-    () => (partyCap ? partyOptions(partyCap, bands) : []),
+    () => (partyCap ? partyOptions(partyCap, bands, { infantsAsChildren, infantsAsOccupants }) : []),
     // the capacity numbers, not the object
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [partyCap?.max_adults, partyCap?.max_children, partyCap?.max_occupants, partyCap?.min_adults, partyRoom, bands],
+    [partyCap?.max_adults, partyCap?.max_children, partyCap?.max_occupants, partyCap?.min_adults, partyRoom, bands, infantsAsChildren, infantsAsOccupants],
   )
   const [partyPick, setPartyPick] = useState<string | null>(null)
   const party = parties.find((x) => x.id === partyPick) ?? defaultParty(parties)
@@ -330,9 +333,9 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
         ) : (
           <div className="space-y-2">
             {!bands.length && <Notice tone="info">{t("rates.occ.ladder.no_bands")}</Notice>}
-            {/* the ladder counts every child for its combinations; the server prices this version's
-                infants after the other children (O-2): the price test shows what it charges */}
-            {Number(settings.infants_count_as_children ?? 1) === 0 && <Notice tone="info">{t("rates.occ.ladder.infants_not_children")}</Notice>}
+            {/* the server prices this version's infants after the other children (O-2); the sample parties
+                count them as it does (LO-40) */}
+            {!infantsAsChildren && <Notice tone="info">{t("rates.occ.ladder.infants_not_children")}</Notice>}
             {bandSource && <p className="text-xs text-zinc-500">{t("rates.occ.ladder.inherited_bands", { source: t(`rates.occ.ladder.source.${bandSource.scope.replace("+", "_")}`) })}</p>}
             <OccupancyLadder
               // a version loaded again (Discard) or another rooms scope starts the grid afresh:

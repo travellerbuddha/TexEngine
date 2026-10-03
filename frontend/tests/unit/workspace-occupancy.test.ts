@@ -1521,3 +1521,22 @@ test("the single-use row names the special combination that prices one adult; a 
   assert.equal(cardCovers({ rooms: ["DLX"], periods: [""] }, null, "P1"), false, "one room of All rooms")
   assert.equal(cardCovers({ rooms: ["DLX"], periods: [""] }, "DLX", "P1"), true)
 })
+
+// LO-40 (Part 2K-6): a version whose infants are not children (O-2) counts the sample parties as the server's
+// capacity check does: max_children and a combination count the other children only, max_occupants follows
+// infants_count_as_occupants. The resolved line could not offer a family the room takes (two adults, a child and a
+// baby in a room for one child).
+test("sample parties of a version whose infants are not children count them as the server does", () => {
+  const cap = { room_type: "STD", max_adults: 2, max_children: 1, max_occupants: 3, min_adults: 1 }
+  const ids = (rules?: Parameters<typeof partyOptions>[2]) => partyOptions(cap, BANDS, rules).map((p) => p.id)
+  // as before when infants are children (the default)
+  assert.deepEqual(ids(), ["1+", "2+", "1+INF", "1+CHA", "1+CHB", "2+INF", "2+CHA", "2+CHB"])
+  assert.deepEqual(ids({ infantsAsChildren: true, infantsAsOccupants: true }), ids())
+  // infants are not children but still occupants: one child and a baby for one adult (three guests)
+  assert.deepEqual(ids({ infantsAsChildren: false }), ["1+", "2+", "1+INF", "1+CHA", "1+CHB", "1+INF,INF", "1+INF,CHA", "1+INF,CHB", "2+INF", "2+CHA", "2+CHB"])
+  // neither children nor occupants: two adults, a child and a baby; never two children over the baby
+  const free = ids({ infantsAsChildren: false, infantsAsOccupants: false })
+  assert.ok(free.includes("2+INF,CHA") && free.includes("2+INF,INF"), free.join(" "))
+  assert.ok(free.every((id) => id.split("+")[1].split(",").filter((c) => c === "CHA" || c === "CHB").length <= 1), free.join(" "))
+  assert.ok(free.length <= PARTY_OPTIONS_MAX)
+})

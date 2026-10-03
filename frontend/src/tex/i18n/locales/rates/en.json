@@ -1553,7 +1553,7 @@
  "rates.occ.ladder.single_sub": "the whole room, from the {unit}",
  "rates.occ.ladder.unit_sub": "from the {unit}",
  "rates.occ.ladder.no_bands": "No child age bands: children cannot be priced yet. Add them with Child ages…",
- "rates.occ.ladder.infants_not_children": "This version does not count infants as children: an infant never changes the other children's combination or position, and is priced by its own band's rule after them. The ladder below still counts every child; the price test shows what is charged.",
+ "rates.occ.ladder.infants_not_children": "This version does not count infants as children: an infant never changes the other children's combination or position, and is priced by its own band's rule after them. The sample parties count the children the same way; the price test shows what is charged.",
  "rates.occ.ladder.inherited_bands": "Child age bands come from the {source}.",
  "rates.occ.ladder.party": "Sample party",
  "rates.occ.ladder.party_unsaved": "Save the draft to see totals for this room: the preview shows the saved draft, which does not have it yet.",
