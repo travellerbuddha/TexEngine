@@ -827,6 +827,26 @@ class TestPointsBack(LoyaltyCase):
 		paid = frappe.db.get_value("TEX Booking", stay["booking"], "paid_amount")
 		self.assertEqual(from_db(paid, "EUR"), D("252.75"))             # the card deposit stays: staff refund it
 
+	def test_c01_a_no_show_keeps_the_points_it_was_paid_with(self):
+		"""C-01 (owner, 2026-10-03): a guest who paid part of a stay with points and did not come keeps nothing back:
+		the points stay with the hotel, as a fee keeps the points it took (a cancellation gives them back, above).
+		TEX sets no no-show itself: staff switch the stay to No Show in Desk or REST."""
+		_stay, guest = self.paid_stay("c01-a")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		hotel, who, red = self.spend("c01-a-hotel", 300, gift=0)
+		self.assertEqual((who, self.available(guest)), (guest, 567))
+		res = frappe.get_doc("Reservation", hotel["rooms"][0]["reservation"])
+		self.assertEqual(res.status, "Confirmed")
+		res.status = "No Show"
+		res.save()
+		self.assertEqual(frappe.db.get_value("Reservation", res.name, "status"), "No Show")
+		self.assertEqual(self.available(guest), 567)
+		self.assertEqual(self.reverse_rows(guest), [])
+		self.assertEqual(self.refunds_of(red["transaction"]), [])
+		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_loyalty_points"), 567)
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "loyalty.return",
+		                                                      "reference_name": hotel["booking"]}))
+
 	def test_a_hold_that_ends_gives_the_points_back_and_asks_staff_for_nothing(self):
 		held = guest_books(session="o20-d")                              # a card hold waiting for its payment
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
