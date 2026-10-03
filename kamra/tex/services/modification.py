@@ -553,9 +553,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 
 	A stay whose price staff set by hand (``booking.manual_price``) keeps it on a change only by an
 	explicit choice (D-9, ADR-065): ``override_amount`` (``price.override``; the drawer fills in the
-	price set by hand) or ``reprice`` (``reservation.modify``: the change's price, the revision's
-	``manual_price_dropped`` and an audit event say so); with neither the change is refused, naming
-	both amounts. Never repriced silently.
+	price set by hand) or ``reprice`` (``price.override`` too since C-02, ADR-076: the change's price, the
+	revision's ``manual_price_dropped`` and an audit event say so); with neither the change is refused,
+	naming both amounts. Never repriced silently.
 
 	Locks: the booking, then the reservation, then the inventory days: the order every path that
 	changes a TEX booking takes (review of ADR-044)."""
@@ -614,6 +614,11 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 			frappe.throw(_("Choose one: keep a price set by hand, or use the price of the change."),
 			             refusal("INVALID_REQUEST"))
 	manual = booking_svc.manual_price(res)
+	if manual is not None and reprice and not scope.has_capability("price.override", res.property):
+		# C-02 (owner, 2026-10-03): a price staff set by hand is replaced only by who may set prices
+		frappe.throw(_("The price of this stay was set by hand: only staff who may override prices can replace it "
+		               "with the change's price. Ask a revenue manager to make this change."),
+		             refusal("NOT_PERMITTED", frappe.PermissionError))
 
 	# lock the new nights first, then recompute deterministically under the lock
 	changes = p["changes"]

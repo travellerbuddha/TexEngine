@@ -265,8 +265,9 @@ export function ModifyDrawer({
   const restricted = Boolean(proposal && !proposal.sellable && proposal.restriction_override)
   const sellableNow = Boolean(proposal && (proposal.sellable || (restricted && overrideRestrictions)))
   const manual = proposal?.manual_price ?? null
-  // a stay priced by hand: keep that price (a final price) or use the change's, never silently (D-9)
-  const choiceOk = !manual || (canOverride && override) || reprice
+  // a stay priced by hand: keep that price (a final price) or use the change's, never silently (D-9); either
+  // needs price.override (C-02)
+  const choiceOk = !manual || (canOverride && (override || reprice))
   const canApply = Boolean(proposal && !stale && sellableNow && reason.trim().length > 2 && overrideOk && choiceOk && !applying)
   const apply = async () => {
     if (!proposal || !canApply) return
@@ -511,22 +512,29 @@ export function ModifyDrawer({
                     engine: money(manual.engine_total, proposal.proposed.currency),
                   })}
                 </p>
-                <Button
-                  size="sm"
-                  variant={reprice ? "primary" : "secondary"}
-                  className="mt-2"
-                  aria-pressed={reprice}
-                  onClick={() => {
-                    setReprice(true)
-                    setOverride(false)
-                  }}
-                >
-                  {t("res.mod.manual_use_change")}
-                </Button>
-                {reprice ? (
-                  <p className="mt-1 text-xs">{t("res.mod.manual_dropped", { manual: money(manual.amount, proposal.proposed.currency) })}</p>
+                {canOverride ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant={reprice ? "primary" : "secondary"}
+                      className="mt-2"
+                      aria-pressed={reprice}
+                      onClick={() => {
+                        setReprice(true)
+                        setOverride(false)
+                      }}
+                    >
+                      {t("res.mod.manual_use_change")}
+                    </Button>
+                    {reprice ? (
+                      <p className="mt-1 text-xs">{t("res.mod.manual_dropped", { manual: money(manual.amount, proposal.proposed.currency) })}</p>
+                    ) : (
+                      !choiceOk && <p className="mt-1 text-xs">{t("res.mod.manual_choose")}</p>
+                    )}
+                  </>
                 ) : (
-                  !choiceOk && <p className="mt-1 text-xs">{t(canOverride ? "res.mod.manual_choose" : "res.mod.manual_choose_no_override")}</p>
+                  // C-02: only who may set prices replaces a price set by hand (the server refuses anyone else)
+                  <p className="mt-1 text-xs">{t("res.mod.manual_needs_override")}</p>
                 )}
               </Notice>
             )}
