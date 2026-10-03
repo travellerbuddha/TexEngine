@@ -117,6 +117,20 @@ def loyalty_adjust(guest: str, program: str, points, reason: str, property: str 
 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
+def loyalty_join(guest: str, program: str, property: str | None = None):
+	crm.require_guest(guest, "crm.edit")
+	return loyalty.join(guest, program, property=text(property, 140) or None)
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def loyalty_leave(guest: str, program: str, reason: str, property: str | None = None):
+	crm.require_guest(guest, "crm.edit")
+	return loyalty.leave(guest, program, reason=text(reason, 500) or "", property=text(property, 140) or None)
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def loyalty_redeem(guest: str, booking: str, points, idempotency_key: str):
 	crm.require_guest(guest)
 	return loyalty.redeem(guest, booking, as_int(points, 0), idempotency_key=text(idempotency_key, 140) or "")

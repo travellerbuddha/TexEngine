@@ -41,8 +41,10 @@ VIA_PARENT = {
 # a loyalty entry belongs to its own hotel (``property``: its stay's or booking's, or the hotel a manual
 # adjustment was made for), not to every hotel of its (group) program: each hotel reads its own entries,
 # their bookings, reasons and actors. An entry of no hotel belongs to its program's hotel in a hotel's
-# program, and is platform level in a group's (ADR-056 second review)
+# program, and is platform level in a group's (ADR-056 second review). A membership the same: the hotel it
+# was made at (C-04, ADR-077)
 LEDGER_DOCTYPE = "TEX Loyalty Ledger"
+LOYALTY_DOCTYPES = (LEDGER_DOCTYPE, "TEX Loyalty Member")
 # belongs to an enterprise; presets (``system_key``) are shared by every tenant
 ENTERPRISE_DOCTYPES = ("TEX Guest Segment",)
 # guest activity of a booking site: a group site's rows have no hotel yet and belong to the
@@ -77,7 +79,7 @@ CONTRACT_COST_DOCTYPES = frozenset({"TEX Contract", "TEX Contract Version",
                                     "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan",
                                     "TEX Contract Offer", "TEX Contract Channel"})
 COST_DOCTYPES = CONTRACT_COST_DOCTYPES | {"TEX Markup Rule", "TEX Pricing Policy"}
-SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, LEDGER_DOCTYPE, "Guest",
+SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, *LOYALTY_DOCTYPES, "Guest",
                    *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES, *LEGACY_PROPERTY_DOCTYPES)
 
 
@@ -125,7 +127,7 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	if doctype in VIA_PARENT:
 		field, parent = VIA_PARENT[doctype]
 		return f"{t}.`{field}` in (select name from `tab{parent}` where {_owner_condition(parent, props)})"
-	if doctype == LEDGER_DOCTYPE:
+	if doctype in LOYALTY_DOCTYPES:
 		return (f"({t}.`property` in ({_sql_list(props)}) or (ifnull({t}.`property`, '') = '' and {t}.`program` in "
 		        f"(select name from `tabTEX Loyalty Program` where `property` in ({_sql_list(props)}))))")
 	if doctype in ENTERPRISE_DOCTYPES:
@@ -181,7 +183,7 @@ def _doc_properties(doc) -> tuple[set[str] | None, bool]:
 		if pdoc.get("hotel_group"):
 			return set(frappe.get_all("Property", filters={"tex_hotel_group": pdoc["hotel_group"]}, pluck="name")), False
 		return None, False
-	if dt == LEDGER_DOCTYPE:
+	if dt in LOYALTY_DOCTYPES:
 		hotel = doc.get("property") or (frappe.db.get_value("TEX Loyalty Program", doc.get("program"), "property")
 		                                if doc.get("program") else None)
 		return ({hotel}, False) if hotel else (None, True)

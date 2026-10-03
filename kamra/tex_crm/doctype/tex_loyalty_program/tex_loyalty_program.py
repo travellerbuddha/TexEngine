@@ -36,6 +36,9 @@ class TEXLoyaltyProgram(Document):
 		if frappe.db.exists("TEX Loyalty Ledger", {"program": self.name}):
 			# its ledger would move to another tenant's view
 			frappe.throw(_("Guests have points in this program: it cannot move to another hotel or group."))
+		if frappe.db.exists("TEX Loyalty Member", {"program": self.name}):
+			# its members would be members, with member prices, at another hotel (C-04)
+			frappe.throw(_("Guests are members of this program: it cannot move to another hotel or group."))
 
 	def _numbers(self):
 		if D(str(self.point_value or 0)) < 0:
