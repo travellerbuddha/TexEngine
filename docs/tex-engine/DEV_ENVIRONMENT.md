@@ -20,7 +20,7 @@ bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.36.1
 cd frappe-bench
 bench set-config -g db_host 127.0.0.1 (+ redis_cache/queue/socketio)
 git init -q apps/payments && git -C apps/payments fetch -q --depth 1 https://github.com/frappe/payments \
-  cca07d9f9392e2ea0e521c5975151db9e4b6c321 && git -C apps/payments checkout -q FETCH_HEAD   # CI's PAYMENTS_REF (test_pins)
+  cca07d9f9392e2ea0e521c5975151db9e4b6c321 && git -C apps/payments checkout -q FETCH_HEAD   # CI's PAYMENTS_REF
 ln -s /home/user/TexEngine apps/kamra
 uv pip install --python env/bin/python -e apps/payments -e apps/kamra
 bench setup requirements --dev kamra     # freezegun: the scheduler smoke test (ADR-064)

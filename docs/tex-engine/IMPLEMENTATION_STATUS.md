@@ -1949,6 +1949,8 @@ re-verified first (its "21 remain" missed the eight pypdf advisories listed on 2
   findings (bleach 3 — Frappe no longer depends on it —, cryptography 4, Pillow 13, pypdf 7, sqlparse 5) and reports
   none new; 29 remain, each outside a pin of Frappe v16.36.1 or of payments (pypdf 11, PyJWT 13, WeasyPrint 2,
   pdfkit, setuptools, oauthlib). The oauthlib and PyJWT reviews were redone on v16.36.1.
+- Two-factor reaches Administrator (Frappe v16.36.1 dropped its exemption): recorded in ADR-074 and GO_LIVE ("Pins"),
+  no code change.
 - The sign-in contract **COMPLETE**: Frappe v16.36.1 no longer answers an expired password with the reset link
   (`redirect_to`), which handed out a reset key for the password alone, before a two-factor code. It asks the code
   first and mails the link to the account's address.
@@ -1963,8 +1965,10 @@ re-verified first (its "21 remain" missed the eight pypdf advisories listed on 2
   only locally, on the demo booking domain's DNS); eval 76/76; banquet 101; front-desk journey 13/13; node unit 435;
   DOM 42; i18n complete; a rebuild of the bundles is identical; ruff clean.
 - **Not done:**
-  - the expired-password notice could say that the link was mailed (wording; the e2e asserts today's text);
+  - the expired-password notice could say that the link was mailed (wording; the e2e asserts today's text). As it
+    stands it sends the user to "Forgot password?", and each new reset (that, or another sign-in with the expired
+    password) replaces the reset key, so the first mail's link stops working;
   - a site with `force_user_to_reset_password` and no outgoing Email Account cannot sign that user in: Frappe raises
-    OutgoingEmailError (HTTP 500) and the admin page shows its generic "Wrong email, username or password."; go-live
+    OutgoingEmailError (HTTP 501) and the admin page shows its generic "Wrong email, username or password."; go-live
     needs SMTP anyway (GO_LIVE_READINESS "Pins"). LOW;
   - the 29 advisories wait for a later Frappe tag (PyJWT and oauthlib move on Frappe's `develop` only).

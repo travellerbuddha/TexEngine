@@ -158,7 +158,7 @@ Per batch:
   - **Linters**: "Semgrep Rules" (frappe/semgrep-rules and semgrep/semgrep-rules `python/lang/correctness` at reviewed
     commits, Semgrep pinned; a Monday run scans with the newest rules), "Marketplace install simulation".
   - **Supply chain**: "Secrets (gitleaks)", "npm dependencies (audit-ci)", "Python dependencies (pip-audit)" with
-    reviewed ignores in `.github/supply-chain/pip-audit-ignore.txt` (one reason per advisory; 61 today); also Mondays.
+    reviewed ignores in `.github/supply-chain/pip-audit-ignore.txt` (one reason per advisory; 29 since 2Z-F); also Mondays.
 - Pins live in four files (`ci.yml`, `supply-chain.yml`, `deploy/tex-local/Dockerfile`, `setup-local.sh`):
   `kamra/tex/tests/unit/test_pins.py` keeps one Frappe tag, one payments commit and one bench CLI across them.
 - A red Monday Linters run means upstream added a rule: review it, fix or `nosemgrep` with a reason, then move the pin
