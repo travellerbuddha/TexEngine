@@ -1943,6 +1943,7 @@ class TestP63VersionedPasswords(PatchCase):
 		self.assertTrue(p63.mask(data, {"api_key"}, {"keys": {"token"}}))
 		self.assertEqual(data, {"row_changed": [["keys", 0, "row1", [["token", "*****", "*****"], ["note", "a", "b"]]]],
 		                        "changed": [["api_key", "*****", "*****"]]})
+		self.assertFalse(p63.mask(data, {"api_key"}, {"keys": {"token"}}))     # masked already: no change
 
 	def test_p63_masks_a_child_tables_secret_in_added_and_removed_rows(self):
 		"""LO-29: a child row added to or removed from the record is kept whole in ``added`` / ``removed``
@@ -1965,4 +1966,3 @@ class TestP63VersionedPasswords(PatchCase):
 		migrate(self.P63)
 		self.assertEqual(self.data(v), {"added": [["rooms", {**row, "p63_token": "*****"}]],
 		                                "removed": [["rooms", {**row, "p63_token": "*****"}]]})
-		self.assertFalse(p63.mask(data, {"api_key"}, {"keys": {"token"}}))     # masked already: no change
