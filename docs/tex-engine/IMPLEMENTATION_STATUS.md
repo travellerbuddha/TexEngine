@@ -1928,4 +1928,9 @@ committed build carries no commit stamp. Cards: `HANDOFF_RELEASE.md` (each re-ve
   - the legacy MCP `/mcp/oauth/register` still lets a guest register a client without a rate limit (its redirects are
     limited to claude.ai and loopback; LOW, for the owner);
   - the GitHub actions' Node 20 deprecation warnings (bump to the current majors, optional);
-  - contrast is not re-measured (R-51).
+  - contrast is not re-measured (R-51);
+  - about thirty more dialogs reset their form in a passive effect after they open and show the last session's values
+    for one frame (review S2: e.g. the payment refund dialog, `payments/detail/Actions.tsx` `RefundDialog`, whose amount
+    typed in that frame would be replaced by the full refundable amount; the user invite and contract dialogs; a scan of
+    `useEffect` resets keyed on `open` lists them). LOW: one frame. Proposed: one fix in the design system's
+    Dialog/Drawer (ADR-073), not a sweep of each.

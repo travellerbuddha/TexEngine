@@ -9741,5 +9741,10 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
 - *A drawer starts from what it opens.* A form kept mounted while closed and reset by a passive effect after it opens
   shows the last session's values for a frame and loses what is typed then (the channels.spec "already mapped"
   flake). Such a form is mounted per opening (keyed) or reset in a layout effect, before its first frame is painted.
+  Part 2Z fixed the components HANDOFF_RELEASE §5 listed. About thirty more dialogs follow the same pattern (the
+  payment transaction actions, the reservation action dialogs, the payment-link dialogs, the loyalty, communication
+  and duplicates dialogs, the contract and version dialogs, the user invite dialog): one frame of the last session's
+  values, LOW. The proposed fix is one change in the design system's Dialog and Drawer (show the content one effect
+  pass after `open`, so a parent's reset lands before the first visible frame), not thirty.
 - The Frappe v16.36.1 upgrade (it closes 32 of the reviewed advisories, none of PR #11's PyJWT/oauthlib ones) is its
   own pull request after 2Z (owner, 2026-10-03). ENGINE_VERSION, prices and schema unchanged.

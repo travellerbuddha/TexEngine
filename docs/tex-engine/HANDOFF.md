@@ -1,7 +1,7 @@
 # TEX Engine — Handover after audit Part 2 (2026-10-03)
 
 **Read this whole file before changing anything.** It replaces the 2026-10-01 handoff (that version is in git history).
-Audit Part 2 is finished: every planned batch is merged (Part 2Z with PR #29). What is left waits for an owner decision,
+Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last. What is left waits for an owner decision,
 an external party, or is a LOW leftover listed below. The session that takes over implements, verifies its own work and
 opens one pull request per batch; the owner, who writes in Turkish, reviews and merges. Never merge, never push to the
 base branch, never rebase or force-push a shared branch.
@@ -60,7 +60,8 @@ Nothing planned remains. In order of likely need:
 | 6 | Smaller owner questions with defaults | owner | C-02 … C-16 |
 | 7 | CLP and ISK: the server keeps them in 2 decimals (`money.MINOR_UNITS`), ISO 4217 says 0; the screens now follow the server (2K-6) | owner: a money-engine rounding change | §6K6 "Not done" |
 | 8 | G-99: `get_contract` returns `payload_hash` to `price.view` callers (offline confirmation of guessed hidden values) | none (LOW) | FINAL_GAP_AUDIT §4 (#70b) |
-| 9 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" | none (LOW) | §6 … §6Z |
+| 9 | About thirty dialogs still reset their form in a passive effect after opening (one frame of the last session's values) | none (LOW); one fix in the design system's Dialog/Drawer | ADR-073, §6Z "Not done" |
+| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" | none (LOW) | §6 … §6Z |
 
 Not in scope unless the owner asks: G-41r allotment × channel, G-54 surcharges by LOS/arrival, G-64 CRM campaigns.
 
