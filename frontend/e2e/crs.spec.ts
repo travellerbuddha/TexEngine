@@ -231,6 +231,7 @@ test("C-02: an agent changing a stay priced by hand is not offered the change's 
   await expect(drawer.getByText("Price set by hand", { exact: true })).toBeVisible()
   await expect(drawer.getByText("Only staff who may set prices can change a stay priced by hand. Ask a revenue manager to make this change.")).toBeVisible()
   await expect(drawer.getByRole("button", { name: "Use the change's price" })).toHaveCount(0)
+  await expect(drawer.getByText(/kept unless you use the change's price/)).toHaveCount(0) // review round 1: no choice offered in words either
   await byLabel(drawer, "Reason").fill(`One more night (${run})`)
   await expect(drawer.getByRole("button", { name: "Apply change" })).toBeDisabled()
   noErrors()

@@ -258,6 +258,7 @@
  "res.mod.expires_hint": "Un calcul este valabil 30 de minute.",
  "res.mod.intro": "Prețul este blocat. O modificare este recalculată pe baza aleasă, afișată lângă prețul actual și aplicată doar cu un motiv. Nimic nu se schimbă până nu aplicați.",
  "res.mod.manual_body": "Prețul acestui sejur a fost stabilit manual: {manual}. Această modificare costă {engine}. Prețul manual se păstrează dacă nu folosiți prețul modificării.",
+ "res.mod.manual_body_no_override": "Prețul acestui sejur a fost stabilit manual: {manual}. Această modificare costă {engine}.",
  "res.mod.manual_choose": "Păstrați prețul manual (prețul final de mai jos) sau folosiți prețul modificării.",
  "res.mod.manual_needs_override": "Doar personalul care poate stabili prețuri poate modifica un sejur cu preț manual. Cereți unui revenue manager să facă această modificare.",
  "res.mod.manual_dropped": "Prețul modificării înlocuiește prețul manual ({manual}). Se înregistrează și se auditează.",

@@ -260,6 +260,7 @@
  "res.mod.expires_hint": "Hesaplama 30 dakika geçerlidir.",
  "res.mod.intro": "Fiyat kilitli. Değişiklik seçtiğiniz esasa göre yeniden fiyatlanır, mevcut fiyatın yanında gösterilir ve yalnızca gerekçeyle uygulanır. Siz uygulayana kadar hiçbir şey değişmez.",
  "res.mod.manual_body": "Bu konaklamanın fiyatı elle verildi: {manual}. Bu değişikliğin fiyatı {engine}. Değişikliğin fiyatını kullanmadıkça elle verilen fiyat korunur.",
+ "res.mod.manual_body_no_override": "Bu konaklamanın fiyatı elle verildi: {manual}. Bu değişikliğin fiyatı {engine}.",
  "res.mod.manual_choose": "Elle verilen fiyatı koruyun (aşağıdaki son fiyat) ya da değişikliğin fiyatını kullanın.",
  "res.mod.manual_needs_override": "Elle fiyat verilmiş bir konaklamayı yalnız fiyat belirleme yetkisi olanlar değiştirebilir. Bu değişikliği bir gelir yöneticisinden isteyin.",
  "res.mod.manual_dropped": "Değişikliğin fiyatı elle verilen fiyatın ({manual}) yerine geçer. Bu kaydedilir ve denetim kaydına yazılır.",

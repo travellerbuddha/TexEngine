@@ -507,7 +507,7 @@ export function ModifyDrawer({
             {manual && (
               <Notice tone="warning" title={t("res.mod.manual_title")}>
                 <p>
-                  {t("res.mod.manual_body", {
+                  {t(canOverride ? "res.mod.manual_body" : "res.mod.manual_body_no_override", {
                     manual: money(manual.amount, proposal.proposed.currency),
                     engine: money(manual.engine_total, proposal.proposed.currency),
                   })}
