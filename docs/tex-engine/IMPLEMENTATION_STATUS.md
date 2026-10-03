@@ -1990,11 +1990,12 @@ HANDOFF §2 items 2, 8 and 9 (each re-verified first; G-99's card named one path
     digest through `frappe.client.get`; the change history kept both digests; `crs.reservation` named it to an agent
     without cost.
   - R-14 is COMPLETE (G-99 was its last gap).
-- Overlays' first frame **COMPLETE**: the design system's Dialog, modal Drawer and side panel show their content one
-  passive-effect pass after they open (`useShown`), so a form its parent resets on opening is never committed with
-  the last session's values (the about thirty dialogs of ADR-073; ConfirmDialog too). AddExtrasDialog's
-  first-quantity focus waits for its form. Tests, DOM harness `overlays.spec.ts` (three new). Red before: the
-  content's commits were `["last session", "last session", "fresh 1"]` for each of the three. Bundles rebuilt.
+- Overlays' first frame **COMPLETE**: the design system's Dialog, modal Drawer and side panel keep their content
+  hidden (`visibility: hidden`) until one passive-effect pass after they open (`useShown`), so a form its parent
+  resets on opening is never seen or typed into with the last session's values (the about thirty dialogs of
+  ADR-073; ConfirmDialog too). The content is rendered in the opening render, as before (the 2Z first-frame e2e
+  checks read it there). Tests, DOM harness `overlays.spec.ts` (three new: what each commit shows). Red before:
+  `["last session", "last session", "fresh 1"]` for each of the three. Bundles rebuilt.
   The guest booking app's own dialog (`src/booking/ui/Dialog.tsx`) is not the design system's and is unchanged: none
   of its users resets a form when it opens.
 - **Not done:** nothing found in the batch.

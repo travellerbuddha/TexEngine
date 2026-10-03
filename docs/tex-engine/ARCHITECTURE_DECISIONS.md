@@ -9806,13 +9806,16 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
     no such database goes live.
   - Server code that ties a booking to its version (booking, modification, `sold_terms`) reads the digest from the
     internal quote or the stored record, as before.
-- *An overlay shows its content one effect pass after it opens (ADR-073's proposal).* About thirty dialogs keep their
-  form mounted while closed and reset it in a passive effect when they open, so the content was first committed with
-  the last session's values. The design system's Dialog, modal Drawer and side panel now render their content when
-  `open` has been true for one passive-effect pass (`useShown`); closing is at once. The parent's reset runs in that
-  same pass, so the first commit already carries the reset form. Focus, Escape, the scroll lock and the side panel's
-  page width follow what is shown. Mounting per opening (keyed) or a layout-effect reset stay the patterns for a new
-  form; the overlay's rule covers what does not follow them.
-  - A consumer effect that reaches into the content when `open` turns true must wait until the content is there:
-    the content's refs are null in the render that opens it. Only AddExtrasDialog's first-quantity focus did; a
-    scan of every Dialog / Drawer consumer found no other.
+- *An overlay keeps its content hidden until one effect pass after it opens (ADR-073's proposal).* About thirty dialogs
+  keep their form mounted while closed and reset it in a passive effect when they open, so the content was first
+  seen, and could be typed into, with the last session's values. The design system's Dialog, modal Drawer and side
+  panel render their content in the opening render, as before, but with `visibility: hidden` (not painted, not
+  focusable, not in the accessibility tree) until `open` has been true for one passive-effect pass (`useShown`);
+  closing is at once. The parent's reset runs in that same pass, so the content is first seen with the reset form.
+  Focus, Escape, the scroll lock and the side panel's page width start when it is shown. Mounting per opening
+  (keyed) or a layout-effect reset stay the patterns for a new form; the overlay's rule covers what does not follow
+  them.
+  - Rendering nothing until that pass (the first version, 391c530) broke the 2Z first-frame e2e checks, which read
+    the dialog right after the click's commit: the content and its refs must exist in the opening render.
+  - A consumer that focuses into the content in the opening render reaches a hidden, unfocusable element; a scan of
+    every Dialog / Drawer consumer found none (AddExtrasDialog focuses once its list has loaded).
