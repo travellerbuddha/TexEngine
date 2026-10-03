@@ -528,7 +528,8 @@ COMMERCIAL_SPECS = [
 		F("guest_key", "Data", "Guest key (hash)"),
 		F("amount", "Currency", "Discount", options="currency"),
 		F("currency", "Link", "Currency", "Currency"),
-	], perms=IMMUTABLE_LOG, autoname="hash", track_changes=False, sort_field="creation", in_create=True),
+	], perms=IMMUTABLE_LOG, autoname="hash", track_changes=False, sort_field="creation", in_create=True,
+	   extra={"modified": "2026-09-30 00:00:00.000000"}),  # the JSON's own stamp (LO-44)
 
 	dt("TEX FX Rate", C, [
 		F("provider", "Select", "Provider", ["TCMB", "ECB", "MANUAL"], reqd=1, in_list_view=1,
@@ -591,7 +592,8 @@ COMMERCIAL_SPECS = [
 		F("book_to", "Date", "Bookable until (sale date)"),
 		F("scope_key", "Data", "Scope key", read_only=1, unique=1, hidden=1),
 		F("note", "Data", "Note"),
-	], perms=COMMERCIAL, autoname="hash", sort_field="restriction_date"),
+	], perms=COMMERCIAL, autoname="hash", sort_field="restriction_date",
+	   extra={"modified": "2026-10-02 00:00:00.000000"}),  # the JSON's own stamp (LO-44)
 
 	dt("TEX Inventory Day", C, [
 		F("property", "Link", "Property", "Property", reqd=1),
@@ -857,7 +859,7 @@ BOOKING_SPECS = [
 		F("request_json", "Code", "Request", "JSON"),
 		F("result_json", "Long Text", "Result", permlevel=1),          # pricing internals (G-95, ADR-056)
 	], perms=[*IMMUTABLE_LOG, INTERNALS], autoname="hash", track_changes=False, sort_field="creation",
-	   in_create=True),
+	   in_create=True, extra={"modified": "2026-09-24 14:00:00.000000"}),  # the JSON's own stamp (LO-44)
 
 	dt("TEX Reservation Revision", B, [
 		F("reservation", "Link", "Reservation", "Reservation", reqd=1, in_list_view=1, in_standard_filter=1),
@@ -891,7 +893,7 @@ BOOKING_SPECS = [
 		F("snapshot_before", "Long Text", "Pricing before", permlevel=1),     # pricing internals (G-95, ADR-056)
 		F("snapshot_after", "Long Text", "Pricing after", permlevel=1),
 	], perms=[*IMMUTABLE_LOG, INTERNALS], autoname="REV-.######", naming_rule="Expression (old style)", track_changes=False,
-	   sort_field="creation", in_create=True),
+	   sort_field="creation", in_create=True, extra={"modified": "2026-09-24 14:00:00.000000"}),  # the JSON's own stamp (LO-44)
 
 	# a guest's own change and how its money was settled (G-45, ADR-044): written only by
 	# services.guest_changes; the proposal, the totals and the amount to collect never change.
@@ -1085,7 +1087,7 @@ PAYMENT_SPECS = [
 		F("account_holder", "Data", "Account holder"),
 		F("transfer_instructions", "Small Text", "Instructions"),
 	], perms=[SM, HA_RO], autoname="PPA-.####", naming_rule="Expression (old style)",
-	   title_field="label"),
+	   title_field="label", extra={"modified": "2026-09-25 00:00:00.000000"}),  # the JSON's own stamp (LO-44)
 
 	dt("TEX Payment Method Rule", PM, [
 		F("property", "Link", "Hotel", "Property", reqd=1, in_list_view=1),
@@ -1123,7 +1125,8 @@ PAYMENT_SPECS = [
 		# one link per key, in the database (O-38, p57)
 		F("idempotency_key", "Data", "Idempotency key", read_only=1, unique=1),
 	], perms=[SM, HA_RO],
-	   autoname="PL-.YYYY.-.#####", naming_rule="Expression (old style)", title_field="guest_name"),
+	   autoname="PL-.YYYY.-.#####", naming_rule="Expression (old style)", title_field="guest_name",
+	   extra={"modified": "2026-09-30 00:00:57.000000"}),  # the JSON's own stamp (LO-44)
 
 	dt("TEX Payment Transaction", PM, [
 		F("property", "Link", "Hotel", "Property", in_standard_filter=1),
@@ -1158,6 +1161,7 @@ PAYMENT_SPECS = [
 		# NEW-6 (ADR-066): a start is asking the gateway for its checkout since then, with no lock held; a
 		# second start of the charge waits until it is cleared or older than the lease (p68)
 		F("checkout_started_at", "Datetime", "Checkout being started since", read_only=1),
+		F("last_reverified_at", "Datetime", "Last asked by the re-verification job", read_only=1, no_copy=1),
 		SB("Outcome"),
 		F("raw_status", "Data", "Provider status"),
 		F("error_code", "Data", "Error code"),
@@ -1173,8 +1177,8 @@ PAYMENT_SPECS = [
 		F("reconciliation_note", "Small Text", "Why", read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-10-02 00:00:00.000000"}),   # the indexes, expires_at, reconciliation, captured_at,
-	                                                        # checkout_started_at came later
+	   extra={"modified": "2026-10-02 18:00:00.000000"}),   # the indexes, expires_at, reconciliation, captured_at,
+	                                                        # checkout_started_at, last_reverified_at came later
 
 	dt("TEX Payment Allocation", PM, [
 		F("property", "Link", "Hotel", "Property"),
@@ -1256,7 +1260,8 @@ CRM_SPECS = [
 		F("quote", "Link", "Quote", "TEX Quote", permlevel=1),
 		F("last_event_at", "Datetime", "Last activity"),
 		F("recovered_booking", "Link", "Recovered booking", "TEX Booking", permlevel=1),
-	], perms=[*CRM, INTERNALS_RW], autoname="ABN-.YYYY.-.#####", naming_rule="Expression (old style)"),
+	], perms=[*CRM, INTERNALS_RW], autoname="ABN-.YYYY.-.#####", naming_rule="Expression (old style)",
+	   extra={"modified": "2026-09-26 10:00:00.000000"}),  # the JSON's own stamp (LO-44)
 
 	dt("TEX Loyalty Tier", R, [
 		F("tier_name", "Data", "Tier", reqd=1, in_list_view=1),
@@ -1323,7 +1328,8 @@ CRM_SPECS = [
 		  description="What the earning was computed from; a rule change never rewrites it (G-24)"),
 		F("explanation", "Code", "How the points were earned", "JSON", read_only=1),
 	], perms=READONLY_AUDIT,
-	   autoname="LYL-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
+	   autoname="LYL-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
+	   extra={"modified": "2026-09-26 10:00:00.000000"}),  # the JSON's own stamp (LO-44)
 ]
 
 # ═══ TEX Connect ══════════════════════════════════════════════════════════
