@@ -2074,7 +2074,8 @@ Split in two batches: 2N-1 (this) the membership, the call centre and staff; 2N-
   G-57 are reversed by the owner's decision (declared in the PR).
 - C-04c **COMPLETE**: CRM → Loyalty shows each program's membership (member since, by their stays, left on) with
   "Join program" / "End membership" (a reason) for staff who may edit the guest; the Call Center prices the search for
-  the caller picked (picking or clearing one prices the offers shown again), an offer says "Member price" and the
+  the caller picked (picking or clearing one prices the last search again: review rounds 1 and 2), an offer says
+  "Member price" and the
   hotel that the caller is a member; the promotion editor always offers "Members only" with its new help (six
   languages). Test: e2e `crm-membership.spec`.
 - Review round 1 **COMPLETE** (1 BLOCKER, 5 SHOULD, NITs; all fixed): a change prices a stay as a member's only when it
@@ -2090,6 +2091,13 @@ Split in two batches: 2N-1 (this) the membership, the call centre and staff; 2N-
   `[False, False] != [False, True]` (the second check read without a lock), `TypeError: member_of() got an unexpected
   keyword argument 'lock'`, `KeyError: 'memberships_dropped'`, `KeyError: 'program_property'`, the cross-enterprise
   join and adjust not refused, the erased member still one, and the e2e (the re-search sent the edited check-in).
+- Review round 2 **COMPLETE** (no BLOCKER; every round-1 finding verified fixed; 1 SHOULD, 4 NITs): a caller picked
+  while a search is on its way prices that search again for them (the request started last, not the last answer; the
+  late answer is ignored); a non-member's stay booked from a member's search is recorded as a non-member's, so the
+  historical simulation never prices it as a member's; the erased checks read the locked profile; the locking reads of
+  memberships sort nothing. Tests: e2e `crm-membership.spec` (a caller named while the search is on its way; red: no
+  search for the caller), `test_c04_r1_a_change_…` (the snapshot's flag and the simulation; red: the non-member's stay
+  was recorded with `member: true`, `[True, True] != [False, True]`).
 - **Not done:**
   - 2N-2 (next batch, after this one is merged): the web — sign-in and join by a one-time e-mail link, a member's
     session on the booking site, the "Member price" teaser for a guest who is not signed in, a guest refusal code for a
@@ -2098,5 +2106,9 @@ Split in two batches: 2N-1 (this) the membership, the call centre and staff; 2N-
     (the sale's terms; ADR-077);
   - the CRM's redemption hint picks a group program's account by the first hotel the user sees the guest at (LOW,
     hint only: the server redeems from the right program);
+  - a membership of a group's program stays Active at the group's other hotels when one hotel later gets its own
+    program; the CRM lists the program each visible hotel resolves to, so it ends there only where a sister hotel is
+    in view (LOW, review round 2 E);
+  - the call centre's member search reads the guest's erasure mark once per hotel (a primary-key read; LOW);
   - the CRS reservations page names no caller (the owner chose web and call centre);
   - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.

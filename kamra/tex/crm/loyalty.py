@@ -519,7 +519,7 @@ def member_of(guest: str | None, program: str | None, *, lock: bool = False) -> 
 	meanwhile is not in it)."""
 	if not (guest and program):
 		return False
-	if frappe.db.get_value("Guest", guest, "tex_erased_at"):
+	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=lock):
 		return False
 	m = membership(guest, program, lock=lock)
 	if m:
@@ -547,7 +547,7 @@ def join(guest: str, program: str, *, property: str | None = None) -> dict:
 	if not prog.enabled:
 		frappe.throw(_("This program is not enabled."))
 	require_live_guest(guest)                          # the profile locked first, as every write of its records
-	if frappe.db.get_value("Guest", guest, "tex_erased_at"):
+	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=True):       # locked above: as committed now
 		frappe.throw(_("An erased profile cannot join a program."))
 	m = membership(guest, program, lock=True)
 	if m and m.status == "Active":
@@ -591,8 +591,7 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None)
 
 # a profile's memberships, read with a lock (what is committed now: a join committed after this request began
 # included), by the (guest, program) index (p77)
-MEMBERSHIPS_OF = """SELECT name, program, modified FROM `tabTEX Loyalty Member` WHERE guest=%(g)s
-                    ORDER BY name FOR UPDATE"""
+MEMBERSHIPS_OF = """SELECT name, program, modified FROM `tabTEX Loyalty Member` WHERE guest=%(g)s FOR UPDATE"""
 
 
 def merge_memberships(source: str, target: str) -> list[str]:
@@ -618,7 +617,7 @@ def end_memberships(guest: str, reason: str) -> int:
 	"""Right to erasure: the guest's memberships end (their records stay, naming the blanked profile). A member by
 	their stays only is no member once erased either (``member_of``). Locking reads, as a merge's."""
 	names = frappe.db.sql("""SELECT name FROM `tabTEX Loyalty Member` WHERE guest=%(g)s AND status='Active'
-	                         ORDER BY name FOR UPDATE""", {"g": guest}, pluck=True)
+	                         FOR UPDATE""", {"g": guest}, pluck=True)
 	for name in names:
 		frappe.db.set_value("TEX Loyalty Member", name, {"status": "Left", "left_at": now_datetime(),
 		                                                 "left_reason": reason})

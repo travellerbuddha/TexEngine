@@ -8,7 +8,7 @@
 // program this run created disabled.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e crm-membership
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test"
-import { api, byLabel, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
+import { api, byLabel, holdNext, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
 
 test.use({ locale: "en-US" })
 
@@ -201,6 +201,33 @@ test("a member joined in CRM gets the member price in the Call Center; the membe
       const plain = ((await again.json()) as { message: StaffSearch }).message
       expect(plain.properties.some((p) => p.member || p.offers.some((o) => o.member_price))).toBe(false)
       await expect(offers.getByText("Member price", { exact: true })).toHaveCount(0)
+    })
+
+    await test.step("Call Center: a caller named while the search is on its way is priced for (review round 2)", async () => {
+      await agent.goto(texPath("/tex/crs/call-center"))
+      await expect(agent.getByRole("heading", { level: 1, name: "Call Center" })).toBeVisible()
+      const market = byLabel(agent, "Market")
+      await market.focus()
+      await agent.keyboard.type("Germ")
+      await expect(market).toHaveValue("DE")
+      const { checkIn } = stayDates(120, 2)
+      await byLabel(agent, "Check-in").focus()
+      await agent.keyboard.type(mdy(checkIn))
+      const first = await holdNext(agent, "kamra.tex.api.ui_crs.search")
+      await agent.keyboard.press("Alt+KeyS")
+      await first.held                                                   // the first search: no caller, on its way
+      const forCaller = agent.waitForResponse(
+        (r) => r.url().includes("ui_crs.search") && r.ok() && (r.request().postData() ?? "").includes(guest),
+        { timeout: 15_000 },
+      )
+      await agent.getByRole("combobox", { name: "Find caller" }).fill(`Member ${run}`)
+      await agent.getByRole("option", { name: new RegExp(`Member ${run}`) }).first().click()
+      const answer = await forCaller                                     // the same search, for the caller
+      expect(answer.request().postData() ?? "").toContain(checkIn)
+      first.release()                                                    // the older answer arrives late: ignored
+      const offers = agent.getByRole("listbox", { name: "Offers" })
+      await expect(offers.getByText("Member price", { exact: true }).first()).toBeVisible()
+      await expect(offers.getByText("caller is a member: member prices").first()).toBeVisible()
     })
 
     await test.step("CRM: the agent ends the membership with a reason", async () => {

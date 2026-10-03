@@ -418,6 +418,17 @@ class TestMemberPrices(MembershipCase):
 		mine_res = frappe.db.get_value("Reservation", {"tex_booking": mine["booking"]}, "name")
 		self.assertFalse(self.members_price_in(self.change(theirs_res)))           # five nights, no member's price
 		self.assertTrue(self.members_price_in(self.change(mine_res)))              # the member gets it
+		# review round 2: the stay records whether its booker was a member, so the historical simulation of the
+		# non-member's stay never applies a members-only promotion either (it reads the stay as sold)
+		from kamra.tex.services import modification
+
+		self.assertEqual([frappe.parse_json(frappe.db.get_value("Reservation", r, "tex_pricing_snapshot"))["request"]
+		                  ["member"] for r in (theirs_res, mine_res)], [False, True])
+		self.promotion(promotion_name="Members any stay")
+		at = str(now_datetime())
+		simulated = {r: modification.simulate(r, at)["simulated"]["promotions"] for r in (theirs_res, mine_res)}
+		self.assertEqual([any(p["applied"] and p.get("member_only") for p in simulated[r])
+		                  for r in (theirs_res, mine_res)], [False, True])
 
 	def test_c04_r1_the_booking_checks_the_membership_again_with_a_locking_read(self):
 		"""Review round 1: the second check runs once the profile is locked, with a locking read (a plain read sees

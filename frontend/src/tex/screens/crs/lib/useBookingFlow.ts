@@ -205,6 +205,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   // the caller the Call Center names in its search: priced as a member where they are one (C-04). A ref, so a
   // search started right after the caller is picked already names them
   const priceFor = useRef<string | undefined>(undefined)
+  // the request of the search started last (answered or still on its way): what a caller picked meanwhile prices
+  // again (review round 2)
+  const submitted = useRef<SearchArgs | undefined>(undefined)
   const setPriceFor = useCallback((guest?: string | null) => {
     priceFor.current = guest || undefined
   }, [])
@@ -357,6 +360,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
    * still has them. */
   const execute = useCallback(
     async (args: SearchArgs, promo: string[], keepSelection: boolean): Promise<SearchResult | null | undefined> => {
+      submitted.current = args
       const prevSelection = selection
       const seq = ++searchSeq.current
       setSearching(true)
@@ -423,15 +427,18 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   )
 
   /** Name the caller the offers are priced for (the Call Center, C-04) and price the offers shown again for them:
-   * the last search's own request with the new caller, never the form as edited since (review round 1), keeping
-   * the rooms picked. Nothing to price again before a search, or once the booking is made. */
+   * the request of the search started last, answered or still on its way (review round 2), with the new caller,
+   * never the form as edited since (review round 1), keeping the rooms picked. A search on its way is replaced:
+   * its answer, priced for nobody or the caller before, is ignored when it arrives (O-29). Nothing to price again
+   * before a search, or once the booking is made. */
   const repriceFor = useCallback(
     async (guest?: string | null): Promise<SearchResult | null | undefined> => {
       priceFor.current = guest || undefined
-      if (!lastArgs || !result || booking) return undefined
-      return execute({ ...lastArgs, guest: priceFor.current }, lastArgs.promo_codes ?? [], true)
+      const last = submitted.current
+      if (!last || booking) return undefined
+      return execute({ ...last, guest: priceFor.current }, last.promo_codes ?? [], true)
     },
-    [lastArgs, result, booking, execute],
+    [booking, execute],
   )
 
   // ── room builder ──
@@ -768,6 +775,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       if (!keepSearch) {
         // a search still on its way belongs to the call being reset
         searchSeq.current++
+        submitted.current = undefined
         setSearching(false)
         setForm(defaultSearchForm(clock.today(), sellable.map((p) => p.name), defaultChannel))
         setResult(undefined)

@@ -9916,8 +9916,9 @@ one-time link sent by e-mail. 2N-1 (this ADR) delivers the membership, the call 
   (`crm.require_guest`, `crm.view`). At each hotel where the agent sees the guest and the guest is a member, the
   offers are a member's (`quoting.search(member=set of hotels)`): the offer key signs `member: true`, so its quote
   is priced as a member's; each hotel says `member` and each offer `member_price` (a members-only promotion
-  applied). The Call Center names the caller picked; picking or clearing one prices the last search again for that
-  caller (its own request, never the form as edited since), keeping the rooms picked.
+  applied). The Call Center names the caller picked; picking or clearing one prices the search started last again
+  for that caller (its own request, answered or still on its way, never the form as edited since), keeping the rooms
+  picked; an older answer arriving late is ignored (O-29).
 - *Booking a member's price.* `create_booking` books a room priced with a members-only promotion only for a member
   of the hotel's program: the profile the booking will join is read before anything is locked or written and must
   be a member; once `resolve_guest` has locked it, it is checked again with locking reads (the membership row, and the
@@ -9928,7 +9929,10 @@ one-time link sent by e-mail. 2N-1 (this ADR) delivers the membership, the call 
 - *A change of a stay* prices it as a member's when it was sold at a member's price (the sale's terms, as a promotion
   code's), or when its offer was a member's and the booker is a member of the hotel's program now. A member's search
   signs every offer as a member's and an offer no members-only promotion priced books for anyone, so a non-member
-  booked from it never gets a member's price on a change (review round 1, BLOCKER).
+  booked from it never gets a member's price on a change (review round 1, BLOCKER). The stay records whether its
+  booker was a member: a non-member's stay booked from a member's search is recorded with `member: false` (the
+  booking reads the membership once, with locks, after the profile is locked), so the historical simulation, which
+  reads the stay as sold, never prices it as a member's either (review round 2).
 - *What it does not do (yet).* The web search, quote and booking never price a member until 2N-2. The CRS reservations page does not name a caller (the owner chose web and call centre).
 - *Schema.* New DocType `TEX Loyalty Member` (its `property`, "Hotel", is where it was made; fresh installs: the model
   sync makes it, D-14); p77 creates its

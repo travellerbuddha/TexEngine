@@ -219,7 +219,11 @@ def require_member(profile: str | None, property: str, *, lock: bool = False) ->
 	from kamra.tex.crm import loyalty
 
 	if not (profile and loyalty.is_member(profile, property, lock=lock)):
-		frappe.throw(_("This price is for members of the hotel's loyalty program, and this guest is not a member. "
+		refuse_members_price()
+
+
+def refuse_members_price() -> None:
+	frappe.throw(_("This price is for members of the hotel's loyalty program, and this guest is not a member. "
 		               "Search again for this guest, or join them to the program first."), refusal("SEARCH_AGAIN"))
 
 
@@ -822,10 +826,15 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	                                                                                      web=not staff))
 	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
 	                                                               language=language, staff=staff)
-	if members_price:
-		# the profile is locked; its membership read with locking reads, so a leave committed meanwhile is seen
-		# (this request's plain reads still see its old read view: review round 1)
-		require_member(guest_name, property, lock=True)
+	booker_member = None
+	if any(r[1].get("member") for r in rows):
+		# offers of a member's search: the profile is locked, its membership read with locking reads, so a leave
+		# committed meanwhile is seen (this request's plain reads still see its old read view: review round 1)
+		from kamra.tex.crm import loyalty
+
+		booker_member = loyalty.is_member(guest_name, property, lock=True)
+		if members_price and not booker_member:
+			refuse_members_price()
 	booker = booker or {}
 	token, token_digest = new_manage_token()
 	manage_days = int(frappe.db.get_single_value("TEX Settings", "manage_link_days") or 365)
@@ -868,6 +877,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		# payload by version and hash (ADR-058)
 		priced = get_datetime(result["request"]["sale_at"])
 		snapshot = {**result, "accepted_at": str(now), "priced_at": str(priced), "quote_id": row.name}
+		if booker_member is False:
+			# a non-member booked an offer of a member's search no members-only promotion priced: the stay is
+			# recorded as a non-member's, so a change or a simulation never prices it as a member's (review round 2)
+			snapshot["request"] = {**result["request"], "member": False}
 		res = frappe.get_doc({
 			"doctype": "Reservation", "property": property, "guest": guest_name, "room_type": req["room_type"],
 			"check_in_date": req["check_in"], "check_out_date": req["check_out"], "adults": int(req["adults"]),
