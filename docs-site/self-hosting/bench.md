@@ -12,8 +12,8 @@ For teams who prefer a classic Frappe bench over Docker.
 
 ```bash
 pip install frappe-bench
-bench init --frappe-branch v16.25.0 frappe-bench && cd frappe-bench
-bench get-app payments
+bench init --frappe-branch v16.36.1 frappe-bench && cd frappe-bench
+bench get-app --branch version-16 payments
 bench get-app kamra https://github.com/Kamra-PMS/kamra-pms --branch main
 bench new-site pms.yourhotel.com --admin-password <strong-password>
 bench --site pms.yourhotel.com install-app kamra

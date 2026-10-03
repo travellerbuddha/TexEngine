@@ -215,6 +215,7 @@ auto-refund unless the property policy explicitly allows it; they create a pendi
 ## ADR-018 Test environment
 **Decision.** Development/CI bench: Frappe v16.25.0, Python 3.14, Node 24, MariaDB, Redis, apps
 `payments` + `kamra`. Pure tests run without a bench. See `DEV_ENVIRONMENT.md`.
+*Amended in Part 2Z-F (ADR-074):* Frappe v16.36.1 and payments' `version-16` branch at a pinned commit.
 
 ## ADR-019 Legacy endpoints inherit TEX tenancy
 **Decision.** `kamra.authz.require_roles` (used by ~300 legacy endpoints) now also resolves the
@@ -4222,6 +4223,8 @@ each fix has a test written first (the fail-first counts are at the end).
     sign-in is answered as e-mail, with the set-up instructions).
   - An expired password follows `redirect_to` only when it is on this site, else the page says so.
     A website user ("No App") goes to the portal (`/me`), as `/` sends them. Anything else is told.
+    *Amended in Part 2Z-F (ADR-074):* Frappe v16.36.1 answers an expired password without `redirect_to`
+    (it mails the link, after a two-factor code), so the page says to use "Forgot password?".
   - "Forgot password?" (`/login#forgot`) and "Other sign-in options"
     (`/login?redirect-to=/kamra/tex`, where single sign-on or LDAP live) lead to Frappe's page. The
     legacy housekeeping sign-in hands any answer without a session to that page.
@@ -9748,3 +9751,39 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   pass after `open`, so a parent's reset lands before the first visible frame), not thirty.
 - The Frappe v16.36.1 upgrade (it closes 32 of the reviewed advisories, none of PR #11's PyJWT/oauthlib ones) is its
   own pull request after 2Z (owner, 2026-10-03). ENGINE_VERSION, prices and schema unchanged.
+
+## ADR-074 Frappe v16.36.1 with payments' version-16 branch (audit Part 2Z-F)
+- *Decision.* Every bench TEX is built and tested on (CI, the supply-chain check, the tex-local Dockerfile and
+  `setup-local.sh`, DEV_ENVIRONMENT) runs Frappe tag **v16.36.1** and payments' **`version-16`** branch at commit
+  `cca07d9f9392e2ea0e521c5975151db9e4b6c321` (before: v16.25.0 and payments `develop` at 86fefa9). The owner made it
+  its own pull request after 2Z (2026-10-03). Still a release tag, not the moving `version-16` branch of Frappe.
+- *Why payments' version-16.* `develop` declares `frappe >=17.0.0-dev,<18.0.0` (bench installed it on a v16 bench with
+  a warning only); `version-16` declares `>=16.0.0,<17.0.0`. The two differ in Razorpay code; TEX imports nothing from
+  payments (`required_apps` only). `test_pins` checks that the payments branch follows the Frappe tag's major.
+- *What the framework move brings.* Six Frappe patches (notification types and log backfills, the Contact Us
+  acknowledgement switch, SMS settings roles), none on a TEX DocType; cryptography 50, Pillow 12.3, pypdf 6.15,
+  sqlparse 0.6 with sql_metadata 3, Click 8.4, pyOpenSSL 26.4; duckdb and pyarrow are new; bleach is gone. TEX uses
+  cryptography (the Sipay provider's AES) and Pillow (upload and ID-document checks), whose tests pass on the new
+  versions, and imports none of the others. Security fixes TEX benefits from: Frappe's OAuth provider drops the
+  password grant, refuses a disabled user's bearer token and takes POST only where it changes state; an API key or
+  token now meets the user's IP restriction; the Contact Us page (off on TEX sites, `is_disabled`) no longer echoes a
+  message in its reply.
+- *Two-factor reaches Administrator.* v16.25.0 exempted Administrator from two-factor sign-in; v16.36.1 does not.
+  Saving System Settings with two-factor on marks the role "All", so Administrator then needs a code too; with the
+  authenticator app not yet set up, the set-up mail goes to Administrator's address. Give Administrator a mailbox that
+  is read, or set its app up, before two-factor is switched on (GO_LIVE_READINESS "Pins"). A two-factor user who sets
+  a new password from a reset link is sent to `/login` (code and new password) instead of being signed in.
+- *The one contract that changed for TEX.* An expired password (`force_user_to_reset_password`) was answered with the
+  reset link (`redirect_to`), before the two-factor code: the password alone gave a reset key. Frappe v16.36.1 asks
+  the code first and mails the link to the account's address; the answer is `message: "Password Reset"` without a
+  link. The admin sign-in page already reads that answer (it tells the user to use "Forgot password?"; a same-site
+  `redirect_to` is still followed). `test_entry_branding`'s test of that answer is rewritten to the new contract and a
+  test for the two-factor order is added (the PR's notes declare the changed assertion). A site with that setting
+  needs a working outgoing Email Account: without one, Frappe fails the sign-in (OutgoingEmailError).
+- *Supply chain.* pip-audit over the new environment closes 32 of the 61 reviewed findings (bleach 3, cryptography 4,
+  Pillow 13, pypdf 7, sqlparse 5) and reports none new. 29 remain, each outside a pin of Frappe v16.36.1 or of
+  payments: pypdf 11, PyJWT 13 and oauthlib 1 (Frappe moves those on `develop` only), WeasyPrint 2, pdfkit 1,
+  setuptools 1. The oauthlib and PyJWT reviews were redone on v16.36.1 (its jwt calls are unchanged).
+- *Existing benches.* `setup-local.sh` keeps a bench it finds and now says when its Frappe differs; NATIVE.md §5 has
+  the in-place steps used on the development bench (fetch the tag and the commit, `bench setup requirements`, build,
+  migrate). The committed bundles do not depend on Frappe: a rebuild after the move is identical.

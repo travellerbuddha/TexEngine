@@ -5,7 +5,10 @@ newest frappe-bench, while the Dockerfile and setup-local.sh pinned one payments
 5.31.0; setup-local.sh installed the newest when none was on PATH): CI equalled the image only while develop did not
 move. Semgrep's rules, its CLI and the registry pack were fetched
 unpinned on every run, so a new upstream rule could turn the base red overnight (2026-09-30). Each pin is named
-once per file here, and the files must agree; a pin changed in one file alone is red."""
+once per file here, and the files must agree; a pin changed in one file alone is red.
+
+2Z-F (ADR-074): payments' develop declares Frappe >=17.0.0-dev, which bench did not refuse on a v16 bench; its
+version-16 branch declares >=16,<17. The payments branch follows the Frappe tag's major."""
 
 import re
 import unittest
@@ -19,6 +22,9 @@ DOCKER = "deploy/tex-local/Dockerfile"
 LOCAL = "deploy/tex-local/setup-local.sh"
 
 FRAPPE_TAG = re.compile(r"(?:--frappe-branch\s+|FRAPPE_BRANCH=(?:\$\{TEX_FRAPPE_BRANCH:-)?)(v\d+\.\d+\.\d+)")
+PAYMENTS_BRANCH = re.compile(
+	r"--branch\s+([\w.-]+)\s+payments|PAYMENTS_BRANCH=(?:\$\{TEX_PAYMENTS_BRANCH:-)?([\w.-]+)"
+)
 PAYMENTS_SHA = re.compile(r"PAYMENTS_REF(?:=|:\s*|=\$\{TEX_PAYMENTS_REF-)\"?([0-9a-f]{40})")
 BENCH_CLI = re.compile(r"frappe-bench==([0-9.]+)|BENCH_VERSION=([0-9.]+)")
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -44,6 +50,13 @@ class TestPins(unittest.TestCase):
 		for path, names in commits.items():
 			self.assertTrue(names, f"{path} pins no payments commit (PAYMENTS_REF)")
 		self.assertEqual(len(set().union(*commits.values())), 1, commits)
+
+	def test_payments_branch_follows_the_frappe_major(self):
+		branches = found(PAYMENTS_BRANCH, (CI, SUPPLY, DOCKER, LOCAL))
+		for path, names in branches.items():
+			self.assertTrue(names, f"{path} names no payments branch")
+		(tag,) = set().union(*found(FRAPPE_TAG, (CI,)).values())
+		self.assertEqual(set().union(*branches.values()), {f"version-{tag[1:].split('.')[0]}"}, branches)
 
 	def test_one_bench_cli_everywhere(self):
 		versions = found(BENCH_CLI, (CI, SUPPLY, DOCKER, LOCAL))

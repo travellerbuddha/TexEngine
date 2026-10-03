@@ -19,7 +19,7 @@ permissions:
 
 env:
   # the payments commit ci.yml, the Dockerfile and setup-local.sh install too (test_pins keeps them equal)
-  PAYMENTS_REF: 86fefa9faf8ad825fe6f08c4753acfe44817900b
+  PAYMENTS_REF: cca07d9f9392e2ea0e521c5975151db9e4b6c321
 
 concurrency:
   group: supply-chain-${{ github.ref }}
@@ -120,14 +120,14 @@ jobs:
           node-version: 24
 
       - name: Bench environment (no database), as ci.yml builds it
-        # kamra declares no runtime dependency (pyproject.toml): the Python surface is Frappe v16.25.0 +
+        # kamra declares no runtime dependency (pyproject.toml): the Python surface is Frappe v16.36.1 +
         # payments, as installed by bench
         run: |
           npm install -g yarn
           pip install frappe-bench==5.31.0
-          bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.25.0 frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.36.1 frappe-bench
           cd frappe-bench
-          bench get-app --skip-assets --branch develop payments
+          bench get-app --skip-assets --branch version-16 payments
           if [ "$(git -C apps/payments rev-parse HEAD)" != "$PAYMENTS_REF" ]; then
             git -C apps/payments fetch --quiet --depth 1 https://github.com/frappe/payments "$PAYMENTS_REF"
             git -C apps/payments checkout --quiet --detach FETCH_HEAD

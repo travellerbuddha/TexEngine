@@ -70,7 +70,8 @@ async function doFetch(path: string, init?: RequestInit) {
 /** Frappe's answer to /api/method/login. Only `message: "Logged In"` (a Desk user) or
  * `"No App"` (a website user, sent to `home_page`) means a session was made. A two-factor
  * account gets `verification` + `tmp_id` (the code is then posted with `loginOtp`), an expired
- * password `message: "Password Reset"` + `redirect_to` (frappe/auth.py LoginManager.login). */
+ * password `message: "Password Reset"` (frappe/auth.py LoginManager.login). Frappe v16.36.1 mails
+ * the reset link (after a two-factor account's code); v16.25.0 answered with it, `redirect_to`. */
 export interface LoginResult {
   message?: string
   home_page?: string

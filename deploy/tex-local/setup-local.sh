@@ -4,8 +4,8 @@
 #
 #   deploy/tex-local/setup-local.sh [options]          (--help; guide: NATIVE.md)
 #
-# Builds a Frappe bench next to your checkout (default: ../tex-bench): Frappe v16.25.0
-# + payments (develop, pinned to a verified commit) + this repository linked in as the
+# Builds a Frappe bench next to your checkout (default: ../tex-bench): Frappe v16.36.1
+# + payments (version-16, pinned to a verified commit) + this repository linked in as the
 # `kamra` app, one site with developer mode and the TEX demo data (two hotels,
 # contracts, booking site "aurora", demo users).
 #
@@ -24,12 +24,12 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 DEFAULT_REPO=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 
-FRAPPE_BRANCH=${TEX_FRAPPE_BRANCH:-v16.25.0}
+FRAPPE_BRANCH=${TEX_FRAPPE_BRANCH:-v16.36.1}
 PAYMENTS_URL=${TEX_PAYMENTS_URL:-https://github.com/frappe/payments}
-PAYMENTS_BRANCH=${TEX_PAYMENTS_BRANCH:-develop}
-# payments' develop moves and already declares Frappe v17: use the commit this setup was
-# verified with. TEX_PAYMENTS_REF= (set but empty) keeps the tip of TEX_PAYMENTS_BRANCH.
-PAYMENTS_REF=${TEX_PAYMENTS_REF-86fefa9faf8ad825fe6f08c4753acfe44817900b}
+PAYMENTS_BRANCH=${TEX_PAYMENTS_BRANCH:-version-16}
+# payments' version-16 branch moves (develop declares Frappe v17): use the commit this setup
+# was verified with. TEX_PAYMENTS_REF= (set but empty) keeps the tip of TEX_PAYMENTS_BRANCH.
+PAYMENTS_REF=${TEX_PAYMENTS_REF-cca07d9f9392e2ea0e521c5975151db9e4b6c321}
 DEFAULT_ADMIN_PASSWORD='admin'
 DEFAULT_DEMO_PASSWORD='TexDemo#2026'
 DEMO_SLUG=aurora
@@ -73,8 +73,8 @@ Options (environment variable in brackets):
                            confirming --reset)
   -h, --help               this help
 
-Other environment variables: TEX_FRAPPE_BRANCH (v16.25.0), TEX_PAYMENTS_URL,
-TEX_PAYMENTS_BRANCH (develop), TEX_PAYMENTS_REF (the verified payments commit; empty =
+Other environment variables: TEX_FRAPPE_BRANCH (v16.36.1), TEX_PAYMENTS_URL,
+TEX_PAYMENTS_BRANCH (version-16), TEX_PAYMENTS_REF (the verified payments commit; empty =
 the tip of TEX_PAYMENTS_BRANCH).
 
 Re-running with no options keeps the site, port, bind address, Redis choice and time
@@ -647,7 +647,12 @@ fi
 # ---------------------------------------------------------------- 1. bench
 step "Frappe bench ($FRAPPE_BRANCH)"
 if [ "$NEED_INIT" = 0 ]; then
-	skip "bench exists at $DIR (Frappe $(env_py -c 'import frappe; print(frappe.__version__)' 2>/dev/null || echo '?'))"
+	have_frappe=$(env_py -c 'import frappe; print(frappe.__version__)' 2>/dev/null || echo '?')
+	# only against a release tag (a branch name is no version) and a version that could be read
+	if [[ "$FRAPPE_BRANCH" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$have_frappe" != '?' ] && [ "v$have_frappe" != "$FRAPPE_BRANCH" ]; then
+		warn "this bench runs Frappe $have_frappe, not $FRAPPE_BRANCH; keeping it (NATIVE.md section 5 moves it)"
+	fi
+	skip "bench exists at $DIR (Frappe $have_frappe)"
 else
 	[ ! -e "$DIR" ] || die "$DIR exists but is not a complete bench (left over from a failed run?). Remove it (rm -rf '$DIR') or choose another --dir."
 	init_args=(init --frappe-branch "$FRAPPE_BRANCH" --python "$PY" --no-backups --skip-assets)
@@ -788,7 +793,7 @@ else
 		die "bench get-app payments failed - see the output above"
 	[ -f "$DIR/apps/payments/payments/__init__.py" ] || die "bench get-app did not create apps/payments"
 	if [ -n "$PAYMENTS_REF" ] && [ "$(git -C "$DIR/apps/payments" rev-parse HEAD)" != "$PAYMENTS_REF" ]; then
-		# the verified commit (develop moves); --branch cannot take a commit, so check it out
+		# the verified commit (the branch moves); --branch cannot take a commit, so check it out
 		{ git -C "$DIR/apps/payments" fetch --quiet --depth 1 "$PAYMENTS_URL" "$PAYMENTS_REF" &&
 			git -C "$DIR/apps/payments" checkout --quiet --detach FETCH_HEAD; } ||
 			die "could not check out payments $PAYMENTS_REF - see the output above (TEX_PAYMENTS_REF= uses the tip of $PAYMENTS_BRANCH instead)"

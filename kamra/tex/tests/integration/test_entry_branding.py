@@ -702,7 +702,9 @@ class TestSignInContract(TexTestCase):
 	"""M1: what Frappe answers ``/api/method/login``, which the sign-in page must read. Only
 	``message: "Logged In"`` (or "No App") comes with a session. A two-factor account gets
 	``verification`` and ``tmp_id`` and no session until its code is posted with the ``tmp_id``; an
-	expired password gets ``message: "Password Reset"`` and ``redirect_to``, no session.
+	expired password gets ``message: "Password Reset"`` and no session. Since Frappe v16.36.1 (2Z-F)
+	the answer names no reset link: Frappe mails it to the account's address, and to a two-factor
+	account only after its code (v16.25.0 answered the password alone with the link, ``redirect_to``).
 
 	Two-factor sign-in is on for one test user only: a role of its own, marked for it, in this
 	test's transaction; the site's switch is read as on inside the test and never written
@@ -800,12 +802,40 @@ class TestSignInContract(TexTestCase):
 		self.sign_in(usr=self.plain, pwd=self.PASSWORD)
 		self.assertEqual(self.sessions, [self.plain])
 
-	def test_an_expired_password_makes_no_session_and_names_the_reset_page(self):
+	def expire(self, user: str):
 		self.settings["force_user_to_reset_password"] = 30
-		frappe.db.set_value("User", self.plain, "last_password_reset_date", add_days(nowdate(), -60))
-		r = self.sign_in(usr=self.plain, pwd=self.PASSWORD)
+		frappe.db.set_value("User", user, "last_password_reset_date", add_days(nowdate(), -60))
+
+	def reset_link(self, sendmail, user: str) -> str:
+		"""The one mail Frappe sent: to ``user``'s own address, with the reset page's link."""
+		(call,) = sendmail.call_args_list
+		self.assertEqual(call.kwargs["recipients"], frappe.db.get_value("User", user, "email"))
+		return call.kwargs["args"]["link"]
+
+	def test_an_expired_password_makes_no_session_and_mails_the_reset_page(self):
+		self.expire(self.plain)
+		with mock.patch("frappe.sendmail") as sendmail:
+			r = self.sign_in(usr=self.plain, pwd=self.PASSWORD)
 		self.assertEqual(r["message"], "Password Reset")
-		self.assertIn("/update-password?key=", r["redirect_to"])
+		self.assertNotIn("redirect_to", r)                                   # the link is in the mailbox only
+		link = self.reset_link(sendmail, self.plain)
+		self.assertIn("/update-password?key=", link)
+		self.assertIn("password_expired=true", link)
+		self.assertEqual(self.sessions, [])
+
+	def test_an_expired_password_of_a_two_factor_account_needs_its_code_first(self):
+		self.expire(self.user)
+		key = frappe.db.get_value("User", self.user, "reset_password_key")
+		with mock.patch("frappe.sendmail") as sendmail:
+			first = self.sign_in(usr=self.user, pwd=self.PASSWORD)
+			self.assertEqual(first["verification"], {"method": "OTP App", "setup": True})
+			self.assertNotIn("redirect_to", first)
+			sendmail.assert_not_called()                                     # the password alone resets nothing:
+			self.assertEqual(frappe.db.get_value("User", self.user, "reset_password_key"), key)  # no new key either
+			r = self.sign_in(otp=self.code(), tmp_id=first["tmp_id"])
+		self.assertEqual(r["message"], "Password Reset")
+		self.assertNotIn("redirect_to", r)
+		self.assertIn("/update-password?key=", self.reset_link(sendmail, self.user))
 		self.assertEqual(self.sessions, [])
 
 

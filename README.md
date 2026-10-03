@@ -135,7 +135,7 @@ Vite üzerinden personel ekranı `http://localhost:5173/tex`, misafir ekranı `h
 
 | Katman | Teknoloji |
 | --- | --- |
-| Backend | Python 3.14, Frappe v16.25.0 |
+| Backend | Python 3.14, Frappe v16.36.1 |
 | Arayüz | React 19, TypeScript, Vite, Tailwind CSS |
 | JavaScript çalışma ortamı | Node.js 24, Yarn 1 |
 | Veritabanı | MariaDB; yerel Docker kurulumu 11.8 kullanır |

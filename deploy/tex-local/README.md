@@ -75,12 +75,12 @@ bölümüne bakın (BT biriminizden şirketin kök sertifikasını isteyin).
 | --- | --- | --- |
 | `db` | `mariadb:11.8` (utf8mb4) | database, named volume `tex-local_db-data` |
 | `redis` | `redis:7-alpine` | cache and background-job queue (no persistence) |
-| `tex` | built from this repository (`Dockerfile`) | Frappe v16.25.0 + `payments` (develop, pinned to commit `86fefa9`) + `kamra` (TEX Engine): web server, scheduler and two background workers (`short,default` and `long`, where the PMS outbox runs) |
+| `tex` | built from this repository (`Dockerfile`) | Frappe v16.36.1 + `payments` (version-16, pinned to commit `cca07d9`) + `kamra` (TEX Engine): web server, scheduler and two background workers (`short,default` and `long`, where the PMS outbox runs) |
 
 The `tex` image is Python 3.14 (Debian bookworm) with Node 24 + Yarn 1, a non-root user
-`frappe`, a bench made with `bench init --frappe-branch v16.25.0`, the `payments` app from
-`https://github.com/frappe/payments` (branch `develop`, pinned to the verified commit
-`86fefa9faf8a…`), and the `kamra` app copied from this repository and installed editable.
+`frappe`, a bench made with `bench init --frappe-branch v16.36.1`, the `payments` app from
+`https://github.com/frappe/payments` (branch `version-16`, pinned to the verified commit
+`cca07d9f9392…`), and the `kamra` app copied from this repository and installed editable.
 The TEX staff app and guest booking engine bundles are committed in `kamra/public`, so
 there is no npm build for TEX; only Frappe's own assets are built
 (`bench build --apps frappe,payments`).
@@ -197,15 +197,14 @@ If you use the company-proxy lines in `.env` (see *Troubleshooting*), this comma
 them up by itself. A rebuild after a code change reuses the cached Frappe and `payments`
 layers and needs no internet access.
 
-`payments` is pinned: its `develop` branch moves, and already declares Frappe v17 as its
-target, so a newer commit may stop working with Frappe v16. The pin is the commit this
-setup was verified with, `86fefa9faf8ad825fe6f08c4753acfe44817900b`. Build arguments
-`FRAPPE_BRANCH` (v16.25.0), `PAYMENTS_BRANCH` (develop), `PAYMENTS_REF` (the pin: a full
+`payments` is pinned: its `version-16` branch (the one for Frappe v16; `develop` already
+declares Frappe v17) moves, so a newer commit is not verified with TEX. The pin is the commit
+this setup was verified with, `cca07d9f9392e2ea0e521c5975151db9e4b6c321`. Build arguments
+`FRAPPE_BRANCH` (v16.36.1), `PAYMENTS_BRANCH` (version-16), `PAYMENTS_REF` (the pin: a full
 commit SHA, tag or branch; empty = the tip of `PAYMENTS_BRANCH`), `FRAPPE_REPO`,
 `PAYMENTS_REPO` and `BENCH_VERSION` (5.31.0) can be overridden, for example
 `docker compose build --build-arg PAYMENTS_REF= && docker compose up -d` to try the current
-`develop`, or `--build-arg PAYMENTS_REF=version-16` for payments' Frappe v16 branch (neither
-verified with TEX).
+tip of `version-16` (not verified with TEX).
 
 ### Remove everything
 
