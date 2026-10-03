@@ -1,5 +1,4 @@
-// Payments screen helpers. Money stays a decimal string: these only validate or
-// compare against zero, they never do arithmetic.
+// Payments screen helpers. Money stays a decimal string (amounts.ts): never a float.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { idempotencyKey } from "../../lib/api"
 
@@ -33,29 +32,8 @@ export function useDebounced<T>(value: T, ms = 300): T {
   return v
 }
 
-/** "0", "0.00", "-0.0", "" → true. */
-export function isZero(s: string | null | undefined) {
-  return !s || /^[-+]?0*(\.0*)?$/.test(s.trim())
-}
-
-/** `a − b` of two decimal amounts, exactly (scaled BigInt), with `decimals` fraction digits:
- *  ("192.60", "187.6") → "5.00". */
-export function minusAmount(a: string, b: string, decimals = 2): string {
-  const scaled = (s: string) => {
-    const [i, f = ""] = s.trim().split(".")
-    return BigInt((i || "0") + (f + "0".repeat(decimals)).slice(0, decimals))
-  }
-  const d = scaled(a) - scaled(b)
-  const neg = d < BigInt(0)
-  const digits = (neg ? -d : d).toString().padStart(decimals + 1, "0")
-  return `${neg ? "-" : ""}${digits.slice(0, -decimals)}.${digits.slice(-decimals)}`
-}
-
-/** A positive decimal with at most `decimals` fraction digits (string check only). */
-export function isPositiveAmount(s: string, decimals = 2) {
-  const v = s.trim()
-  return new RegExp(`^\\d+(\\.\\d{1,${decimals}})?$`).test(v) && !isZero(v)
-}
+// the amount helpers are pure (amounts.ts, node tests); kept importable from here
+export { isPositiveAmount, isZero, minusAmount } from "./amounts"
 
 export async function copyText(text: string): Promise<boolean> {
   try {
