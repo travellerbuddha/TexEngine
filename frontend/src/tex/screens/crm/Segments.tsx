@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { AlertTriangle, Calculator, Copy, Lock, Plus, Save, Trash2, Users } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../lib/api"
@@ -106,7 +106,8 @@ export default function Segments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.data])
 
-  useEffect(() => {
+  // the editor shows the segment just chosen before its first frame is painted, never the last one's rules (2Z)
+  useLayoutEffect(() => {
     const copy = pendingCopy.current
     pendingCopy.current = null
     setDraft(isNew ? (copy ?? draftOf(undefined, defaultEnterprise)) : draftOf(current))

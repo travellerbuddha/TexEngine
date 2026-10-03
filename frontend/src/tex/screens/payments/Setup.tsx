@@ -226,8 +226,13 @@ export default function Setup() {
 
           {property && <MethodsPreview property={property} />}
 
-          {property && <AccountDrawer open={account !== undefined} account={account ?? null} property={property} onClose={closeAccount} onSaved={q.reload} />}
-          {property && <RuleDialog open={rule !== undefined} rule={rule ?? null} accounts={accounts} property={property} onClose={closeRule} onSaved={q.reload} />}
+          {/* one per opening (keyed): each starts from the record it opens, never from the last one's for a frame (2Z) */}
+          {property && account !== undefined && (
+            <AccountDrawer key={account?.name ?? "new"} open account={account} property={property} onClose={closeAccount} onSaved={q.reload} />
+          )}
+          {property && rule !== undefined && (
+            <RuleDialog key={rule?.name ?? "new"} open rule={rule} accounts={accounts} property={property} onClose={closeRule} onSaved={q.reload} />
+          )}
         </div>
       )}
     </>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useLayoutEffect, useState } from "react"
 import { ListChecks } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
@@ -35,7 +35,9 @@ export function CsvPicker({
   const [open, setOpen] = useState(false)
   const selected = splitCsv(value)
   const [draft, setDraft] = useState<string[]>(selected)
-  useEffect(() => {
+  // the draft is the value as the popover opens, before its first frame is painted (2Z: a passive effect showed
+  // the last opening's ticks for a frame and dropped a click made in it)
+  useLayoutEffect(() => {
     if (open) setDraft(splitCsv(value))
   }, [open, value])
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v

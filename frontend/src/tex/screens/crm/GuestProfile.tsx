@@ -302,7 +302,8 @@ export default function GuestProfile() {
               </Card>
             </div>
           </div>
-          <EditGuestDrawer guest={g} open={editing} onClose={closeEdit} onSaved={q.reload} />
+          {/* one per opening: it starts from the guest as saved, never from the last edit's form for a frame (2Z) */}
+          {editing && <EditGuestDrawer key={g.name} guest={g} open onClose={closeEdit} onSaved={q.reload} />}
           <MergeDialog open={merging !== null} guest={g} source={merging ?? ""} onClose={closeMerge} onMerged={q.reload} />
           <LogCommunicationDialog
             open={logging}

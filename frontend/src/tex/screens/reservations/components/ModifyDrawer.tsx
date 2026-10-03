@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, ArrowRight, Calculator, RotateCcw } from "lucide-react"
 import { useTexQuery, type TexApiError } from "../../../lib/api"
 import { addDays, date, isDecimal, money, nightsBetween } from "../../../lib/format"
@@ -166,7 +166,9 @@ export function ModifyDrawer({
     if (applyError) errorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }, [applyError])
 
-  useEffect(() => {
+  // reset as the drawer opens, before its first frame is painted: the drawer stays mounted, and a passive
+  // effect showed the last stay's form for a frame and then dropped what was typed into it (2Z)
+  useLayoutEffect(() => {
     if (!open) return
     setForm(initial)
     setBasis("CURRENT")
@@ -288,7 +290,7 @@ export function ModifyDrawer({
   const stayNights = useRef(nightsBetween(initial.check_in, initial.check_out) || 1)
   // the last complete check-in: extras' service days move by as many days as the stay does
   const lastCheckIn = useRef(initial.check_in)
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return
     stayNights.current = nightsBetween(initial.check_in, initial.check_out) || 1
     lastCheckIn.current = initial.check_in
