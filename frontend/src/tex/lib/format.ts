@@ -26,7 +26,9 @@ function exactParts(amount: string, digits: number, locale: string) {
   return { neg, text: digits ? `${intFmt}${sep}${frac}` : intFmt }
 }
 
-const MINOR: Record<string, number> = { JPY: 0, KRW: 0, VND: 0, CLP: 0, ISK: 0, HUF: 2, KWD: 3, BHD: 3, JOD: 3, OMR: 3, TND: 3 }
+// the server's minor units (kamra/tex/money.py MINOR_UNITS; anything missing: 2), in which it keeps and sends
+// every amount; tests/unit/minor-units.test.ts keeps them the same
+const MINOR: Record<string, number> = { JPY: 0, KRW: 0, VND: 0, HUF: 2, KWD: 3, BHD: 3, JOD: 3, OMR: 3, TND: 3 }
 
 export function minorUnits(ccy: string) {
   return MINOR[ccy?.toUpperCase()] ?? 2
