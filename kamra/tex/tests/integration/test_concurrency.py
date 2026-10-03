@@ -26,22 +26,51 @@ PROPERTY_TABLES = ("TEX Booking", "Reservation", "TEX Quote", "TEX Reservation R
                    "TEX Payment Method Rule")
 
 
+def _delete_children(doctype: str, names: list[str]):
+	"""The child rows of ``names`` (rows of ``doctype``) in each of its tables, before the rows go by plain SQL,
+	which leaves them behind (LO-36: a CONC version's rates, periods, boards, occupancy rules and rooms)."""
+	if names:
+		for df in frappe.get_meta(doctype).get_table_fields():
+			frappe.db.delete(df.options, {"parenttype": doctype, "parent": ("in", names)})
+
+
 def _cleanup():
 	frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test cleanup
 	codes = frappe.get_all("TEX Contract", filters={"property": fx.PROPERTY, "contract_code": "CONC"}, pluck="name")
 	for c in codes:
+		_delete_children("TEX Contract Version", frappe.get_all("TEX Contract Version", filters={"contract": c},
+		                                                        pluck="name"))
 		frappe.db.sql("DELETE FROM `tabTEX Contract Version` WHERE contract=%s", c)
-	bookings = frappe.get_all("TEX Booking", filters={"property": fx.PROPERTY}, pluck="name")
-	for b in bookings:
-		frappe.db.sql("DELETE FROM `tabTEX Booking Room` WHERE parent=%s", b)
 	res = frappe.get_all("Reservation", filters={"property": fx.PROPERTY}, pluck="name")
 	for r in res:
 		frappe.db.sql("DELETE FROM `tabTEX Reservation Revision` WHERE reservation=%s", r)
 	for dt in PROPERTY_TABLES:
 		if dt == "TEX Reservation Revision":
 			continue
+		# a booking's rooms and the other tables' child rows too
+		_delete_children(dt, frappe.get_all(dt, filters={"property": fx.PROPERTY}, pluck="name"))
 		frappe.db.sql(f"DELETE FROM `tab{dt}` WHERE property=%s", fx.PROPERTY)  # constant table list
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+
+
+class TestCleanupLeavesNoOrphans(IntegrationTestCase):
+	"""LO-36: the shared cleanup removed the CONC contract versions with plain SQL, and left their child rows
+	(rates, periods, boards, occupancy rules, rooms …) behind on the site for every module after this one."""
+
+	def test_a_cleaned_contract_leaves_no_child_rows(self):
+		_cleanup()
+		f = fx.base_setup()
+		fx.create_contract(f, code="CONC")
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- as the race classes commit their fixtures
+		versions = frappe.get_all("TEX Contract Version", filters={"contract": ("in", frappe.get_all(
+			"TEX Contract", filters={"property": fx.PROPERTY, "contract_code": "CONC"}, pluck="name"))}, pluck="name")
+		self.assertTrue(versions)
+		children = [df.options for df in frappe.get_meta("TEX Contract Version").get_table_fields()]
+		held = {dt: frappe.db.count(dt, {"parent": ("in", versions)}) for dt in children}
+		self.assertTrue(any(held.values()), held)            # the contract has child rows to clean
+		_cleanup()
+		left = {dt: n for dt in children if (n := frappe.db.count(dt, {"parent": ("in", versions)}))}
+		self.assertEqual(left, {})
 
 
 class TestConcurrentLastRoom(IntegrationTestCase):
