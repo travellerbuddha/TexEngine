@@ -50,8 +50,9 @@ class TestPins(unittest.TestCase):
 		for path, names in versions.items():
 			self.assertTrue(names, f"{path} installs frappe-bench unpinned")
 		self.assertEqual(len(set().union(*versions.values())), 1, versions)
-		for path in (CI, SUPPLY):
-			self.assertNotRegex(read(path), r"pip install frappe-bench\s*$|pip install frappe-bench\n", path)
+		for path in (CI, SUPPLY, LOCAL):
+			# an install command, or one a message tells the reader to run, names the version
+			self.assertNotRegex(read(path), r"(?:pip install|uv tool install)(?: --user)? frappe-bench(?!==)", path)
 
 	def test_semgrep_rules_and_cli_are_pinned(self):
 		text = read(LINTERS)

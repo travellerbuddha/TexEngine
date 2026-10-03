@@ -39,7 +39,7 @@ seconds.
 | Disk / RAM | ~3 GB / 4 GB free | |
 
 The script also needs the `bench` command (`frappe-bench`). If it is missing, the script
-offers to install it with `uv tool install frappe-bench`. It does the same for Python 3.14
+offers to install it with `uv tool install frappe-bench==5.31.0` (the bench CLI CI pins). It does the same for Python 3.14
 with `uv python install 3.14`. Both installs are for your user only, and the script asks
 before each one unless you pass `--yes`. The script never runs `sudo`. When something is
 missing, it prints the install command for you to run.

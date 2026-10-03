@@ -589,7 +589,7 @@ if [ -z "$BENCH" ]; then
 		BENCH="$UV_BIN/bench"
 		[ -x "$BENCH" ] || die "bench was installed but $BENCH is missing"
 	else
-		die "bench is required. Install it with: uv tool install frappe-bench   (or: pip install --user frappe-bench, with uv on PATH), then re-run."
+		die "bench is required. Install it with: uv tool install frappe-bench==5.31.0   (or: pip install --user frappe-bench==5.31.0, with uv on PATH), then re-run."
 	fi
 fi
 BENCH_ON_PATH=1
