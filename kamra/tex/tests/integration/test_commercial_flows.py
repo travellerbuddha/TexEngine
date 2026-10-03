@@ -2068,6 +2068,24 @@ class TestMarkupTies(TexTestCase):
 		policy_api.activate("TEX Markup Rule", revision)
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
 
+	def test_a_scheduled_markup_ties_inside_a_live_markups_window_only(self):
+		"""LO-42 (b3): the check compares the new markup's own start (``at``), not now: scheduled inside a live
+		markup's window it is refused, scheduled after that one ends it is activated."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		inside = self.markup(value=9)
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.activate("TEX Markup Rule", inside, at=str(add_to_date(now_datetime(), days=3)))
+		self.assertIn(f"live markup {first}", str(refused.exception))
+		ends = add_to_date(now_datetime(), days=5)
+		revision = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": revision, "priority": 2})
+		policy_api.activate("TEX Markup Rule", revision, at=str(ends))     # the first (priority 0) ends at ``ends``
+		after = self.markup(value=11)
+		policy_api.activate("TEX Markup Rule", after, at=str(add_to_date(ends, days=1)))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", after, "tex_status"), "Active")
+
+
 	def test_the_tie_check_reads_its_hotels_markups_only(self):
 		"""LO-42 (b2): the check is a locking read; its IFNULL(property, '') kept the (property, tex_status)
 		index out, so it scanned and locked every markup row of every hotel until the activation committed."""
