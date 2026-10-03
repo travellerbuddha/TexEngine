@@ -414,8 +414,10 @@ class Scanner(ast.NodeVisitor):
 		"""A doctype computed at run time (a parameter, a helper's return value), LO-46: it was left out
 		silently. The call is listed when its filters compare a field that is a nullable date in some
 		DocType of the repository (a ``[doctype, field, …]`` row: in that one) with no ``is`` on it, or when
-		they cannot be read while what builds them holds a comparison operator."""
-		what = f"{api}({ast.unparse(_arg(call, 0, 'doctype', 'dt', 'table'))})"
+		they cannot be read while what builds them holds a comparison operator. A doctype given in a ``**``
+		mapping has no argument to name: ``api(**)``."""
+		named = _arg(call, 0, "doctype", "dt", "table")
+		what = f"{api}({ast.unparse(named) if named is not None else '**'})"
 		for group in groups:
 			if group is None:
 				continue
@@ -629,6 +631,22 @@ def computed_plain(doctype, now):
 		                 [("apart", "active_to", "<"), ("third", "active_to", "<="), ("third_or", "active_to", "<")])
 		self.assertEqual(sorted((u.function, u.what) for u in scanner.unresolved),
 		                 [("computed", "frappe.get_all(doctype)")])
+
+	def test_a_call_with_no_doctype_argument_is_read_not_crashed_on(self):
+		# 2K-6 review N2: a call whose doctype comes in a ``**`` mapping has no doctype argument to name; it was
+		# skipped before LO-46, and LO-46's listing must not fail on it
+		src = '''
+import frappe
+def spread(kw):
+	return frappe.get_all(**kw)
+def spread_filters(kw, now):
+	return frappe.get_all(**kw, filters={"active_to": ("<", now)})
+'''
+		tree = ast.parse(src)
+		scanner = Scanner("probe.py", tree, doctype_fields())
+		scanner.visit(tree)
+		self.assertEqual(scanner.findings, [])
+		self.assertEqual([(u.function, u.what) for u in scanner.unresolved], [("spread_filters", "frappe.get_all(**)")])
 
 if __name__ == "__main__":
 	unittest.main()
