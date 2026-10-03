@@ -2,7 +2,7 @@
 // Menu, Tooltip, Drawer and grid hooks with the app's styles, sized to overflow a short viewport.
 import { StrictMode, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import "../../src/index.css"
+import "./harness.css"
 import { Drawer, Menu, MenuItem, Popover, Tooltip, useGridNavigation, useGridSelection } from "../../src/tex/ui"
 
 const ITEMS = Array.from({ length: 50 }, (_, i) => `Item ${i}`)

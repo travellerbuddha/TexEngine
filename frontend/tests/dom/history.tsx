@@ -6,7 +6,7 @@
 // Open /tests/dom/history.html under `npx vite --config tests/dom/vite.config.ts` to try it by hand.
 import { StrictMode, useCallback, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import "../../src/index.css"
+import "./harness.css"
 import type { EditorState, Tables } from "../../src/tex/screens/rates/lib/tables"
 import type { Row, VersionTable } from "../../src/tex/screens/rates/lib/types"
 import { UndoToastView } from "../../src/tex/screens/rates/workspace/BulkToolbar"
