@@ -82,6 +82,11 @@ def _site(slug: str | None = None, domain: str | None = None):
 	return site
 
 
+# ─── members (C-04 on the web, ADR-078) ─────────────────────────────────
+# a visitor asks for a sign-in or join link: each one sends a mail, so fewer per address (``members``) and per visitor
+MEMBER_LINK_LIMIT = {"limit": _limit(10, "tex_public_member_link_limit"), "seconds": 600}
+
+
 def _site_properties(site) -> list[str]:
 	if site.property:
 		return [site.property]
@@ -159,7 +164,15 @@ def site(slug: str | None = None, domain: str | None = None):
 		"analytics": {"ga4": s.ga4_measurement_id, "gtm": s.gtm_container_id, "meta_pixel": s.meta_pixel_id,
 		              "consent_banner": bool(s.consent_banner)},
 		"extras": _strip_names({p: loc.extras(p, rows) for p, rows in _public_extras(props).items()}),
+		# the site's loyalty programs, which a guest may sign in to or join on the web (C-04, ADR-078); None: none
+		"membership": _membership(s),
 	}
+
+
+def _membership(s) -> dict | None:
+	from kamra.tex.crm import members
+
+	return members.site_membership(s)
 
 
 def _public_extras(props: list[str]) -> dict:
@@ -326,6 +339,69 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out,
 	                                  "rooms": [p.summary() for p in parties], "market": mkt})
 	return res
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])   # an e-mail: never in a URL
+@rate_limit(**MEMBER_LINK_LIMIT)
+@refusals.coded
+def member_link(site: str, email: str, purpose: str = "sign_in", first_name: str | None = None,
+                last_name: str | None = None, accepted=0, language: str | None = None, session_id: str | None = None):
+	"""Send a one-time link to sign in, or to join the site's loyalty program (with a name and the tick). The answer is
+	the same whatever the e-mail (``members.request_link``)."""
+	from kamra.tex.crm import members
+
+	s = _site(site)
+	members.request_link(s, email=text(email, 140), purpose=text(purpose, 20) or "", first_name=text(first_name, 140),
+	                     last_name=text(last_name, 140), accepted=_ticked(accepted),
+	                     language=text(language, 10) or content.guest_language())
+	return {"ok": True}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])   # the token in the body, never a query string (G-83)
+@rate_limit(**WRITE_LIMIT)
+@refusals.coded
+@retry_on_deadlock
+def member_verify(site: str, token: str):
+	"""Open a sign-in or join link: a session on this device for 30 days (its token once, here) and the member's
+	status."""
+	from kamra.tex.crm import members
+
+	return members.verify(_site(site), text(token, 200) or "")
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**SEARCH_LIMIT)
+@refusals.coded
+def member_status(site: str, member_session: str):
+	from kamra.tex.crm import members
+
+	s = _site(site)
+	return members.status(s, members.require_session(s, text(member_session, 200)))
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+@refusals.coded
+@retry_on_deadlock
+def member_join(site: str, member_session: str, accepted=0):
+	"""A signed-in guest who is no member joins the site's program, with the tick."""
+	from kamra.tex.crm import members
+
+	return members.join_signed_in(_site(site), text(member_session, 200), _ticked(accepted))
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+@refusals.coded
+def member_sign_out(site: str, member_session: str):
+	from kamra.tex.crm import members
+
+	members.sign_out(_site(site), text(member_session, 200))
+	return {"ok": True}
+
+
+def _ticked(value) -> bool:
+	return booking_svc.consent_given(value)
 
 
 # a guest sees whether a limited extra can still be booked on a day, and "few left", never

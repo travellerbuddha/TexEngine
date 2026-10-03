@@ -680,5 +680,10 @@
   "refusal.RESERVATION_CHANGED": "Twoja rezerwacja w międzyczasie się zmieniła. Sprawdź zmianę ponownie.",
   "refusal.PRICE_MOVED": "Cena zmieniła się w międzyczasie. Sprawdź ją ponownie.",
   "refusal.CHANGE_NOT_MADE": "Ta zmiana nie została wprowadzona. Sprawdź rezerwację i spróbuj ponownie.",
-  "refusal.EXTRAS_REFUSED": "Nie można dodać tych usług. Sprawdź je ponownie."
+  "refusal.EXTRAS_REFUSED": "Nie można dodać tych usług. Sprawdź je ponownie.",
+  "refusal.MEMBERSHIP_UNAVAILABLE": "Ten hotel nie ma programu lojalnościowego na tej stronie.",
+  "refusal.MEMBER_CONSENT_REQUIRED": "Zaznacz pole, aby potwierdzić dołączenie do programu lojalnościowego.",
+  "refusal.MEMBER_LINK_INVALID": "Ten link jest nieprawidłowy lub wygasł. Poproś o nowy.",
+  "refusal.MEMBER_SESSION_ENDED": "Wylogowano Cię. Zaloguj się ponownie, aby zobaczyć ceny dla członków.",
+  "refusal.NOT_A_MEMBER": "Z tym adresem e-mail nie ma jeszcze członkostwa. Możesz dołączyć do programu."
 }

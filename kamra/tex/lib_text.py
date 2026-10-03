@@ -93,6 +93,86 @@ T: dict[str, dict[str, tuple[str, str]]] = {
 	},
 }
 
+# C-04 on the web (ADR-078): a one-time link to sign in, or to confirm joining, at {hotel}; {program}: the program's
+# name; {minutes}: how long the link works. An address with no membership asked to sign in gets "member_none", with a
+# link to joining and no token
+T["member_sign_in"] = {
+	"en": ("Your sign-in link for {hotel}",
+	       "Hello,<br><br>use the button below to sign in to {program} at {hotel} and see your member prices. The link "
+	       "works once, for {minutes} minutes. If you did not ask for it, you can ignore this e-mail."),
+	"tr": ("{hotel} giriş bağlantınız",
+	       "Merhaba,<br><br>{hotel} {program} üyeliğinize giriş yapmak ve üye fiyatlarınızı görmek için aşağıdaki düğmeyi "
+	       "kullanın. Bağlantı bir kez ve {minutes} dakika boyunca çalışır. Bu bağlantıyı siz istemediyseniz bu e-postayı "
+	       "dikkate almayın."),
+	"de": ("Ihr Anmeldelink für {hotel}",
+	       "Guten Tag,<br><br>mit der Schaltfläche unten melden Sie sich bei {program} im {hotel} an und sehen Ihre "
+	       "Mitgliederpreise. Der Link funktioniert einmal, {minutes} Minuten lang. Wenn Sie ihn nicht angefordert haben, "
+	       "können Sie diese E-Mail ignorieren."),
+	"ru": ("Ваша ссылка для входа в {hotel}",
+	       "Здравствуйте!<br><br>Нажмите кнопку ниже, чтобы войти в {program} отеля {hotel} и увидеть цены для "
+	       "участников. Ссылка работает один раз в течение {minutes} минут. Если вы её не запрашивали, просто "
+	       "проигнорируйте это письмо."),
+	"ro": ("Linkul dvs. de conectare la {hotel}",
+	       "Bună ziua,<br><br>folosiți butonul de mai jos pentru a vă conecta la {program} de la {hotel} și a vedea "
+	       "prețurile de membru. Linkul funcționează o singură dată, timp de {minutes} minute. Dacă nu l-ați cerut, "
+	       "puteți ignora acest e-mail."),
+	"pl": ("Twój link do logowania w {hotel}",
+	       "Dzień dobry,<br><br>użyj przycisku poniżej, aby zalogować się do {program} w {hotel} i zobaczyć ceny dla "
+	       "członków. Link działa jeden raz przez {minutes} minut. Jeśli o niego nie prosiłeś, zignoruj tę wiadomość."),
+}
+T["member_join"] = {
+	"en": ("Confirm that you join {program}",
+	       "Dear {name},<br><br>use the button below to confirm that you join {program} at {hotel}. You are then a member "
+	       "and see member prices at once. The link works once, for {minutes} minutes. If you did not ask for it, you can "
+	       "ignore this e-mail: nothing happens."),
+	"tr": ("{program} üyeliğinizi onaylayın",
+	       "Sayın {name},<br><br>{hotel} {program} programına katıldığınızı onaylamak için aşağıdaki düğmeyi kullanın. "
+	       "Böylece üye olursunuz ve üye fiyatlarını hemen görürsünüz. Bağlantı bir kez ve {minutes} dakika boyunca "
+	       "çalışır. Bu isteği siz yapmadıysanız bu e-postayı dikkate almayın: hiçbir şey değişmez."),
+	"de": ("Bestätigen Sie Ihren Beitritt zu {program}",
+	       "Guten Tag {name},<br><br>bestätigen Sie mit der Schaltfläche unten, dass Sie {program} im {hotel} beitreten. "
+	       "Danach sind Sie Mitglied und sehen sofort Mitgliederpreise. Der Link funktioniert einmal, {minutes} Minuten "
+	       "lang. Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail: Es geschieht nichts."),
+	"ru": ("Подтвердите участие в {program}",
+	       "Здравствуйте, {name}!<br><br>Нажмите кнопку ниже, чтобы подтвердить участие в {program} отеля {hotel}. После "
+	       "этого вы станете участником и сразу увидите цены для участников. Ссылка работает один раз в течение {minutes} "
+	       "минут. Если вы этого не запрашивали, проигнорируйте письмо: ничего не изменится."),
+	"ro": ("Confirmați înscrierea în {program}",
+	       "Stimate/Stimată {name},<br><br>folosiți butonul de mai jos pentru a confirma înscrierea în {program} de la "
+	       "{hotel}. Veți fi apoi membru și veți vedea imediat prețurile de membru. Linkul funcționează o singură dată, "
+	       "timp de {minutes} minute. Dacă nu ați cerut acest lucru, ignorați e-mailul: nu se întâmplă nimic."),
+	"pl": ("Potwierdź dołączenie do {program}",
+	       "Dzień dobry {name},<br><br>użyj przycisku poniżej, aby potwierdzić dołączenie do {program} w {hotel}. Staniesz "
+	       "się członkiem i od razu zobaczysz ceny dla członków. Link działa jeden raz przez {minutes} minut. Jeśli o to "
+	       "nie prosiłeś, zignoruj tę wiadomość: nic się nie zmieni."),
+}
+T["member_none"] = {
+	"en": ("About signing in at {hotel}",
+	       "Hello,<br><br>someone asked to sign in to {program} at {hotel} with this e-mail, but it has no membership yet. "
+	       "You can join with the button below and see member prices at once. If you did not ask for it, you can ignore "
+	       "this e-mail."),
+	"tr": ("{hotel} girişi hakkında",
+	       "Merhaba,<br><br>bu e-posta adresiyle {hotel} {program} programına giriş yapılmak istendi, ancak bu adresle "
+	       "henüz bir üyelik yok. Aşağıdaki düğmeyle programa katılabilir ve üye fiyatlarını hemen görebilirsiniz. Bu "
+	       "isteği siz yapmadıysanız bu e-postayı dikkate almayın."),
+	"de": ("Zur Anmeldung im {hotel}",
+	       "Guten Tag,<br><br>jemand wollte sich mit dieser E-Mail bei {program} im {hotel} anmelden, sie hat aber noch "
+	       "keine Mitgliedschaft. Mit der Schaltfläche unten können Sie beitreten und sehen sofort Mitgliederpreise. Wenn "
+	       "Sie das nicht angefordert haben, können Sie diese E-Mail ignorieren."),
+	"ru": ("О входе в {hotel}",
+	       "Здравствуйте!<br><br>С этим адресом пытались войти в {program} отеля {hotel}, но участия пока нет. Вы можете "
+	       "вступить по кнопке ниже и сразу увидеть цены для участников. Если вы этого не запрашивали, просто "
+	       "проигнорируйте письмо."),
+	"ro": ("Despre conectarea la {hotel}",
+	       "Bună ziua,<br><br>cineva a cerut conectarea la {program} de la {hotel} cu acest e-mail, dar acesta nu are încă "
+	       "o calitate de membru. Vă puteți înscrie cu butonul de mai jos și veți vedea imediat prețurile de membru. Dacă "
+	       "nu ați cerut acest lucru, puteți ignora e-mailul."),
+	"pl": ("W sprawie logowania w {hotel}",
+	       "Dzień dobry,<br><br>ktoś chciał zalogować się do {program} w {hotel} tym adresem e-mail, ale nie ma on jeszcze "
+	       "członkostwa. Możesz dołączyć przyciskiem poniżej i od razu zobaczyć ceny dla członków. Jeśli o to nie "
+	       "prosiłeś, zignoruj tę wiadomość."),
+}
+
 LINK_LABEL = {
 	"booking_confirmed": {"en": "View or change your booking", "tr": "Rezervasyonunuzu görüntüleyin veya değiştirin",
 	                      "de": "Buchung ansehen oder ändern", "ru": "Посмотреть или изменить бронирование",
@@ -102,6 +182,12 @@ LINK_LABEL = {
 	                    "ro": "Finalizați sau gestionați rezervarea", "pl": "Dokończ lub zarządzaj rezerwacją"},
 	"payment_link": {"en": "Pay securely", "tr": "Güvenli ödeme yapın", "de": "Sicher bezahlen",
 	                 "ru": "Оплатить безопасно", "ro": "Plătiți în siguranță", "pl": "Zapłać bezpiecznie"},
+	"member_sign_in": {"en": "Sign in", "tr": "Giriş yap", "de": "Anmelden", "ru": "Войти", "ro": "Conectare",
+	                   "pl": "Zaloguj się"},
+	"member_join": {"en": "Confirm and join", "tr": "Onayla ve katıl", "de": "Bestätigen und beitreten",
+	                "ru": "Подтвердить и вступить", "ro": "Confirmați și înscrieți-vă", "pl": "Potwierdź i dołącz"},
+	"member_none": {"en": "Join the program", "tr": "Programa katıl", "de": "Dem Programm beitreten",
+	                "ru": "Вступить в программу", "ro": "Înscrieți-vă în program", "pl": "Dołącz do programu"},
 }
 
 # what happens to money a booking could not take (B5): refunded by itself, or the hotel decides
@@ -127,6 +213,18 @@ FOOTER = {
 }
 
 
+# a member link signs its holder in (it is no booking's): its own footer
+MEMBER_FOOTER = {
+	"en": "Keep this e-mail private: the link signs you in.",
+	"tr": "Bu e-postayı kimseyle paylaşmayın: bağlantı sizin adınıza giriş yapar.",
+	"de": "Bitte geben Sie diese E-Mail nicht weiter: Der Link meldet Sie an.",
+	"ru": "Не пересылайте это письмо: ссылка выполняет вход от вашего имени.",
+	"ro": "Păstrați acest e-mail privat: linkul vă conectează.",
+	"pl": "Nie udostępniaj tej wiadomości: link loguje Cię na Twoje konto.",
+}
+FOOTERS = {"member_sign_in": MEMBER_FOOTER, "member_join": MEMBER_FOOTER, "member_none": {}}
+
+
 def render(key: str, lang: str, *, link: str = "", **values: str) -> tuple[str, str]:
 	lang = lang if lang in T[key] else "en"
 	subject_t, body_t = T[key][lang]
@@ -136,7 +234,7 @@ def render(key: str, lang: str, *, link: str = "", **values: str) -> tuple[str, 
 		label = LINK_LABEL.get(key, {}).get(lang) or LINK_LABEL.get(key, {}).get("en", "Open")
 		body += (f'<br><br><a href="{escape(link, quote=True)}" style="display:inline-block;padding:10px 16px;'
 		         f'background:#2250d1;color:#fff;border-radius:8px;text-decoration:none">{label}</a>'
-		         f'<br><br><small>{FOOTER[lang]}</small>')
+		         + (f'<br><br><small>{footer}</small>' if (footer := FOOTERS.get(key, FOOTER).get(lang)) else ""))
 	# subjects are plain text: undo the HTML escaping done for the body
 	from html import unescape
 

@@ -680,5 +680,10 @@
   "refusal.RESERVATION_CHANGED": "Rezervarea dvs. s-a modificat între timp. Vă rugăm să revizuiți din nou modificarea.",
   "refusal.PRICE_MOVED": "Prețul s-a modificat între timp. Vă rugăm să îl revizuiți din nou.",
   "refusal.CHANGE_NOT_MADE": "Această modificare nu a fost efectuată. Vă rugăm să verificați rezervarea și să încercați din nou.",
-  "refusal.EXTRAS_REFUSED": "Aceste extrase nu pot fi adăugate. Vă rugăm să le verificați din nou."
+  "refusal.EXTRAS_REFUSED": "Aceste extrase nu pot fi adăugate. Vă rugăm să le verificați din nou.",
+  "refusal.MEMBERSHIP_UNAVAILABLE": "Acest hotel nu are un program de loialitate pe acest site.",
+  "refusal.MEMBER_CONSENT_REQUIRED": "Bifați caseta pentru a confirma înscrierea în programul de loialitate.",
+  "refusal.MEMBER_LINK_INVALID": "Acest link nu este valid sau a expirat. Vă rugăm să cereți unul nou.",
+  "refusal.MEMBER_SESSION_ENDED": "Ați fost deconectat. Conectați-vă din nou pentru a vedea prețurile de membru.",
+  "refusal.NOT_A_MEMBER": "Nu există încă o calitate de membru cu acest e-mail. Vă puteți înscrie în program."
 }

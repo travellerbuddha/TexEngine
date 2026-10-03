@@ -680,5 +680,10 @@
   "refusal.RESERVATION_CHANGED": "Your booking changed in the meantime. Please review the change again.",
   "refusal.PRICE_MOVED": "The price has changed in the meantime. Please review it again.",
   "refusal.CHANGE_NOT_MADE": "This change was not made. Please look at your booking and try again.",
-  "refusal.EXTRAS_REFUSED": "These extras cannot be added. Please check them again."
+  "refusal.EXTRAS_REFUSED": "These extras cannot be added. Please check them again.",
+  "refusal.MEMBERSHIP_UNAVAILABLE": "This hotel has no loyalty program on this site.",
+  "refusal.MEMBER_CONSENT_REQUIRED": "Please tick the box to confirm that you join the loyalty program.",
+  "refusal.MEMBER_LINK_INVALID": "This link is not valid or has expired. Please ask for a new one.",
+  "refusal.MEMBER_SESSION_ENDED": "You are signed out. Please sign in again to see your member prices.",
+  "refusal.NOT_A_MEMBER": "There is no membership with this e-mail yet. You can join the program instead."
 }

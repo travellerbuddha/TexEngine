@@ -680,5 +680,10 @@
   "refusal.RESERVATION_CHANGED": "Rezervasyonunuz bu arada değişti. Lütfen değişikliği yeniden gözden geçirin.",
   "refusal.PRICE_MOVED": "Fiyat bu arada değişti. Lütfen yeniden gözden geçirin.",
   "refusal.CHANGE_NOT_MADE": "Bu değişiklik yapılmadı. Lütfen rezervasyonunuzu kontrol edip tekrar deneyin.",
-  "refusal.EXTRAS_REFUSED": "Bu ekstralar eklenemiyor. Lütfen yeniden kontrol edin."
+  "refusal.EXTRAS_REFUSED": "Bu ekstralar eklenemiyor. Lütfen yeniden kontrol edin.",
+  "refusal.MEMBERSHIP_UNAVAILABLE": "Bu otelin bu sitede bir sadakat programı yok.",
+  "refusal.MEMBER_CONSENT_REQUIRED": "Sadakat programına katıldığınızı onaylamak için kutuyu işaretleyin.",
+  "refusal.MEMBER_LINK_INVALID": "Bu bağlantı geçersiz ya da süresi dolmuş. Lütfen yeni bir bağlantı isteyin.",
+  "refusal.MEMBER_SESSION_ENDED": "Oturumunuz kapandı. Üye fiyatlarınızı görmek için yeniden giriş yapın.",
+  "refusal.NOT_A_MEMBER": "Bu e-posta adresiyle henüz bir üyelik yok. Bunun yerine programa katılabilirsiniz."
 }

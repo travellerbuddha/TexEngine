@@ -36,6 +36,7 @@ GUEST_PATHS: dict[str, set[str]] = {
 	                             "apply", "guest_unsellable"},
 	"services/sold_terms.py": {"refuse"},
 	"services/addons.py": {"_snapshot", "_open", "_requests", "apply"},
+	"crm/members.py": {"_email", "_name", "request_link", "_take_link", "verify", "require_session", "join_signed_in"},
 }
 # what makes a raised exception coded: ``refusal(...)`` / ``with_code(...)`` / ``MarketRefused(code=…)``, or a
 # class whose definition declares a registered ``code`` (checked below)

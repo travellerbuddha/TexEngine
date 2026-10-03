@@ -680,5 +680,10 @@
   "refusal.RESERVATION_CHANGED": "Ihre Buchung hat sich inzwischen geändert. Bitte prüfen Sie die Änderung erneut.",
   "refusal.PRICE_MOVED": "Der Preis hat sich inzwischen geändert. Bitte prüfen Sie ihn erneut.",
   "refusal.CHANGE_NOT_MADE": "Diese Änderung wurde nicht vorgenommen. Bitte prüfen Sie Ihre Buchung und versuchen Sie es erneut.",
-  "refusal.EXTRAS_REFUSED": "Diese Extras können nicht hinzugefügt werden. Bitte prüfen Sie sie erneut."
+  "refusal.EXTRAS_REFUSED": "Diese Extras können nicht hinzugefügt werden. Bitte prüfen Sie sie erneut.",
+  "refusal.MEMBERSHIP_UNAVAILABLE": "Dieses Hotel hat auf dieser Website kein Treueprogramm.",
+  "refusal.MEMBER_CONSENT_REQUIRED": "Bitte setzen Sie das Häkchen, um Ihren Beitritt zum Treueprogramm zu bestätigen.",
+  "refusal.MEMBER_LINK_INVALID": "Dieser Link ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen an.",
+  "refusal.MEMBER_SESSION_ENDED": "Sie sind abgemeldet. Bitte melden Sie sich erneut an, um Ihre Mitgliederpreise zu sehen.",
+  "refusal.NOT_A_MEMBER": "Mit dieser E-Mail gibt es noch keine Mitgliedschaft. Sie können stattdessen dem Programm beitreten."
 }

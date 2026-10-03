@@ -116,6 +116,37 @@ def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], gu
 	return {"queued": bool(queue), "status": "Queued" if queue else "Failed", "communication": comm}
 
 
+def member_mail(site, email: str, key: str, *, token: str | None = None, guest: str | None = None,
+                name: str | None = None, language: str = "en") -> dict:
+	"""A web member's link (C-04, ADR-078): ``member_sign_in`` / ``member_join`` with the one-time token in the URL
+	fragment, or ``member_none`` (no membership with this e-mail: a link to joining, no token). Sent in the site's
+	hotel's name (a group site: its first hotel's). The token is never stored or logged; a profile's mail is
+	recorded as its communication, without the link."""
+	from kamra.tex.crm import members
+	from kamra.tex.services import sites
+
+	try:
+		props = members.site_properties(site)
+		property = site.property or (props[0] if props else None)
+		lang = (language or "en")[:2]
+		lang = lang if lang in LANGS else "en"
+		hotel = (frappe.db.get_value("Property", property, "property_name") if property else None) or site.site_name
+		programs = [frappe.db.get_value("TEX Loyalty Program", p, "program_name") or "" for p in
+		            members.site_programs(site)]
+		if guest:
+			name = " ".join(x for x in frappe.db.get_value("Guest", guest, ["first_name", "last_name"]) or () if x)
+		link = sites.guest_url(site, f"member#token={token}") if token else sites.guest_url(site, "?join=1")
+		subject, body = render(key, lang, link=link, hotel=escape_html(hotel), program=escape_html(", ".join(programs)),
+		                       name=escape_html((name or "").strip()), minutes=str(members.LINK_MINUTES))
+	except Exception as e:
+		if transaction_lost(e):
+			raise
+		log_exception("TEX member mail")
+		return {"queued": False, "status": "Failed", "communication": None}
+	return _deliver(email, subject, body, reference=("TEX Booking Site", site.name), guest=guest, property=property,
+	                template=key, booking=None, log_title="TEX member mail", booking_site=site.name)
+
+
 def booking_created(booking: str, manage_token: str) -> bool:
 	"""Booking e-mail with the manage link. True when it was queued."""
 	return booking_mail(booking, manage_token)["queued"]

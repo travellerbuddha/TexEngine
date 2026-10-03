@@ -1347,6 +1347,19 @@ CRM_SPECS = [
 		F("left_reason", "Small Text", "Why the membership ended"),
 	], perms=READONLY_AUDIT, autoname="hash", naming_rule="Random", sort_field="creation", in_create=True,
 	   extra={"modified": "2026-10-03 23:00:00.000000"}),
+
+	# C-04 on the web (ADR-078): a guest signed in on a booking site by a one-time e-mail link, for 30 days on
+	# that device; only the session token's hash is stored
+	dt("TEX Member Session", R, [
+		F("site", "Link", "Booking site", "TEX Booking Site", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("property", "Link", "Hotel", "Property", description="The site's hotel (none for a hotel group's site)"),
+		F("guest", "Link", "Guest", "Guest", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("member_session_column_1", "Column Break"),  # named: a counted break would renumber the specs after it
+		F("token_hash", "Data", "Token hash", unique=1, read_only=1, hidden=1),
+		F("expires_at", "Datetime", "Expires at", in_list_view=1),
+		F("revoked_at", "Datetime", "Signed out at"),
+	], perms=READONLY_AUDIT, autoname="hash", naming_rule="Random", sort_field="creation", in_create=True,
+	   extra={"modified": "2026-10-04 10:00:00.000000"}),
 ]
 
 # ═══ TEX Connect ══════════════════════════════════════════════════════════
