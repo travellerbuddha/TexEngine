@@ -120,8 +120,9 @@ def member_mail(site, email: str, key: str, *, token: str | None = None, guest: 
                 name: str | None = None, language: str = "en") -> dict:
 	"""A web member's link (C-04, ADR-078): ``member_sign_in`` / ``member_join`` with the one-time token in the URL
 	fragment, or ``member_none`` (no membership with this e-mail: a link to joining, no token). Sent in the site's
-	hotel's name (a group site: its first hotel's). The token is never stored or logged; a profile's mail is
-	recorded as its communication, without the link."""
+	hotel's name (a group site: its first hotel's). The token is in no log and no record of ours: only the outgoing
+	mail itself carries it (Frappe's Email Queue, System Manager only, until the mail is sent and purged), and it works
+	once, within ``members.LINK_MINUTES``. A profile's mail is recorded as its communication, without the link."""
 	from kamra.tex.crm import members
 	from kamra.tex.services import sites
 

@@ -2112,3 +2112,49 @@ Split in two batches: 2N-1 (this) the membership, the call centre and staff; 2N-
   - the call centre's member search reads the guest's erasure mark once per hotel (a primary-key read; LOW);
   - the CRS reservations page names no caller (the owner chose web and call centre);
   - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.
+
+## 6N2. Audit Part 2N-2 — members on the web: sign-in, join, member prices and "Member price" (2026-10-03)
+
+C-04's web half (owner, 2026-10-03; ADR-078), after 2N-1 (PR #33). The owner also chose a session kept on the device
+for 30 days and a web join with e-mail and name, confirmed by the link. Card: HANDOFF_LEFTOVERS §3 C-04 and §6N1
+"Not done" (re-verified: no public endpoint signed a guest in, `public.search` took no member, a member's price
+booked by a non-member was refused with `SEARCH_AGAIN`, the booking app had no member UI).
+
+- C-04e **COMPLETE**: `members.request_link` (sign in, or join with e-mail, name and the terms ticked; the same answer
+  whatever the e-mail; an address without a profile asked to sign in gets a mail that says so and links to joining;
+  3 mails per address and site an hour, 10 requests per client per 10 minutes); `members.verify` (the link used once,
+  read and deleted in one step, within 30 minutes on its own site; a join link joins the profile of that e-mail, made
+  with the name given when there is none: `loyalty.join_web`, source Web, audited); `TEX Member Session` (only the
+  token's hash; 30 days; sign-out revokes it; erasure deletes, a merge moves, a daily purge removes those ended 30 days
+  ago; site DocType, Desk / REST by the site's hotels; p78 its `(guest, site)` index); `public.member_link`,
+  `member_verify`, `member_status`, `member_join`, `member_sign_out`; the site answers `membership`; mails
+  `member_sign_in` / `member_join` / `member_none` in six languages; refusal codes `MEMBERSHIP_UNAVAILABLE`,
+  `MEMBER_CONSENT_REQUIRED`, `MEMBER_LINK_INVALID`, `MEMBER_SESSION_ENDED`, `NOT_A_MEMBER` with the booking app's
+  texts. Tests: `test_member_web.TestSignIn` (5), `TestJoinOnTheWeb` (4), `TestMemberSessionsAndPrivacy` (3),
+  `test_patches.test_p78_…`. Red: `test_member_web` could not import `kamra.tex.crm.members`; p78: the index missing.
+- C-04f **COMPLETE**: `public.search(member_session=…)` prices a signed-in member as one at the site's hotels whose
+  program they are a member of (`member_price` per offer, `member {signed_in, hotels}`); where a members-only
+  promotion is live and the visitor is no member, the member's totals only are shown beside anyone's price
+  (`member_total` per offer and room, `member_from_total` per hotel; never a member's offer key); a member's price
+  booked for anyone else is refused with `MEMBERS_ONLY`. Tests: `test_member_web.TestMemberPricesOnTheWeb` (6). Red:
+  `TypeError: search() got an unexpected keyword argument 'member_session'`.
+- C-04g **COMPLETE**: the booking app — "Member sign-in" in the header (signed in: the guest's name, "Join …" when no
+  member, "Sign out"); the sign-in / join dialog (the terms ticked first; "Check your e-mail" whatever the address);
+  `/member#token=…` on the platform and a hotel's own host (one request per link, the token leaves the address bar,
+  back to the search the link was asked from; a spent link asks for a new one, `NOT_A_MEMBER` offers to join); the
+  session sent with every search, signing in, out or joining prices it again and drops a selection made at the other
+  price; "Your member price" on a member's rate, "Member price: …" with the way to it on anyone's, the member's
+  from-price on a hotel card; the details step filled in from the membership and the e-mail read-only while a
+  member's price is chosen; the session kept by the device's clock (`member_verify` returns `expires_in`); six
+  languages. Tests: node unit `member-session.test.ts` (7), e2e `member-web.spec` (join on a rate → the mailed link →
+  priced as a member → booked under the member's e-mail → the spent link → sign out), `test_member_web` sign-in test
+  (`expires_in`). Red: `KeyError: 'expires_in'`; the e2e against the previous bundle (no "Member sign-in" button).
+  The e2e turns on an outgoing account of its own when the bench has none (CI's has none), which sends nothing (an
+  SMTP host that does not resolve; the site's scheduler, which flushes the queue, is off in CI), and turns it off
+  after.
+- **Not done:**
+  - staff cannot see or end a guest's web sessions from the CRM (an erasure deletes them; LOW);
+  - the widget's frame hides the header's member control (the rates' "Member price" still opens the dialog there);
+  - a change of a stay through the manage page is priced by ADR-077's rule (the sale's terms), never by a session;
+  - a guest asked for a link is not told when an address's limit was reached (by design: the same answer);
+  - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.

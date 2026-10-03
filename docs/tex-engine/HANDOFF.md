@@ -3,14 +3,14 @@
 **Read this whole file before changing anything.** It replaces the 2026-10-01 handoff (that version is in git history).
 Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last; the Frappe v16.36.1 upgrade followed
 as 2Z-F (PR #30), the LOW leftovers that need no decision as 2L (PR #31), four owner decisions as 2M (PR #32), members-only prices
-in the call centre as 2N-1 (C-04, first half; the web is 2N-2). What is
+in the call centre as 2N-1 (C-04, first half, PR #33) and on the web as 2N-2 (C-04's second half). What is
 left waits for an owner decision, an external party, or is a LOW leftover listed below. The session that takes over implements, verifies its own work and
 opens one pull request per batch; the owner, who writes in Turkish, reviews and merges. Never merge, never push to the
 base branch, never rebase or force-push a shared branch.
 
 Recover state in this order (CLAUDE.md): `CLAUDE.md` → this file → `IMPLEMENTATION_STATUS.md` (§6 sections, newest
-last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-077) → `PRODUCT_SPEC.md` → `git log` and
-the descriptions of PRs #3–#33 (each has its items, fail-first evidence, review rounds and "Kalanlar").
+last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-078) → `PRODUCT_SPEC.md` → `git log` and
+the descriptions of PRs #3–#34 (each has its items, fail-first evidence, review rounds and "Kalanlar").
 
 ## 1. Where things stand
 
@@ -49,6 +49,7 @@ the descriptions of PRs #3–#33 (each has its items, fail-first evidence, revie
 | 2L LOW leftovers | #31 | G-99 (the payload digest only with cost, also in Desk / REST and the trail), overlays hidden until a pass after they open, D-14 recorded (§6L, ADR-075) |
 | 2M owner decisions | #32 | C-12 ŞEKER is SEKER, C-02 a price set by hand only with `price.override`, C-03 SMS / WhatsApp-only guests listed with the phone, C-01 a no-show keeps the points (§6M, ADR-076) |
 | 2N-1 members-only prices (call centre) | #33 | C-04: `TEX Loyalty Member`, who a member is, staff join / leave, members-only promotions live, the Call Center prices the caller as a member, a member's price books for a member only (§6N1, ADR-077) |
+| 2N-2 members on the web | #34 | C-04: sign-in and join on the booking site by a one-time e-mail link, `TEX Member Session` (30 days on the device), member prices on the web, "Member price" for anyone else, `MEMBERS_ONLY`, the booking app in six languages (§6N2, ADR-078) |
 
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
@@ -69,12 +70,11 @@ Nothing planned remains. In order of likely need:
 | 3 | PMS adapters, SMS/WhatsApp providers, inbound PMS events (G-69r) | **D-15**: which PMS runs each go-live hotel? | C-07 |
 | 4 | O-6 deadlines in hotel-local time for UTC+7 hotels; LO-37 (the `fx_bridged` WARN of a MANUAL-mode pair) | D-13 answered **no** for wave 1; ask again when Cam Ranh / Phuket are planned | C-05, LO-37 |
 | 5 | ~~Points policy for No Show~~ **answered** (PR #32, C-01): a no-show keeps the points the stay was paid with; who charges a no-show fee stays with D-15 | none | §6M, ADR-076 |
-| 6 | Smaller owner questions with defaults: C-02, C-03, C-12 **done** (PR #32); C-04 **answered**, its call-centre half done (2N-1, PR #33); C-08 … C-11, C-13 … C-15 open (C-16 accepted) | owner | `HANDOFF_LEFTOVERS.md` §3 |
-| 6a | **2N-2, next batch** (C-04's web half, after PR #33 is merged): sign-in and join on the booking site by a one-time e-mail link, a member's session, the "Member price" teaser for a guest not signed in, a guest refusal code for a member's price booked by a non-member, the booking app's six languages | none (answered) | §6N1 "Not done", ADR-077 |
+| 6 | Smaller owner questions with defaults: C-02, C-03, C-12 **done** (PR #32); C-04 **done** (call centre 2N-1, PR #33; web 2N-2, PR #34); C-08 … C-11, C-13 … C-15 open (C-16 accepted) | owner | `HANDOFF_LEFTOVERS.md` §3 |
 | 7 | CLP and ISK: the server keeps them in 2 decimals (`money.MINOR_UNITS`), ISO 4217 says 0; the screens now follow the server (2K-6) | owner: a money-engine rounding change | §6K6 "Not done" |
 | 8 | ~~G-99: `get_contract` returns `payload_hash` to `price.view` callers~~ **done** (PR #31) | none | §6L, ADR-075 |
 | 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays keep their content hidden until a pass after they open | none | §6L, ADR-075 |
-| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" | none (LOW) | §6 … §6N1 |
+| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" | none (LOW) | §6 … §6N2 |
 
 Not in scope unless the owner asks: G-41r allotment × channel, G-54 surcharges by LOS/arrival, G-64 CRM campaigns.
 
@@ -173,11 +173,11 @@ Per batch:
 
 ## 6. Numbers
 
-- Patches up to **p77** (p57 sits in `[pre_model_sync]`). p26, p30, p32, p41–p44 and **p67** were never used — do not
-  use them. **Next free: p78.**
-- ADRs up to **ADR-077**. **Next free: ADR-078.**
+- Patches up to **p78** (p57 sits in `[pre_model_sync]`). p26, p30, p32, p41–p44 and **p67** were never used — do not
+  use them. **Next free: p79.**
+- ADRs up to **ADR-078**. **Next free: ADR-079.**
 - `IMPLEMENTATION_STATUS.md` sections: 6, 6B, 6C1, 6C2, 6G1, 6D1, 6E1, 6I, 6E2, 6H1, 6D2, 6F1, 6H2, 6F2, 6G2, 6K1, 6K2,
-  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF, 6L, 6M, 6N1. A new batch adds its own section at the END of the file.
+  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF, 6L, 6M, 6N1, 6N2. A new batch adds its own section at the END of the file.
 
 ## 7. Owner decisions
 
@@ -196,7 +196,8 @@ abandoned bookings with the phone; **C-12** a promotion code's Turkish letters a
 **C-04** (2026-10-03): a member is a guest who joined the hotel's loyalty program or who stayed and earned points;
 members get the members-only prices on the web and in the call centre; a guest not signed in on the web sees the
 member price as "Member price" (applied only when signed in); the web sign-in is a one-time link sent by e-mail
-(ADR-077; the call centre in 2N-1, the web in 2N-2).
+(ADR-077; the call centre in 2N-1, the web in 2N-2). For the web (2N-2, ADR-078): a member stays signed in **on the
+device for 30 days**; a guest joins on the web with **e-mail and name, confirmed by the link**.
 
 Open (ask the owner when the work needs it; never guess): **D-15** (PMS per hotel; also who charges a no-show fee),
 C-08 … C-11, C-13 … C-15 with their defaults in `HANDOFF_LEFTOVERS.md` §3, and CLP/ISK minor units (§2 item 7).
@@ -235,6 +236,9 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
   (`tests/dom/harness.css`).
 - A form kept mounted while closed and reset by a passive effect shows the last session's values for a frame and
   loses what is typed then: mount it per opening (keyed) or reset in a layout effect (ADR-073).
+- The local and CI benches have no outgoing Email Account, so `frappe.sendmail` writes no Email Queue row (the
+  failure is only an Error Log). An e2e that reads a mail turns on an outbox of its own and turns it off after
+  (`member-web.spec`); integration tests use `ensure_test_outbox` or mock `notify._send`.
 - A Frappe tag move can change a contract TEX relies on: v16.36.1 stopped answering an expired password with the
   reset link (ADR-074). Run every suite on a Frappe move, and read the diff of `frappe/auth.py`, `frappe/oauth.py` and
   `frappe/integrations/oauth2.py` between the tags.
@@ -242,7 +246,7 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
 ## 10. First steps for the session that takes over
 
 1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md`; skim the descriptions of
-   PRs #29–#32 (the latest complete batches).
+   PRs #31–#34 (the latest complete batches).
 2. Set up the bench (`docs/tex-engine/DEV_ENVIRONMENT.md`) and run the pure unit tests and one integration module.
 3. Ask the owner, in Turkish, only what the next item needs (§2: D-15 and the open C-items need a decision; plain questions
    with the consequence of each answer worked best, D-14). Never start an item that waits for an answer.

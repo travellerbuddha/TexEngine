@@ -109,6 +109,9 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Gateway substitution | Payments only through a provider account of the same hotel; payment links keep their fixed gateway |
 | Card data exposure | Hosted/tokenised checkout only; never receive PAN/CVV; store brand + last4 only; log scrubber |
 | Token theft (manage booking, payment links) | 32-byte random tokens, only sha256 stored, expiry, rate limits, rotation for sensitive actions |
+| A web member's sign-in link or session taken or guessed (C-04, ADR-078) | The link: a 32-byte random token in the URL fragment of the mail, its sha256 kept in the cache for 30 minutes and read-and-deleted in one step (used once, on its own site only); the session: another 32-byte token, only its sha256 stored (`TEX Member Session`), 30 days on that device, revoked on sign-out, worthless for an erased profile, deleted by an erasure, purged 30 days after it ended. A link is sent only to the address typed, and a join link joins only the profile of that e-mail (the link proves the address). Rate limits: 10 link requests per client per 10 minutes, 3 mails per address and site an hour; the session endpoints use the public write / search limits |
+| Learning from the site who is a guest or a member (enumeration) | A link request answers the same whatever the e-mail (an address without a profile gets a mail saying so, not a different answer), and the same when an address's limit is reached; a session shows the guest only their own name, e-mail and membership |
+| A member's price booked by someone else | The booking checks the membership of the profile it joins (its e-mail), not the session: anyone else gets `MEMBERS_ONLY`; the "Member price" a visitor sees is the totals of a member's search only (its offer keys never reach the visitor, so every key a visitor holds is anyone's price) (ADR-078) |
 | XSS | React escaping; no `dangerouslySetInnerHTML` for user/admin content in TEX screens; branding restricted to tokens (validated colours/fonts/radii); CSP for booking pages |
 | CSRF | Frappe CSRF token on session-authenticated POSTs; public booking endpoints are stateless (no cookies trusted) and rate limited |
 | SQL injection | Parameterised queries only (`%(name)s`); no string-built SQL with user input |
@@ -171,6 +174,10 @@ the guest's manage token.
   failing bookings behind the funnel purge; comments and mail deleted with the duplicate; an erasure
   undone by a merge; a merge not reconstructible; the legacy endpoint's hotel check; p45 missing most
   earlier erasures) and 3 Low fixed with fail-first tests (ADR-056 third review follow-up, p48).
+
+- 2026-10-03 C-04 web members (ADR-078): one-time e-mail links and device sessions designed against
+  enumeration, link reuse, cross-site use and a member's price booked by another; independent review
+  rounds in the 2N-2 pull request.
 
 ## 7. Known gaps (tracked)
 
