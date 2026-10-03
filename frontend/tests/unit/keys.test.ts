@@ -116,3 +116,14 @@ test("a cell editor's keys: one routing for the matrix, the ladder and the board
   // typing, the field's own undo and the clipboard stay the field's
   for (const e of [k("a"), k("z", { ctrl: true }), k("c", { ctrl: true }), k("v", { meta: true }), k("ArrowLeft")]) assert.equal(editorKeyAction(e), null)
 })
+
+test("Turkish letters (LO-49): ı and İ are the I key on both Turkish layouts; ü and the others no other letter's key", () => {
+  // Turkish-F: the key printed ı / I sits where QWERTY has R, İ / i where it has S, ü where it has G
+  assert.equal(shortcutLetter({ key: "ı", code: "KeyR" }), "i")
+  assert.equal(shortcutLetter({ key: "İ", code: "KeyS" }), "i")
+  assert.equal(shortcutLetter({ key: "İ", code: "Quote" }), "i") // Turkish-Q
+  for (const [key, code] of [["ü", "KeyG"], ["ö", "KeyX"], ["ç", "KeyB"], ["ş", "Semicolon"], ["ğ", "KeyE"], ["Ü", "KeyG"]])
+    assert.equal(shortcutLetter({ key, code }), null, `${key} at ${code}`)
+  // German QWERTZ keeps its ü key out of the letters, as before
+  assert.equal(shortcutLetter({ key: "ü", code: "BracketLeft" }), null)
+})

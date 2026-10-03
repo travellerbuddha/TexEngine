@@ -93,6 +93,7 @@
  "crs.cc.results_hint": "Sonuçlar burada görünür; ↑ ↓ ve Enter kullanın.",
  "crs.cc.shortcuts": "Kısayollar",
  "crs.cc.shortcuts_hint": "Bu sayfadaki her şey klavyeyle çalışır.",
+ "crs.cc.voiceover_hint": "VoiceOver açıkken ⌃⌥ VoiceOver tuşudur ve bu kısayolları VoiceOver alabilir: bunun yerine metin alanı dışındayken ⌥ ile harfe basın ya da sayfadaki düğmeleri kullanın.",
  "crs.cc.subtitle": "Misafir hattayken klavyeyle hızlı rezervasyon.",
  "crs.cc.summary": "Çağrı özeti",
  "crs.cc.summary_empty": "Çağrının adımları burada görünür.",

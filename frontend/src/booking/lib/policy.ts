@@ -39,8 +39,10 @@ export function cancellation(i18n: I18n, info: RatePlanInfo | null | undefined, 
 }
 
 /** ``currency``: the quote's; a FIXED deposit is written in its policy's own currency when it names one
- * (Y-3 B, ADR-067) — the converted amount due comes from the server (``due_now``). */
-export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, currency: string) {
+ * (Y-3 B, ADR-067) — the converted amount due comes from the server (``due_now``). ``perBooking``: a FIXED deposit
+ * says it is for the whole booking (several rooms: the server takes it once per booking and policy, LO-35). */
+export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, currency: string,
+                             { perBooking = false }: { perBooking?: boolean } = {}) {
   const { t, money } = i18n
   const p = info?.payment_policy
   const kind = (p?.deposit_type || "FULL").toUpperCase()
@@ -48,10 +50,44 @@ export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, 
   let text: string
   if (kind === "NONE") text = t("policy.payNothingNow")
   else if (kind === "PERCENT") text = t("policy.depositPercent", { percent: v.replace(/\.0+$/, "") })
-  else if (kind === "FIXED") text = t("policy.depositFixed", { amount: money(v, p?.currency || currency) })
+  else if (kind === "FIXED")
+    text = t(perBooking ? "policy.depositFixedBooking" : "policy.depositFixed", { amount: money(v, p?.currency || currency) })
   else if (kind === "NIGHTS") text = t("policy.depositNights", { count: Number.parseInt(v || "1", 10) || 1 })
   else text = t("policy.payInFull")
   return { text, payAtHotel: !!p?.allow_pay_at_hotel || kind === "NONE" }
+}
+
+/** The payment line of each room of one booking, in room order (``null``: a room not chosen yet). A FIXED deposit
+ * is taken once per booking and policy, room by room (the server's ``deposit_shares``, ADR-067): where two rooms or
+ * more carry the policy, the first names it, for the whole booking, and the others say it is taken with that room
+ * (LO-35); a room alone with its policy reads as it would on its own. */
+export function bookingPaymentTerms(
+  i18n: I18n,
+  rooms: ({ info: RatePlanInfo | null | undefined; currency: string } | null)[],
+) {
+  // the server's key of a FIXED policy (deposit_shares), or null for another kind of deposit
+  const fixedKey = (info: RatePlanInfo | null | undefined) => {
+    const p = info?.payment_policy
+    return (p?.deposit_type || "").toUpperCase() === "FIXED" ? String(p?.id || p?.name || "") : null
+  }
+  const carrying = new Map<string, number>()
+  for (const r of rooms) {
+    const key = r ? fixedKey(r.info) : null
+    if (key !== null) carrying.set(key, (carrying.get(key) ?? 0) + 1)
+  }
+  const first = new Map<string, number>()
+  return rooms.map((r, i) => {
+    if (!r) return null
+    const p = r.info?.payment_policy
+    const key = fixedKey(r.info)
+    if (key === null || (carrying.get(key) ?? 0) < 2) return paymentTerms(i18n, r.info, r.currency)
+    const at = first.get(key)
+    if (at === undefined) {
+      first.set(key, i)
+      return paymentTerms(i18n, r.info, r.currency, { perBooking: true })
+    }
+    return { text: i18n.t("policy.depositWithRoom", { n: at + 1 }), payAtHotel: !!p?.allow_pay_at_hotel }
+  })
 }
 
 const REASONS: Record<string, MessageKey> = {

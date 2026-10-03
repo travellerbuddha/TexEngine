@@ -12,6 +12,7 @@ import { siteUrl } from "../lib/mount"
 import { getJSON, manageToken, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
 import { armAbandon, disarmAbandon, trackMarketRefused } from "../lib/track"
 import { marketRefusal, refusedLinkPayload, type MarketRefusal } from "../lib/marketLink"
+import { priceChange, type PriceChange } from "../lib/priceChange"
 import type { Residency } from "../../lib/residency"
 import { useSite } from "../site/SiteContext"
 import type { Basket, BookResponse, Offer, PaymentMethod, PaymentStart, QuoteResponse, RatePlanInfo, RoomQuote, SearchResult } from "../types"
@@ -51,13 +52,6 @@ export interface Guest {
   consent_whatsapp: boolean
 }
 
-export interface PriceChange {
-  room: number
-  from: string
-  to: string
-  currency: string
-}
-
 /** An extra the guest asked for that the quote did not add (and does not charge). */
 export interface RejectedExtra {
   room: number
@@ -86,6 +80,11 @@ interface FlowState {
   quotes: (QuoteResponse | null)[]
   quotedAt: number | null
   priceChanges: PriceChange[]
+  /** per room, the last quote the guest has seen the price of: what the next one is compared with (LO-32). A quote
+   * whose price is a change the guest has not accepted yet does not replace it ("OK, continue" does: on the extras
+   * step the notice is not shown, and the next quote must still announce it); kept when the extras change (they
+   * clear the quotes), gone with the room chosen; absent in a flow saved before it was kept */
+  seen?: (RoomQuote | null)[]
   guest: Guest
   method: PaymentMethod | null
   /** gateway chosen when several accounts offer the same method (e.g. two card gateways) */
@@ -196,6 +195,8 @@ export interface BasketState {
   data: Basket | null
   /** quote ids the data belongs to */
   key: string | null
+  /** why it could not be read (status "error"): the checkout says so (LO-14) */
+  error?: FlowError | null
 }
 
 const BookingCtx = createContext<Ctx | null>(null)
@@ -415,7 +416,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         const selections = Array.from({ length: criteria.rooms.length }, (_, i) => (i === roomIndex ? sel : f.selections[i] ?? null))
         const next = selections.findIndex((s) => !s)
         if (next >= 0) setActiveRoom(next)
-        return { ...f, selections, quotes: [], quotedAt: null, priceChanges: [], bookKey: null }
+        // a room chosen again is compared with the search's price of it again
+        const seen = (f.seen ?? []).map((q, i) => (i === roomIndex ? null : q))
+        return { ...f, selections, quotes: [], seen, quotedAt: null, priceChanges: [], bookKey: null }
       })
     },
     [criteria.rooms.length],
@@ -464,16 +467,16 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         const code = q.reasons?.[0]?.code
         return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: "", room: i })
       }
-      const before = (base[i] ?? sels[i])!.quote.totals.accommodation
-      const after = q.quote.totals.accommodation
-      if (q.price_changed || (before && after && before !== after))
-        changes.push({ room: i, from: q.price_changed && q.previous_total ? q.previous_total : before, to: q.price_changed ? q.quote.totals.total : after, currency: q.quote.currency })
+      // against the last quote the guest saw of this room, else the search's offer (LO-32)
+      const change = priceChange(i, q, flow.seen?.[i] ?? null, (base[i] ?? sels[i])!.quote)
+      if (change) changes.push(change)
       quotes.push(q)
     }
-    setFlow((f) => ({ ...f, quotes, quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
+    const seen = (f: FlowState) => quotes.map((r, i) => (changes.some((c) => c.room === i) ? f.seen?.[i] ?? null : r.quote ?? null))
+    setFlow((f) => ({ ...f, quotes, seen: seen(f), quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
     return { error: null, rejected: findRejected(quotes, flow.extras), quotes, changes }
-  }, [flow.selections, flow.extras, site.slug])
+  }, [flow.selections, flow.extras, flow.seen, site.slug])
 
   const rejectedExtras = useMemo(() => findRejected(flow.quotes, flow.extras), [flow.quotes, flow.extras])
 
@@ -538,7 +541,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     [],
   )
   const setTerms = useCallback((v: boolean) => setFlow((f) => ({ ...f, terms: v })), [])
-  const clearPriceChanges = useCallback(() => setFlow((f) => ({ ...f, priceChanges: [] })), [])
+  // the guest accepts the new prices: the quotes they were told of are the ones seen now (LO-32)
+  const clearPriceChanges = useCallback(
+    () => setFlow((f) => ({ ...f, priceChanges: [], seen: f.selections.map((_, i) => (f.quotes[i]?.ok ? f.quotes[i]?.quote : null) ?? f.seen?.[i] ?? null) })),
+    [],
+  )
 
   // server total and amount due now per payment method, once every room is quoted
   const quotedIds = flow.quotes.map((q) => q?.quote_id).filter((x): x is string => !!x)
@@ -552,7 +559,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     setBasket((b) => ({ status: "loading", data: b.key === basketKey ? b.data : null, key: basketKey }))
     pub<Basket>("basket", { site: site.slug, quote_ids: basketKey.split(","), session_id: sessionId() })
       .then((data) => alive && setBasket({ status: "done", data, key: basketKey }))
-      .catch(() => alive && setBasket({ status: "error", data: null, key: basketKey }))
+      .catch((e: unknown) => alive && setBasket({ status: "error", data: null, key: basketKey, error: toFlowError(e) }))
     return () => {
       alive = false
     }

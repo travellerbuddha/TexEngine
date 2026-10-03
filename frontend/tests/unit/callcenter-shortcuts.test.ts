@@ -72,3 +72,31 @@ test("the platform comes from navigator.platform", () => {
   assert.equal(shortcutPlatform("Linux x86_64"), "linux")
   assert.equal(shortcutPlatform(""), "linux")
 })
+
+test("? opens the help with Ctrl or AltGr too, never with ⌘, never in a field (LO-49)", () => {
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Slash", ctrlKey: true }), "linux"), "help")
+  // Windows reports AltGr as Ctrl+Alt: a layout that types ? with it
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Minus", ctrlKey: true, altKey: true, altGraph: true }), "windows"), "help")
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Slash", metaKey: true }), "mac"), null) // the Mac's own Help
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Slash", ctrlKey: true, editable: true }), "linux"), null)
+})
+
+test("Turkish-F (LO-49): Alt with the key printed ı or ü runs no other letter's shortcut", () => {
+  // ı sits where QWERTY has R (results), ü where it has G (guest)
+  assert.equal(callCenterShortcut(ev({ key: "ı", code: "KeyR", altKey: true }), "windows"), null)
+  assert.equal(callCenterShortcut(ev({ key: "ü", code: "KeyG", altKey: true }), "windows"), null)
+  // the key printed R is still Alt+R
+  assert.equal(callCenterShortcut(ev({ key: "r", code: "KeyU", altKey: true }), "windows"), "results")
+})
+
+// 2K-5 review: on a Mac ⌥ makes a key type its Option-layer character, never the key's own letter; a letter with a
+// diacritic there (US ⌥⇧S "Í", ⌥⇧M "Â", French ⌥S "Ò") is the physical key's shortcut, as before LO-49
+test("mac: Option typing a letter with a diacritic is still the physical key's shortcut", () => {
+  assert.equal(callCenterShortcut(ev({ key: "Í", code: "KeyS", altKey: true }), "mac"), "search")
+  assert.equal(callCenterShortcut(ev({ key: "Â", code: "KeyM", altKey: true }), "mac"), "notes")
+  assert.equal(callCenterShortcut(ev({ key: "Ò", code: "KeyS", altKey: true, ctrlKey: true }), "mac"), "search")
+  // ⌥⇧B types "ı": the B key, which runs nothing
+  assert.equal(callCenterShortcut(ev({ key: "ı", code: "KeyB", altKey: true }), "mac"), null)
+  // in a field, Option typing a character of its own stays the character
+  assert.equal(callCenterShortcut(ev({ key: "Í", code: "KeyS", altKey: true, editable: true }), "mac"), null)
+})

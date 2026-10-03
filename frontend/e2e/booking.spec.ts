@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test"
-import { addExtra, completeSandbox, fillGuest, guestSearch, payWithSandbox, pickRoom, readConfirmation, visiblePrices } from "./flows/booking"
+import { expect, test, type Page, type TestInfo } from "@playwright/test"
+import { addExtra, completeSandbox, fillGuest, guestSearch, nextStep, payWithSandbox, pickRoom, readConfirmation, visiblePrices } from "./flows/booking"
 import { stayDates, trackErrors } from "./helpers"
 
 // Guest booking engine (R-58): search → room → extras → guest details → sandbox card
@@ -155,6 +155,311 @@ test("a new price found when the quotes are made again stops the booking; the ne
   expect(booked).toHaveLength(1)
   await completeSandbox(page, "success")
   expect((await readConfirmation(page)).status).toBe("Confirmed")
+  noErrors()
+})
+
+/** LO-32: the stay chosen, quoted on the payment step, then quoted again at submit 10.00 dearer; the guest accepts that
+ * price. `dearer()` makes the next quotes the server's with the stay 10.00 dearer than the search said, marked as the
+ * server marks them: changed against the search's total (it knows nothing of what the guest accepted), but not when
+ * extras were asked for (it does not compare those). */
+async function acceptDearerStay(page: Page, testInfo: TestInfo, offsetDays: number) {
+  await page.clock.install()
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const booked: string[][] = []
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book") booked.push((r.postDataJSON() as { quote_ids: string[] }).quote_ids)
+  })
+  const dearer = () =>
+    page.route(
+      (url) => isQuoteRooms(url.href),
+      async (route) => {
+        const asked = (route.request().postDataJSON() as { rooms: { extras?: unknown[] }[] }).rooms
+        const response = await route.fetch()
+        const body = (await response.json()) as { message: { rooms: { price_changed?: boolean; previous_total?: string; quote?: { totals: Record<string, string> } }[] } }
+        body.message.rooms.forEach((q, i) => {
+          if (!q.quote) return
+          q.previous_total = q.quote.totals.total
+          q.price_changed = !asked[i]?.extras?.length
+          for (const k of ["accommodation", "total"]) {
+            const c = cents(q.quote.totals[k]) + 1000n
+            q.quote.totals[k] = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+          }
+        })
+        await route.fulfill({ response, json: body })
+      },
+      { times: 1 },
+    )
+  const { checkIn, checkOut } = stay(offsetDays, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted, { message: "the stay was quoted" }).toBeGreaterThan(0)
+  const bookButton = page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first()
+  const notice = page.getByText("The price has changed")
+  await expect(notice).toHaveCount(0)
+  const terms = page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ })
+  // the guest lingers 26 minutes, then chooses (the page quotes again after 25), as in the O-30 tests
+  const linger = async () => {
+    await page.clock.fastForward("26:00")
+    await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+    await terms.uncheck()
+    await terms.check()
+  }
+
+  // the quotes are made again at submit and the stay costs 10.00 more: the guest sees it and accepts it
+  await dearer()
+  await linger()
+  const before = quoted
+  await bookButton.click()
+  await expect(notice.first()).toBeVisible()
+  expect(quoted).toBeGreaterThan(before)
+  expect(booked, "no booking before the guest has seen the new price").toEqual([])
+  await page.getByRole("button", { name: "OK, continue" }).first().click()
+  await expect(notice).toHaveCount(0)
+  return { booked, bookButton, notice, dearer, linger, quoted: () => quoted }
+}
+
+test("a price the guest accepted is not announced again when the quotes are made again at that price (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  const { booked, bookButton, notice, dearer, linger } = await acceptDearerStay(page, testInfo, 210)
+
+  // they linger again: the quotes made at the next submit cost what they accepted, so nothing is announced
+  await dearer()
+  await linger()
+  await bookButton.click()
+  await expect.poll(() => booked.length, { message: "booked at the price the guest accepted" }).toBe(1)
+  await expect(notice).toHaveCount(0)
+  await completeSandbox(page, "success")
+  expect((await readConfirmation(page)).status).toBe("Confirmed")
+  noErrors()
+})
+
+test("a price the guest accepted is not announced again when they add an extra afterwards (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  const { booked, notice, dearer, quoted } = await acceptDearerStay(page, testInfo, 220)
+
+  // back to the extras: one more makes the page quote again (the room still at the price they accepted); the extra
+  // is the guest's own choice, the room's price is what they accepted, so nothing is announced
+  await page.getByRole("navigation", { name: "Booking steps" }).getByRole("button", { name: /^Extras/ }).click()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Make your stay special")
+  await addExtra(page, { name: "Airport transfer", quantity: 1 })
+  await dearer()
+  const before = quoted()
+  await nextStep(page)
+  await expect.poll(quoted, { message: "the stay was quoted again with the extra" }).toBeGreaterThan(before)
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your details")
+  await expect(notice).toHaveCount(0)
+  await fillGuest(page, GUEST)
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  await page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first().click()
+  await expect.poll(() => booked.length, { message: "booked with the extra" }).toBe(1)
+  await completeSandbox(page, "success")
+  expect((await readConfirmation(page)).status).toBe("Confirmed")
+  noErrors()
+})
+
+test("an extra the quotes made again cannot add is told as such, not as a price change (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  await page.clock.install()
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const booked: string[][] = []
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book") booked.push((r.postDataJSON() as { quote_ids: string[] }).quote_ids)
+  })
+  const { checkIn, checkOut } = stay(230, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await addExtra(page, { name: "Airport transfer", quantity: 1 })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted, { message: "the stay was quoted" }).toBeGreaterThan(0)
+
+  // the transfer sells out while the guest lingers: the quotes made at submit cannot add it, and leave it (and its
+  // price) out of the total, as the server does; the room costs what it did
+  await page.route(
+    (url) => isQuoteRooms(url.href),
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { message: { rooms: { quote?: { totals: Record<string, string>; extras: { name: string; ok: boolean; amount: string; reason?: string }[] } }[] } }
+      for (const q of body.message.rooms) {
+        for (const e of q.quote?.extras ?? []) {
+          if (!e.ok || e.name !== "Airport transfer") continue
+          const c = cents(q.quote!.totals.total) - cents(e.amount)
+          q.quote!.totals.total = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+          Object.assign(e, { ok: false, amount: "0.00", reason: `sold out on ${checkIn}` })
+        }
+      }
+      await route.fulfill({ response, json: body })
+    },
+    { times: 1 },
+  )
+  await page.clock.fastForward("26:00")
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  const before = quoted
+  await page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first().click()
+  const rejected = page.getByRole("status").filter({ hasText: "Could not be added to your stay" })
+  await expect(rejected).toBeVisible()
+  await expect(rejected).toContainText("Airport transfer")
+  expect(quoted).toBeGreaterThan(before)
+  expect(booked, "no booking before the guest has seen what could not be added").toEqual([])
+  const notice = page.getByText("The price has changed")
+  await expect(notice).toHaveCount(0)
+  // they go on without it: still no price change, for the room's price did not change
+  await rejected.getByRole("button", { name: "Continue anyway" }).click()
+  await expect(rejected).toHaveCount(0)
+  await expect(notice).toHaveCount(0)
+  noErrors()
+})
+
+test("a new price found on the extras step is announced on the next step, though the guest changed the extras (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the flow's steps, not the viewport, are under test")
+  const noErrors = trackErrors(page)
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const money = (c: bigint) => `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+  // the next quotes: the server's, the room 10.00 dearer than the search said; the transfer sold out (left out of the
+  // total), and marked as the server marks them (changed against the search's total only when no extras were asked)
+  const dearer = () =>
+    page.route(
+      (url) => isQuoteRooms(url.href),
+      async (route) => {
+        const asked = (route.request().postDataJSON() as { rooms: { extras?: unknown[] }[] }).rooms
+        const response = await route.fetch()
+        const body = (await response.json()) as {
+          message: { rooms: { price_changed?: boolean; previous_total?: string; quote?: { totals: Record<string, string>; extras: { name: string; ok: boolean; amount: string; reason?: string }[] } }[] }
+        }
+        body.message.rooms.forEach((q, i) => {
+          if (!q.quote) return
+          q.previous_total = q.quote.totals.total
+          q.price_changed = !asked[i]?.extras?.length
+          let total = cents(q.quote.totals.total) + 1000n
+          for (const e of q.quote.extras) {
+            if (!e.ok || e.name !== "Airport transfer") continue
+            total -= cents(e.amount)
+            Object.assign(e, { ok: false, amount: "0.00", reason: `sold out on ${checkIn}` })
+          }
+          q.quote.totals.accommodation = money(cents(q.quote.totals.accommodation) + 1000n)
+          q.quote.totals.total = money(total)
+        })
+        await route.fulfill({ response, json: body })
+      },
+      { times: 1 },
+    )
+  const { checkIn, checkOut } = stay(250, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await addExtra(page, { name: "Airport transfer", quantity: 1 })
+
+  // Continue: the transfer cannot be added and the room costs 10.00 more; the guest stays on the extras step, which
+  // tells only what could not be added
+  await dearer()
+  await page.getByRole("button", { name: "Continue", exact: true }).filter({ visible: true }).first().click()
+  const rejected = page.getByRole("status").filter({ hasText: "Could not be added to your stay" })
+  await expect(rejected).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Make your stay special")
+  // they take the transfer out and go on: the room still costs 10.00 more than they were shown, so the next step says so
+  await addExtra(page, { name: "Airport transfer", quantity: 0 })
+  await dearer()
+  const before = quoted
+  await page.getByRole("button", { name: "Continue", exact: true }).filter({ visible: true }).first().click()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your details")
+  expect(quoted).toBeGreaterThan(before)
+  await expect(page.getByRole("status").filter({ hasText: "The price has changed" })).toBeVisible()
+  noErrors()
+})
+
+test("on a phone the price-change notice is focused and scrolled into view (LO-33)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "the phone's viewport is under test")
+  const noErrors = trackErrors(page)
+  await page.clock.install()
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const { checkIn, checkOut } = stay(215, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted, { message: "the stay was quoted" }).toBeGreaterThan(0)
+  // the refresh made at submit (the quotes are 26 minutes old) finds the stay 10.00 dearer
+  await page.route(
+    (url) => isQuoteRooms(url.href),
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { message: { rooms: { quote?: { totals: Record<string, string> } }[] } }
+      for (const q of body.message.rooms) {
+        if (!q.quote) continue
+        for (const k of ["accommodation", "total"]) {
+          const c = cents(q.quote.totals[k]) + 1000n
+          q.quote.totals[k] = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+        }
+      }
+      await route.fulfill({ response, json: body })
+    },
+    { times: 1 },
+  )
+  await page.clock.fastForward("26:00")
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  // the guest books from the bottom of the page: the notice sits above, out of a phone's view
+  const bookButton = page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).last()
+  await bookButton.scrollIntoViewIfNeeded()
+  await bookButton.click()
+  const notice = page.getByRole("status").filter({ hasText: "The price has changed" })
+  await expect(notice).toBeVisible()
+  await expect(notice).toBeInViewport()
+  await expect(notice).toBeFocused()
+  noErrors()
+})
+
+test("payment options that could not be loaded say why, and load on Try again (LO-14)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the checkout's wording, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  const isBasket = (url: URL) => url.pathname === "/api/method/kamra.tex.api.public.basket"
+  // the server's refusals as Frappe sends them: a rate limit (429), then a coded refusal (G-70b)
+  const refuse = (status: number, body: Record<string, unknown>) =>
+    page.route(isBasket, (route) => route.fulfill({ status, contentType: "application/json", json: { ...body, _server_messages: JSON.stringify([JSON.stringify({ message: "Refused" })]) } }), { times: 1 })
+  await refuse(429, { exc_type: "RateLimitExceededError" })
+  const { checkIn, checkOut } = stay(240, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+
+  const failed = page.getByRole("status").filter({ has: page.getByRole("button", { name: "Try again" }) })
+  await expect(failed).toContainText("Too many attempts")
+  await expect(failed).toContainText("Please wait a minute and try again.")
+  await expect(failed).not.toContainText("Check your connection")
+  // a coded refusal is told in its own words
+  await refuse(417, { exc_type: "ValidationError", tex_code: "QUOTE_INVALID" })
+  await failed.getByRole("button", { name: "Try again" }).click()
+  await expect(failed).toContainText("The payment options could not be loaded")
+  await expect(failed).toContainText("Your selection is no longer valid. Please search again.")
+  await expect(failed).not.toContainText("Check your connection")
+  // and the options load when the server answers
+  await failed.getByRole("button", { name: "Try again" }).click()
+  await expect(page.getByRole("radio", { name: /^Credit or debit card/ }).first()).toBeVisible()
+  await expect(failed).toHaveCount(0)
   noErrors()
 })
 

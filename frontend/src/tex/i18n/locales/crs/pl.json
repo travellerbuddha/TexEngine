@@ -95,6 +95,7 @@
  "crs.cc.results_hint": "Wyniki pojawią się tutaj; użyj ↑ ↓ i Enter.",
  "crs.cc.shortcuts": "Skróty klawiszowe",
  "crs.cc.shortcuts_hint": "Wszystko na tej stronie działa z klawiatury.",
+ "crs.cc.voiceover_hint": "Przy włączonym VoiceOver ⌃⌥ to klawisz VoiceOver i VoiceOver może przechwycić te skróty: zamiast tego naciśnij ⌥ i literę poza polem tekstowym albo użyj przycisków na stronie.",
  "crs.cc.subtitle": "Rezerwacja z klawiatury, gdy gość jest na linii.",
  "crs.cc.summary": "Podsumowanie rozmowy",
  "crs.cc.summary_empty": "Tutaj pojawią się kroki rozmowy.",

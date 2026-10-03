@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { useI18n, type MessageKey } from "../i18n"
 import { pub } from "../lib/api"
 import { extraAnchor, extraStock, refusalText, stayDays, type DayAvailability, type ExtrasAvailability } from "../lib/extras"
-import { boardLabel, cancellation, paymentTerms } from "../lib/policy"
+import { boardLabel, bookingPaymentTerms, cancellation } from "../lib/policy"
 import { refusalMessage } from "../lib/refusals"
 import { useBooking, type Step } from "../flow/BookingContext"
 import { continuePayment } from "../flow/payment"
@@ -17,7 +17,7 @@ import type { PaymentMethod, PaymentStart, QuoteResponse, SiteExtra } from "../t
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
-import { fallbackChoices, type PayChoice } from "../lib/methods"
+import { basketFailureText, checkoutChoices } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
 import { countryNames, isoCountry, regionDisplay, residencyProblem } from "../../lib/residency"
@@ -527,7 +527,6 @@ const METHOD_TEXT: Record<PaymentMethod, { label: MessageKey; body: MessageKey }
   "Bank Transfer": { label: "payment.bank", body: "payment.bankBody" },
   "Pay at Hotel": { label: "payment.hotel", body: "payment.hotelBody" },
 }
-const KNOWN = new Set<string>(["Card", "Bank Transfer", "Pay at Hotel"])
 
 function PaymentStep() {
   const i18n = useI18n()
@@ -545,28 +544,18 @@ function PaymentStep() {
   const radioName = useId()
   const methodErrRef = useRef<HTMLDivElement>(null)
 
-  // Methods and amounts come from the server basket (same deposit rules as booking);
-  // if it cannot be read, fall back to the card alone (the hotel's rules decide the rest) and let book() decide.
+  // Methods and amounts come from the server basket (same deposit rules as booking). If it cannot be read the guest
+  // is told and may read it again: no method is guessed, the hotel's rules may not sell it (LO-14)
   const basket = b.basket.status === "done" ? b.basket.data : null
   const basketLoading = b.basket.status === "loading" || (b.basket.status === "idle" && b.quotesFresh)
-  const choices: PayChoice[] = useMemo(() => {
-    if (basket) {
-      const avail = basket.methods.filter((m) => m.available && KNOWN.has(m.method))
-      return avail.map((m) => ({
-        method: m.method as PaymentMethod,
-        account: m.provider_account,
-        via: avail.filter((x) => x.method === m.method).length > 1 ? m.label : null,
-        dueNow: m.due_now,
-        later: m.balance_after,
-        sandbox: m.sandbox,
-      }))
-    }
-    return fallbackChoices()
-  }, [basket])
+  const { choices, failed: basketFailed } = useMemo(() => checkoutChoices({ status: b.basket.status, data: basket }),
+    [b.basket.status, basket])
   const current =
     choices.find((c) => c.method === flow.method && (!c.account || !flow.providerAccount || c.account === flow.providerAccount)) ?? choices[0] ?? null
   const method: PaymentMethod = current?.method ?? "Card"
   const currency = basket?.currency ?? flow.selections[0]?.currency ?? ""
+  // a fixed deposit is named once per booking and policy, as the server takes it (LO-35)
+  const payLines = bookingPaymentTerms(i18n, flow.selections.map((s) => (s ? { info: s.rateInfo, currency: s.currency } : null)))
   const payingNow = current?.dueNow ? !isZero(current.dueNow) : method !== "Pay at Hotel"
   const bookLabel = payingNow
     ? current?.dueNow
@@ -716,6 +705,15 @@ function PaymentStep() {
             <p className="mt-3">
               <Spinner label={t("payment.checkingOptions")} />
             </p>
+          ) : basketFailed ? (
+            <Alert
+              tone="warn"
+              className="mt-3"
+              title={basketFailureText(i18n, b.basket.error).title}
+              actions={<Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>}
+            >
+              {basketFailureText(i18n, b.basket.error).body}
+            </Alert>
           ) : !choices.length ? (
             <Alert tone="warn" className="mt-3" title={t("payment.noMethodsTitle")}>
               {t("payment.noMethodsBody")}
@@ -783,7 +781,7 @@ function PaymentStep() {
                     {s.ratePlanName ? ` · ${s.ratePlanName}` : ""}
                   </p>
                   <p className="text-soft">{cancellation(i18n, s.rateInfo, criteria.checkIn!).text}</p>
-                  {method !== "Pay at Hotel" && <p className="text-soft">{paymentTerms(i18n, s.rateInfo, s.currency).text}</p>}
+                  {method !== "Pay at Hotel" && <p className="text-soft">{payLines[i]?.text}</p>}
                   {s.rateInfo?.cancellation_policy?.description && <p className="text-xs text-muted">{s.rateInfo.cancellation_policy.description}</p>}
                 </li>
               ) : null,

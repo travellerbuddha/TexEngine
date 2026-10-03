@@ -12,8 +12,18 @@ export const ANALYTICS_ID_PATTERNS = {
 
 export type AnalyticsIdKind = keyof typeof ANALYTICS_ID_PATTERNS
 
-/** The id as the engine uses it (trimmed), or null when it is blank or not valid. */
+/** What the server strips around an id (Python ``str.strip()``: its whitespace; ``String.trim`` also strips a
+ * byte-order mark and keeps the separators U+001C–U+001F and U+0085). The same set: the admin form, the engine and
+ * the server judge one value alike (LO-49). */
+const EDGE = /^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g
+
+/** The value stripped as the server strips it (``EDGE``). */
+export function stripId(raw: string | null | undefined): string {
+  return (raw ?? "").replace(EDGE, "")
+}
+
+/** The id as the engine uses it (stripped as the server strips it), or null when it is blank or not valid. */
 export function analyticsId(kind: AnalyticsIdKind, raw: string | null | undefined): string | null {
-  const v = (raw ?? "").trim()
+  const v = stripId(raw)
   return v && ANALYTICS_ID_PATTERNS[kind].test(v) ? v : null
 }

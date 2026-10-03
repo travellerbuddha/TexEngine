@@ -180,15 +180,26 @@ export function FlowErrorAlert() {
   )
 }
 
-/** Shown after quoting when the server's price differs from the search result. */
+/** Shown after quoting when the server's price differs from the search result. Focused and scrolled into view
+ * when it appears (LO-33): on a phone the guest books from the foot of the page, far below it. Again whenever quotes
+ * made again find a change still not accepted (a new list): the submit stopped for it. */
 export function PriceChangeNotice() {
   const { t, money } = useI18n()
   const b = useBooking()
+  const ref = useRef<HTMLDivElement>(null)
   const changes = b.flow.priceChanges
-  if (!changes.length) return null
+  const shown = changes.length > 0
+  useEffect(() => {
+    if (changes.length) {
+      ref.current?.focus()
+      ref.current?.scrollIntoView({ block: "center" })
+    }
+  }, [changes])
+  if (!shown) return null
   const multi = b.criteria.rooms.length > 1
   return (
     <Alert
+      ref={ref}
       tone="warn"
       title={t("errors.priceChangedTitle")}
       actions={
@@ -206,7 +217,7 @@ export function PriceChangeNotice() {
         {changes.map((c) => (
           <li key={c.room}>
             {multi ? `${t("guests.room", { n: c.room + 1 })}: ` : ""}
-            {t("errors.priceChangedLine", { from: money(c.from, c.currency), to: money(c.to, c.currency) })}
+            {t(c.basis === "total" ? "errors.priceChangedTotal" : "errors.priceChangedLine", { from: money(c.from, c.currency), to: money(c.to, c.currency) })}
           </li>
         ))}
       </ul>

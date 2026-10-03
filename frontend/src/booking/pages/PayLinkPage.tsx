@@ -7,7 +7,7 @@ import { isPositive, isZero } from "../lib/format"
 import { refusalMessage } from "../lib/refusals"
 import { getItem, rememberPayment, rememberReturn, setItem } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
-import { payLinkPath } from "../lib/mount"
+import { payLinkPagePath } from "../lib/mount"
 import { payLinkNotices } from "../lib/paylink"
 import type { PaymentLinkInfo, PaymentStart } from "../types"
 import { Button } from "../ui/controls"
@@ -15,12 +15,16 @@ import { Alert, EmptyState, Spinner } from "../ui/feedback"
 import { PlainShell } from "./SiteError"
 
 const LINK_TOKEN = "tex.paylink.token"
+/** the token of the link a payment of this tab was started from (LO-30) */
+const paidFrom = (txn: string) => `tex.paylink.txn.${txn}`
 
 /** Take the link's token from the URL fragment (never sent to a server, G-83), keep it for
- * this tab and remove it from the address bar, like the manage page's magic link. */
-function takeLinkToken(): string | null {
+ * this tab and remove it from the address bar, like the manage page's magic link. Back from a gateway
+ * (``payment``: the charge this tab started) the token is the one that charge was started from: the return
+ * address carries none (LO-30). */
+function takeLinkToken(payment: string | null): string | null {
   const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash)
-  if (!m) return getItem(LINK_TOKEN)
+  if (!m) return (payment ? getItem(paidFrom(payment)) : null) ?? getItem(LINK_TOKEN)
   const tok = decodeURIComponent(m[1])
   setItem(LINK_TOKEN, tok)
   try {
@@ -35,9 +39,10 @@ export default function PayLinkPage() {
   const i18n = useI18n()
   const { t, money, dateTime } = i18n
   const { hash } = useLocation()
-  // a link opened again in this tab (only its fragment changes) brings a new token
-  const token = useMemo(() => takeLinkToken() ?? "", [hash]) // eslint-disable-line react-hooks/exhaustive-deps
   const [sp] = useSearchParams()
+  const payment = sp.get("payment")
+  // a link opened again in this tab (only its fragment changes) brings a new token
+  const token = useMemo(() => takeLinkToken(payment) ?? "", [hash, payment]) // eslint-disable-line react-hooks/exhaustive-deps
   const navigate = useNavigate()
   const status = sp.get("status")
   const [link, setLink] = useState<PaymentLinkInfo | null>(null)
@@ -83,8 +88,10 @@ export default function PayLinkPage() {
       // the server picks the hotel's gateway; the guest only chooses when it asks (several card gateways)
       const p = await pub<PaymentStart>("pay_link", { token, provider_account: account ?? undefined })
       rememberPayment(p, { amount: isZero(link.paid) ? link.amount : undefined, currency: link.currency, hotel: link.hotel ?? undefined })
-      // the gateway returns to /pay/return (the token is never sent to it); come back here
-      rememberReturn(p.transaction, payLinkPath(token))
+      // the gateway returns to /pay/return (the token is never sent to it); come back here, the token kept for this
+      // charge in the tab, never in the address (LO-30)
+      setItem(paidFrom(p.transaction), token)
+      rememberReturn(p.transaction, payLinkPagePath())
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {

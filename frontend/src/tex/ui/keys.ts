@@ -14,8 +14,16 @@
  */
 export function shortcutLetter(e: { key: string; code?: string }): string | null {
   if (/^[a-z]$/i.test(e.key)) return e.key.toLowerCase()
+  // Turkish ı and İ are the I key, on Turkish-Q and on Turkish-F (where it sits at the QWERTY R / S position)
+  if (e.key === "ı" || e.key === "İ") return "i"
   const m = /^Key([A-Z])$/.exec(e.code ?? "")
-  return m ? m[1].toLowerCase() : null
+  const own = m ? m[1].toLowerCase() : null
+  // a letter with a diacritic (ü, ç, ğ, å …) is its base letter's key only where it is that key (Mac ⌥C types ç on
+  // the C key); elsewhere a key of its own, never another letter's: on Turkish-F ü sits at the QWERTY G position
+  // (LO-49). Letters without a base letter (œ, ø, ß) and other scripts fall back to the physical key, as before
+  const base = [...e.key].length === 1 ? e.key.normalize("NFD")[0].toLowerCase() : ""
+  if (base !== e.key.toLowerCase() && /^[a-z]$/.test(base)) return base === own ? base : null
+  return own
 }
 
 /** The editing shortcuts of the keyboard grids (PRICING_WORKSPACE_UX.md §3.10). */

@@ -93,6 +93,7 @@
  "crs.cc.results_hint": "Ergebnisse erscheinen hier; ↑ ↓ und Enter verwenden.",
  "crs.cc.shortcuts": "Tastenkürzel",
  "crs.cc.shortcuts_hint": "Alles auf dieser Seite funktioniert mit der Tastatur.",
+ "crs.cc.voiceover_hint": "Bei eingeschaltetem VoiceOver ist ⌃⌥ die VoiceOver-Taste, und VoiceOver kann diese Kurzbefehle abfangen: Drücken Sie stattdessen außerhalb eines Textfelds ⌥ und den Buchstaben, oder nutzen Sie die Schaltflächen der Seite.",
  "crs.cc.subtitle": "Tastaturorientiertes Buchen, während der Gast am Telefon ist.",
  "crs.cc.summary": "Gesprächsverlauf",
  "crs.cc.summary_empty": "Die Schritte des Gesprächs erscheinen hier.",

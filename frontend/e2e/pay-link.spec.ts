@@ -125,3 +125,48 @@ test("an old /book/pay/<token> link opens the same page and moves the token out 
   expectTokenNowhere(seen.slice(1), link.token)
   noErrors()
 })
+
+test("back from the gateway, the link page shows no address with its token (LO-30)", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  await english(page)
+  const own = await api<Link>(admin, "kamra.tex.api.payments.create_link", {
+    property: HOTEL,
+    amount: "9.00",
+    currency: "EUR",
+    description: `E2E pay link return ${uniqueRunId()}`,
+    expires_hours: 2,
+  })
+  try {
+    // every address the tab shows: each navigation of the page and each history entry a script writes
+    await page.addInitScript(() => {
+      const w = window as unknown as { __urls?: string[] }
+      w.__urls = w.__urls ?? []
+      for (const k of ["pushState", "replaceState"] as const) {
+        const real = history[k].bind(history)
+        history[k] = (data: unknown, unused: string, url?: string | URL | null) => {
+          if (url != null) w.__urls!.push(String(url))
+          return real(data, unused, url)
+        }
+      }
+    })
+    const shown: string[] = []
+    page.on("framenavigated", (f) => {
+      if (f === page.mainFrame()) shown.push(f.url())
+    })
+    await page.goto(onBench(own.url).toString())
+    await expect(page.getByRole("heading", { name: "Payment request" })).toBeVisible()
+    // the page took the token out of the address bar on load (the first test); from here on, none carries it
+    expect(page.url()).not.toContain("token=")
+    const opened = shown.length
+    const before = (await page.evaluate(() => (window as unknown as { __urls?: string[] }).__urls ?? [])).length
+    await page.getByRole("button", { name: /^Pay / }).click()
+    await page.getByRole("button", { name: "Simulate successful payment" }).click()
+    await expect(page.getByRole("heading", { name: "Paid — thank you!" })).toBeVisible({ timeout: 30_000 })
+    const written = await page.evaluate(() => (window as unknown as { __urls?: string[] }).__urls ?? [])
+    const later = [...shown.slice(opened), ...written.slice(before), page.url()]
+    expect(later.filter((u) => u.includes("token=") || u.includes(own.token))).toEqual([])
+    noErrors()
+  } finally {
+    await api(admin, "kamra.tex.api.payments.cancel_link", { name: own.link, reason: "e2e clean-up" }).catch(() => undefined)
+  }
+})

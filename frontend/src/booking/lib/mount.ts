@@ -67,6 +67,12 @@ export function payLinkPath(token: string): string {
   return PINNED ? payLinkRoute(token) : `/book${payLinkRoute(token)}`
 }
 
+/** Absolute path of the payment-link page with no token: where a gateway's return brings the guest back, the
+ * tab's stored token read again (LO-30), so no address after the e-mailed link carries it. */
+export function payLinkPagePath(): string {
+  return PINNED ? "/pay" : "/book/pay"
+}
+
 /** A payment link e-mailed before G-83 carries its token in the path (…/pay/<token>). Move
  * it into the fragment before the app starts, so that no request the page makes (API calls
  * and their Referer) repeats it. Call once, before the router reads the location. */

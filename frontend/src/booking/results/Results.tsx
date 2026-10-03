@@ -142,7 +142,8 @@ function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName, disab
   if (!q) return null
   const info = offer.rate_plan_info ?? q.rate_plan
   const cx = cancellation(i18n, info, criteria.checkIn!)
-  const pay = paymentTerms(i18n, info, q.currency)
+  // several rooms: a fixed deposit is for the whole booking, taken once (LO-35)
+  const pay = paymentTerms(i18n, info, q.currency, { perBooking: criteria.rooms.length > 1 })
   const night = uniformNight(q)
   // strike-through only with the server's own pre-discount figure, and only when it is comparable to the total
   const strike = !isZero(q.totals.accommodation_discount ?? "0") && q.totals.accommodation === q.totals.total ? q.totals.accommodation_gross : null
