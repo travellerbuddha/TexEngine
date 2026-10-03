@@ -1,76 +1,43 @@
 # Reviewed pip-audit findings (NEW-5, .github/workflows/supply-chain.yml, SECURITY.md "Supply-chain checks").
-# The Python surface is the bench environment: Frappe v16.25.0 + payments (develop) + kamra (which declares no
+# The Python surface is the bench environment: Frappe v16.36.1 + payments (version-16) + kamra (which declares no
 # runtime dependency). A finding here cannot be fixed in this repository: the fixed release is outside a pin of
-# Frappe v16.25.0 or of payments, and comes with their upgrade. Anything not listed fails the job.
+# Frappe v16.36.1 or of payments, and comes with their upgrade. Anything not listed fails the job.
+# 2Z-F (2026-10-03): the move from Frappe v16.25.0 closed 32 listed findings (bleach 3, cryptography 4, Pillow 13,
+# pypdf 7, sqlparse 5) and reported none new.
 # Format, one finding per line:  ID | package version | reason | review YYYY-MM-DD
 # (an alias of the finding, e.g. its GHSA or CVE id, matches too). Reviewed by the repository owner.
 #
-# bleach: Frappe pins bleach~=6.3.0 (fix 6.4.0; GHSA-g75f-g53v-794x has none).
-GHSA-g75f-g53v-794x | bleach 6.3.0 | no fixed release; Frappe pins bleach~=6.3.0 | review 2026-12-31
-GHSA-gj48-438w-jh9v | bleach 6.3.0 | fix 6.4.0 outside Frappe's pin bleach~=6.3.0; comes with Frappe | review 2026-12-31
-GHSA-8rfp-98v4-mmr6 | bleach 6.3.0 | fix 6.4.0 outside Frappe's pin bleach~=6.3.0; comes with Frappe | review 2026-12-31
-# cryptography: Frappe pins cryptography~=46.0.3 (fixes 48.0.1, 49.0.0, 50.0.0).
-PYSEC-2026-3554 | cryptography 46.0.7 | fix 49.0.0 outside Frappe's pin cryptography~=46.0.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3552 | cryptography 46.0.7 | fix 50.0.0 outside Frappe's pin cryptography~=46.0.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3553 | cryptography 46.0.7 | fix 49.0.0 outside Frappe's pin cryptography~=46.0.3; comes with Frappe | review 2026-12-31
-GHSA-537c-gmf6-5ccf | cryptography 46.0.7 | fix 48.0.1 outside Frappe's pin cryptography~=46.0.3; comes with Frappe | review 2026-12-31
-# pdfkit: Frappe pins pdfkit~=1.0.0; no fixed release.
+# pdfkit: Frappe v16.36.1 pins pdfkit~=1.0.0; no fixed release.
 PYSEC-2026-2860 | pdfkit 1.0.0 | no fixed release; Frappe pins pdfkit~=1.0.0 (print to PDF) | review 2026-12-31
-# pillow: Frappe pins Pillow~=12.2.0 (fix 12.3.0). TEX decodes uploads itself (PNG/JPEG/GIF/WebP, size and pixel limits).
-PYSEC-2026-2253 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-2254 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-2255 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-2256 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-2257 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3451 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3452 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3453 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3454 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3493 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3494 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3495 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-PYSEC-2026-3496 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-# pypdf: Frappe pins pypdf==6.13.3 (fixes 6.14.0 to 6.19.0). TEX code does not import pypdf; the 2026-10-01 batch
-# (PYSEC-2026-4153…4160) is long runtimes / large memory on crafted PDFs, fixed in 6.17.0 to 6.19.0.
-PYSEC-2026-3610 | pypdf 6.13.3 | fix 6.14.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3611 | pypdf 6.13.3 | fix 6.14.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3612 | pypdf 6.13.3 | fix 6.14.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3613 | pypdf 6.13.3 | fix 6.14.2 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3655 | pypdf 6.13.3 | fix 6.15.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3656 | pypdf 6.13.3 | fix 6.15.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3910 | pypdf 6.13.3 | fix 6.16.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3911 | pypdf 6.13.3 | fix 6.16.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3912 | pypdf 6.13.3 | fix 6.15.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-3913 | pypdf 6.13.3 | fix 6.16.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4153 | pypdf 6.13.3 | fix 6.18.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4154 | pypdf 6.13.3 | fix 6.18.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4155 | pypdf 6.13.3 | fix 6.18.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4156 | pypdf 6.13.3 | fix 6.18.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4157 | pypdf 6.13.3 | fix 6.19.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4158 | pypdf 6.13.3 | fix 6.17.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4159 | pypdf 6.13.3 | fix 6.19.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-PYSEC-2026-4160 | pypdf 6.13.3 | fix 6.19.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
-# setuptools: payments (develop) pins setuptools==80.9.0 (fix 83.0.0); used to build, not at run time.
+# pypdf: Frappe v16.36.1 pins pypdf==6.15.0 (fixes 6.16.0 to 6.19.0). TEX code does not import pypdf; the
+# 2026-10-01 batch (PYSEC-2026-4153…4160) is long runtimes / large memory on crafted PDFs, fixed in 6.17.0 to 6.19.0.
+PYSEC-2026-3910 | pypdf 6.15.0 | fix 6.16.1 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-3911 | pypdf 6.15.0 | fix 6.16.1 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-3913 | pypdf 6.15.0 | fix 6.16.0 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4153 | pypdf 6.15.0 | fix 6.18.0 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4154 | pypdf 6.15.0 | fix 6.18.1 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4155 | pypdf 6.15.0 | fix 6.18.1 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4156 | pypdf 6.15.0 | fix 6.18.1 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4157 | pypdf 6.15.0 | fix 6.19.0 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4158 | pypdf 6.15.0 | fix 6.17.0 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4159 | pypdf 6.15.0 | fix 6.19.0 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+PYSEC-2026-4160 | pypdf 6.15.0 | fix 6.19.0 outside Frappe's pin pypdf==6.15.0; comes with Frappe | review 2026-12-31
+# setuptools: payments (version-16) pins setuptools==80.9.0 (fix 83.0.0); used to build, not at run time.
 PYSEC-2026-3447 | setuptools 80.9.0 | fix 83.0.0 outside payments' pin setuptools==80.9.0; build tool, comes with payments | review 2026-12-31
-# sqlparse: Frappe pins sqlparse~=0.5.5 (fix 0.6.0).
-PYSEC-2026-3696 | sqlparse 0.5.5 | fix 0.6.0 outside Frappe's pin sqlparse~=0.5.5; comes with Frappe | review 2026-12-31
-PYSEC-2026-3697 | sqlparse 0.5.5 | fix 0.6.0 outside Frappe's pin sqlparse~=0.5.5; comes with Frappe | review 2026-12-31
-PYSEC-2026-3698 | sqlparse 0.5.5 | fix 0.6.0 outside Frappe's pin sqlparse~=0.5.5; comes with Frappe | review 2026-12-31
-PYSEC-2026-3699 | sqlparse 0.5.5 | fix 0.6.0 outside Frappe's pin sqlparse~=0.5.5; comes with Frappe | review 2026-12-31
-PYSEC-2026-3923 | sqlparse 0.5.5 | fix 0.6.0 outside Frappe's pin sqlparse~=0.5.5; comes with Frappe | review 2026-12-31
-# weasyprint: Frappe pins WeasyPrint==68.0 (fix 70.0; PYSEC-2026-3412 has none).
+# weasyprint: Frappe v16.36.1 pins WeasyPrint==68.0 (fix 70.0; PYSEC-2026-3412 has none).
 PYSEC-2026-3412 | weasyprint 68.0 | no fixed release; Frappe pins WeasyPrint==68.0 (print to PDF) | review 2026-12-31
 PYSEC-2026-3940 | weasyprint 68.0 | fix 70.0 outside Frappe's pin WeasyPrint==68.0; comes with Frappe | review 2026-12-31
-# oauthlib: Frappe v16.25.0 pins oauthlib~=3.3.1 (fix 4.0.0; v16.36.1 still pins ~=3.3.1, only develop moves to ~=4.0.0).
-# Reviewed 2026-10-01: Frappe's own OAuth provider (frappe.integrations.oauth2; dynamic client registration is on by
-# default, so a guest can register a client) is the only user. TEX has no client of its own on it (its MCP login is
-# kamra/mcp_oauth.py, its own code); a client a guest registers knows its own PKCE verifier.
-CVE-2026-49265 | oauthlib 3.3.1 | PKCE timing in the authorization-code grant; fix 4.0.0 outside Frappe's pin oauthlib~=3.3.1; no TEX-owned client uses Frappe's provider, a guest-registered client knows its own verifier | review 2026-12-31
-# PyJWT: Frappe v16.25.0 pins PyJWT~=2.13.0 (fixes 2.14.0, 2.15.0; v16.36.1 still pins ~=2.13.0, only develop moves to ~=2.15.0).
-# Reviewed 2026-10-01: Frappe (frappe/oauth.py, frappe/utils/oauth.py) only encodes the id_token with HS256 and the
-# OAuth client's generated secret, decodes an id_token_hint with algorithms=["HS256"] inside `except Exception`, and decodes
-# the id_token of a configured social login provider unverified (none on a TEX site). Neither Frappe, payments nor TEX
-# uses PyJWKClient / PyJWKSet or mixes HMAC with asymmetric algorithms, and the HMAC key is never attacker-supplied.
+# oauthlib: Frappe v16.36.1 still pins oauthlib~=3.3.1 (fix 4.0.0; only develop moves to ~=4.0.0).
+# Reviewed 2026-10-01, again 2026-10-03 on v16.36.1: Frappe's own OAuth provider (frappe.integrations.oauth2) is the
+# only user. TEX has no client of its own on it (its MCP login is kamra/mcp_oauth.py, its own code), and since 2Z
+# (p76, after_install) a guest can no longer register one: dynamic client registration is off on TEX sites.
+CVE-2026-49265 | oauthlib 3.3.1 | PKCE timing in the authorization-code grant; fix 4.0.0 outside Frappe's pin oauthlib~=3.3.1; no TEX-owned client uses Frappe's provider and guest client registration is off (p76) | review 2026-12-31
+# PyJWT: Frappe v16.36.1 still pins PyJWT~=2.13.0 (fixes 2.14.0, 2.15.0; only develop moves to ~=2.15.0).
+# Reviewed 2026-10-01, again 2026-10-03 on v16.36.1 (its jwt calls are unchanged): Frappe (frappe/oauth.py,
+# frappe/utils/oauth.py) only encodes the id_token with HS256 and the OAuth client's generated secret, decodes an
+# id_token_hint with algorithms=["HS256"] inside `except Exception`, and decodes the id_token of a configured social
+# login provider unverified (none on a TEX site). Neither Frappe, payments nor TEX uses PyJWKClient / PyJWKSet or
+# mixes HMAC with asymmetric algorithms, and the HMAC key is never attacker-supplied.
 # JWK / JWKS API (not used):
 CVE-2026-102274 | PyJWT 2.13.0 | malformed RSA JWK aborts a PyJWKSet; PyJWKSet is not used by Frappe, payments or TEX; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
 CVE-2026-101917 | PyJWT 2.13.0 | PyJWKClient refetches the JWKS for unknown kid; PyJWKClient is not used; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
