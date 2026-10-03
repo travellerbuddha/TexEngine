@@ -53,7 +53,8 @@ export interface VersionRow {
   published_at: string | null
   published_by: string | null
   change_note: string | null
-  payload_hash: string | null
+  /** only for who sees cost (G-99) */
+  payload_hash?: string | null
   based_on: string | null
   /** published, not yet selling (withdrawing it cancels it; the version before keeps selling) */
   scheduled?: boolean
@@ -383,7 +384,7 @@ export interface PreviewResult {
   reasons: { code: string; message: string }[]
   currency?: string
   request?: QuoteRequest
-  contract?: { code: string; name: string; version_no: number; market: string; currency: string; basis: string; payload_hash: string }
+  contract?: { code: string; name: string; version_no: number; market: string; currency: string; basis: string; payload_hash?: string }
   rate_plan?: {
     code: string
     name: string

@@ -40,6 +40,7 @@ from werkzeug.test import EnvironBuilder
 from werkzeug.wrappers import Request
 
 from kamra.tex.api import admin as admin_api
+from kamra.tex.api import contracts as contracts_api
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import crs as crs_api
 from kamra.tex.api import loyalty as loyalty_api
@@ -70,6 +71,9 @@ INTERNAL = {
 
 
 P40 = "p40_crm_privacy_review"
+# G-99: the payload's digest (sha256 of the frozen payload, cost and markups included) lets a viewer without
+# cost confirm a guess of the hidden values offline: withheld as the payload is
+G99_HASHES = {"Reservation": "tex_payload_hash", "TEX Quote": "payload_hash"}
 
 
 @contextmanager
@@ -793,6 +797,50 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 		self.assertEqual(json.loads(held.new_value), {"version": v.name, "changed": [
 			["tex_cost_amount", "€ 300.00", "€ 400.00"],
 			["tex_pricing_snapshot", '{"totals": {"cost": "300"}}', '{"totals": {"cost": "400"}}']]})
+
+	def test_g99_desk_and_rest_never_carry_the_payload_hash(self):
+		names = {"Reservation": self.res, "TEX Quote": self.quote}
+		for doctype, name in names.items():
+			self.assertTrue(frappe.db.get_value(doctype, name, G99_HASHES[doctype]), doctype)   # something to hide
+		as_user(self.clerk)
+		for doctype, name in names.items():
+			field = G99_HASHES[doctype]
+			for label, call in {
+				"frappe.client.get": lambda: frappe.client.get(doctype, name),
+				"GET /api/resource (v1)": lambda: frappe.api.v1.read_doc(doctype, name),
+				"get_list(*)": lambda: frappe.client.get_list(doctype, fields=["*"], filters={"name": name}),
+			}.items():
+				out = self.refused_or(call)
+				for r in out if isinstance(out, list) else [out]:
+					d = r.as_dict() if isinstance(r, BaseDocument) else dict(r)
+					self.assertIn(d.get(field), (None, ""), f"{doctype} {label}")
+		as_user("Administrator")
+		for doctype, field in G99_HASHES.items():                   # withheld as the payload is (permlevel 1)
+			self.assertIn(field, internals.INTERNAL_FIELDS[doctype], doctype)
+			self.assertEqual(frappe.get_meta(doctype).get_field(field).permlevel, internals.PERMLEVEL, doctype)
+
+	def test_g99_the_change_history_masks_the_payload_hash(self):
+		before = frappe.get_doc("Reservation", self.res)
+		after = frappe.copy_doc(before)
+		after.name = before.name
+		after.tex_payload_hash = "f" * 64                    # rebooked on another version: a new digest
+		version = frappe.new_doc("Version")
+		self.assertTrue(version.update_version_info(before, after))
+		version.insert(ignore_permissions=True)
+		[row] = [r for r in json.loads(version.data)["changed"] if r[0] == "tex_payload_hash"]
+		self.assertEqual(row[1:3], ["*****", "*****"])
+
+	def test_g99_the_tex_api_names_the_payload_hash_only_to_who_sees_cost(self):
+		contract = frappe.db.get_value("Reservation", self.res, "tex_contract")
+		as_user(self.clerk)
+		self.assertTrue(scope.has_capability("price.view", fx.PROPERTY))
+		self.assertNotIn("payload_hash", crs_api.reservation(self.res)["pricing"]["contract"])
+		versions = contracts_api.get_contract(contract)["versions"]
+		self.assertTrue(versions)
+		self.assertEqual([v.name for v in versions if "payload_hash" in v], [])
+		as_user(self.revenue)
+		self.assertTrue(crs_api.reservation(self.res)["pricing"]["contract"]["payload_hash"])
+		self.assertTrue(any(v.get("payload_hash") for v in contracts_api.get_contract(contract)["versions"]))
 
 
 # ─── withheld fields on customised role permissions (review follow-up) ───

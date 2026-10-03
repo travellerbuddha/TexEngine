@@ -76,7 +76,8 @@
   {
    "fieldname": "payload_hash",
    "fieldtype": "Data",
-   "label": "Payload hash"
+   "label": "Payload hash",
+   "permlevel": 1
   },
   {
    "fieldname": "expires_at",
@@ -119,7 +120,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 14:00:00.000000",
+ "modified": "2026-10-03 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Quote",

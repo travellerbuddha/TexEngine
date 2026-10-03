@@ -2,7 +2,8 @@
 
 - Pricing internals (G-95). A price-locked snapshot carries what only ``price.view_cost`` may see
   in the TEX API: the rule explanation, cost and margin, the FX record (provider rate and row, FX
-  margin, policy).
+  margin, policy). With them the contract payload's digest (G-99): a sha256 of the frozen payload,
+  cost and markups included, with which a guess of those values is confirmed offline.
 - A guest's stored totals (G-65): stays, lifetime value, last stay and loyalty points counted over
   every tenant's hotels and programs. The TEX CRM shows each viewer the totals of their own hotels.
 - Who a booking-engine visitor is (G-81 review): an abandoned case's profile, e-mail and phone,
@@ -45,8 +46,8 @@ import frappe
 
 # DocType → withheld fields (permlevel ``PERMLEVEL`` in the DocType JSON)
 INTERNAL_FIELDS: dict[str, tuple[str, ...]] = {
-	"Reservation": ("tex_pricing_snapshot", "tex_cost_amount", "tex_margin_amount", "tex_fx_rate"),
-	"TEX Quote": ("result_json",),
+	"Reservation": ("tex_pricing_snapshot", "tex_cost_amount", "tex_margin_amount", "tex_fx_rate", "tex_payload_hash"),
+	"TEX Quote": ("result_json", "payload_hash"),
 	"TEX Reservation Revision": ("snapshot_before", "snapshot_after"),
 	"Guest": ("tex_stays", "tex_lifetime_value", "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points"),
 	"TEX Abandoned Booking": ("guest", "email", "phone", "session_id", "quote", "recovered_booking"),

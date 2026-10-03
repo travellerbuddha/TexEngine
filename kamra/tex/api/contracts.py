@@ -104,6 +104,9 @@ def get_contract(name: str):
 	                          fields=["name", "version_no", "status", "effective_from", "active_to", "published_at",
 	                                  "published_by", "change_note", "payload_hash", "based_on"],
 	                          order_by="version_no desc")
+	if not _sees_cost(c.property):
+		for v in versions:
+			v.pop("payload_hash")   # the frozen payload's digest: confirms a guess of its cost offline (G-99)
 	can_publish = scope.has_capability("contract.publish", c.property)
 	published = any(v.status != "Draft" for v in versions)
 	now = now_datetime()
