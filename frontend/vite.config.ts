@@ -1,20 +1,16 @@
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
-import { execFileSync } from "node:child_process"
 import { resolve } from "node:path"
 import { defineConfig } from "vite"
 
-/** The commit being built (TEX_BUILD_COMMIT, else git): the bundles' source offer links the
- * source of exactly this version when the server cannot tell its own (AGPL-3.0 §13, ADR-060). */
+/** The commit a build carries only when it is told (TEX_BUILD_COMMIT, e.g. an image build): the bundles' source
+ * offer then links exactly that version when the server cannot tell its own (AGPL-3.0 §13, ADR-060). The
+ * committed and bench builds carry none, so they are a function of the source alone (2Z, ADR-073): CI checks the
+ * committed bundles against a fresh build, and `bench build` leaves the app checkout clean. The served pages
+ * name the running commit anyway (`source_meta`). */
 export function buildCommit(): string {
   const env = (process.env.TEX_BUILD_COMMIT || "").trim().toLowerCase()
-  if (/^[0-9a-f]{7,40}$/.test(env)) return env
-  try {
-    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: __dirname, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
-    return /^[0-9a-f]{40}$/.test(sha) ? sha : ""
-  } catch {
-    return ""
-  }
+  return /^[0-9a-f]{7,40}$/.test(env) ? env : ""
 }
 
 // Dev (`vite`): served at / on :5173, proxying /api to the Frappe bench.
