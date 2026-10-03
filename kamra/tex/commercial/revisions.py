@@ -219,6 +219,10 @@ def archive(doctype: str, name: str) -> None:
 	revision scheduled for later cancels it: it never goes live and the revision it was
 	to replace stays live, so archiving never leaves a gap that nobody chose."""
 	_check_doctype(doctype)
+	if doctype in SERIAL_ACTIVATION:
+		# a cancelled schedule puts its predecessor back on sale, which is checked as an activation is
+		# (a markup's tie, LO-42 b1): one at a time with the activations
+		_serialise_activations(doctype)
 	doc = frappe.get_doc(doctype, name)
 	if doc.tex_status == "Draft":
 		doc.flags.tex_system_update = True
@@ -245,6 +249,7 @@ def archive(doctype: str, name: str) -> None:
 			p.tex_status = "Active" if old_to is None else "Superseded"
 			p.active_to = old_to
 			p.flags.tex_revision_transition = True
+			p.flags.tex_restored_by = doc.name
 			p.save(ignore_permissions=True)
 	doc.tex_status = "Archived"
 	doc.flags.tex_revision_transition = True

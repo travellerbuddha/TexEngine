@@ -39,9 +39,18 @@ class TEXMarkupRule(Document):
 		if self.stay_from and self.stay_to and self.stay_from > self.stay_to:
 			frappe.throw("Stay window ends before it starts.")
 		before = self.get_doc_before_save()
-		if self.tex_status == "Active" and self.flags.tex_revision_transition and \
-				(not before or before.tex_status == "Draft"):
+		if self.flags.tex_revision_transition and (
+				(self.tex_status == "Active" and (not before or before.tex_status == "Draft"))
+				or self._reopened(before)):
 			self._check_ties()
+
+	def _reopened(self, before) -> bool:
+		"""Put back on sale for longer than it was (an archived schedule hands its window back, LO-42 b1):
+		a tie with a markup activated meanwhile in that window is refused as an activation's is."""
+		if not before or self.tex_status not in ("Active", "Superseded") or not before.active_to:
+			return False
+		return not self.active_to or frappe.utils.get_datetime(self.active_to) > frappe.utils.get_datetime(
+			before.active_to)
 
 	def _check_ties(self):
 		"""G-53: a REPLACE markup that ties with a live or scheduled one of another record (the same
@@ -63,6 +72,11 @@ class TEXMarkupRule(Document):
 				other = b if a is me else a
 				# a tie is not revised away at the same priority: change a priority or archive one (2D-1)
 				scheduled = starts.get(other.rule_id) and frappe.utils.get_datetime(starts[other.rule_id]) > now
+				if self.flags.tex_restored_by:
+					frappe.throw(_("Archiving {0} would put markup {1} back on sale, and it has the same scope and "
+					               "priority as live or scheduled markup {2}, and their stay dates meet: only one "
+					               "would apply. Change the priority of one, or archive one of them first.").format(
+						self.flags.tex_restored_by, self.name, other.rule_id), title=_("Markup tie"))
 				msg = (_("Markup {0} has the same scope and priority as live or scheduled markup {1}, and their stay "
 				         "dates meet: only one would apply. Change the priority of one, or archive one of them.")
 				       if scheduled else

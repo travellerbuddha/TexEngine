@@ -2068,6 +2068,26 @@ class TestMarkupTies(TexTestCase):
 		policy_api.activate("TEX Markup Rule", revision)
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
 
+	def test_archiving_a_scheduled_revision_never_puts_a_tie_back_on_sale(self):
+		"""LO-42 (b1): archiving a scheduled revision puts the revision it was to replace back on sale (open again),
+		with no tie check: a markup activated meanwhile in that window could tie with it, and the engine would
+		take the newer silently. The archive is refused, naming both."""
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		revision = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.save_record("TEX Markup Rule", {"name": revision, "priority": 5})
+		at = add_to_date(now_datetime(), days=2)
+		policy_api.activate("TEX Markup Rule", revision, at=str(at))       # the first ends at ``at``
+		other = self.markup(value=9)
+		policy_api.activate("TEX Markup Rule", other, at=str(add_to_date(at, days=1)))   # no tie while the first ends
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.archive("TEX Markup Rule", revision, reason="LO-42 b1")
+		self.assertIn(first, str(refused.exception))
+		self.assertIn(other, str(refused.exception))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", first, "tex_status"), "Superseded")
+
+
 	def test_a_scheduled_markup_ties_inside_a_live_markups_window_only(self):
 		"""LO-42 (b3): the check compares the new markup's own start (``at``), not now: scheduled inside a live
 		markup's window it is refused, scheduled after that one ends it is activated."""
