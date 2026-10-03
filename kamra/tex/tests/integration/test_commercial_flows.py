@@ -2068,6 +2068,18 @@ class TestMarkupTies(TexTestCase):
 		policy_api.activate("TEX Markup Rule", revision)
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
 
+	def test_the_tie_check_reads_its_hotels_markups_only(self):
+		"""LO-42 (b2): the check is a locking read; its IFNULL(property, '') kept the (property, tex_status)
+		index out, so it scanned and locked every markup row of every hotel until the activation committed."""
+		from kamra.tex_commercial.doctype.tex_markup_rule import tex_markup_rule as controller
+
+		for prop in (fx.PROPERTY, ""):
+			with self.subTest(property=prop or "(none)"):
+				sql, args = controller.tie_candidates(prop, "x", now_datetime())
+				plan = frappe.db.sql(f"EXPLAIN {sql}", args, as_dict=True)[0]
+				self.assertIn("tex_markup_prop_status", plan.get("possible_keys") or "", plan)
+				self.assertIn(plan["type"], ("ref", "range", "ref_or_null"), plan)
+
 
 class TestPaymentMethodRules(TexTestCase):
 	"""O-15 (audit 2F-2, ADR-041): the hotel's payment method rules bind every booking, the guest's and staff's.
