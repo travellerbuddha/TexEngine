@@ -333,6 +333,18 @@ class TestManualOverride(DeterminismCase):
 		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "reservation.manual_price_dropped",
 		                                                      "reference_name": res}))
 
+	def test_c02_staff_without_price_override_are_sent_to_revenue_whatever_they_choose(self):
+		"""C-02 (2M review round 1): an agent who sends neither choice (keep the price, or take the change's) is told
+		that only revenue management can change the stay, not to choose (which they may not), and is refused as one
+		who may not: a permission error, before the nights are locked or anything is written."""
+		res = self.priced_by_hand()
+		as_user(self.agent)
+		p = modification.propose(res, {"check_out": str(fx.d(6, 13))})
+		with self.assertRaisesRegex(frappe.PermissionError, "set by hand.*revenue manager"):
+			crs_api.apply_modification(proposal_token=p["proposal_token"], reason="one more night")
+		as_user("Administrator")
+		self.assertEqual(D(frappe.db.get_value("Reservation", res, "tex_total_amount")), D("380.00"))
+
 	def test_an_override_on_a_historical_sale_date(self):
 		res = sell()
 		sold_at = now_datetime()
