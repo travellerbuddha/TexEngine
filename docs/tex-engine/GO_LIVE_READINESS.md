@@ -192,8 +192,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   Registration", set by install and p76). Before go-live, review Desk → OAuth Client (and OAuth Bearer Token) and delete or
   revoke any client not created by an administrator — p76 prints how many a guest registered. Switch registration on only
   for a reviewed integration.
-- **Pins**: Frappe v16.25.0 and payments 86fefa9 (`ci.yml`, `supply-chain.yml`, `deploy/tex-local/Dockerfile` and `setup-local.sh`,
-  DEV_ENVIRONMENT); the upgrade to Frappe v16.36.1 is its own PR after 2Z.
+- **Pins**: Frappe v16.36.1 and payments `version-16` at cca07d9 (`ci.yml`, `supply-chain.yml`, `deploy/tex-local/Dockerfile`
+  and `setup-local.sh`, DEV_ENVIRONMENT; `test_pins` keeps them equal), since 2Z-F (ADR-074). Since v16.36.1 Frappe mails
+  an expired password's reset link (after a two-factor code) instead of answering with it: set
+  `force_user_to_reset_password` only on a site with a working outgoing Email Account, or such a sign-in fails.
 - **`encryption_key`** in `site_config.json` signs offers, payment callbacks and webhooks,
   and decrypts every Password field. Back it up separately from the database and never
   rotate it without a re-encryption plan.

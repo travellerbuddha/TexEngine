@@ -1,8 +1,9 @@
 # TEX Engine — Development environment
 
 ## Versions (match upstream CI)
-Frappe **v16.25.0**, Python **3.14**, Node **24**, MariaDB 10.11+/11.x, Redis, apps
-`payments` at commit `86fefa9` (CI's `PAYMENTS_REF`) + `kamra` (this repo).
+Frappe **v16.36.1**, Python **3.14**, Node **24**, MariaDB 10.11+/11.x, Redis, apps
+`payments` (branch `version-16`) at commit `cca07d9` (CI's `PAYMENTS_REF`) + `kamra` (this repo). A bench made
+before 2Z-F (Frappe v16.25.0, payments `develop`) moves in place as `deploy/tex-local/NATIVE.md` §5 shows.
 
 ## Cloud-session bench (reproducible recipe)
 ```bash
@@ -14,12 +15,12 @@ mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_passw
 # python 3.14 + node 24 (+ yarn) ; bench must not run as root:
 useradd -m frappe
 su frappe; source /home/user/bench/env.sh     # PATH, proxy CA vars
-bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.25.0 \
+bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.36.1 \
   --python /opt/py314/bin/python3.14 frappe-bench
 cd frappe-bench
 bench set-config -g db_host 127.0.0.1 (+ redis_cache/queue/socketio)
 git init -q apps/payments && git -C apps/payments fetch -q --depth 1 https://github.com/frappe/payments \
-  86fefa9faf8ad825fe6f08c4753acfe44817900b && git -C apps/payments checkout -q FETCH_HEAD   # CI's PAYMENTS_REF (test_pins)
+  cca07d9f9392e2ea0e521c5975151db9e4b6c321 && git -C apps/payments checkout -q FETCH_HEAD   # CI's PAYMENTS_REF (test_pins)
 ln -s /home/user/TexEngine apps/kamra
 uv pip install --python env/bin/python -e apps/payments -e apps/kamra
 bench setup requirements --dev kamra     # freezegun: the scheduler smoke test (ADR-064)

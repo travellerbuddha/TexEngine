@@ -40,13 +40,13 @@ git clone https://github.com/frappe/frappe_docker && cd frappe_docker
 # build a custom image containing kamra + payments
 export APPS_JSON_BASE64=$(base64 -w0 <<'EOF'
 [
-  {"url": "https://github.com/frappe/payments", "branch": "develop"},
+  {"url": "https://github.com/frappe/payments", "branch": "version-16"},
   {"url": "https://github.com/Kamra-PMS/kamra-pms", "branch": "main"}
 ]
 EOF
 )
 docker build -t yourorg/kamra:latest \
-  --build-arg FRAPPE_BRANCH=v16.25.0 \
+  --build-arg FRAPPE_BRANCH=v16.36.1 \
   --build-arg APPS_JSON_BASE64=$APPS_JSON_BASE64 \
   -f images/layered/Containerfile .
 # then follow frappe_docker's compose guide (pwd.yml / docs) with your image
@@ -63,8 +63,8 @@ bench --site pms.yourhotel.com install-app payments kamra
 
 ```bash
 pip install frappe-bench
-bench init --frappe-branch v16.25.0 frappe-bench && cd frappe-bench
-bench get-app payments
+bench init --frappe-branch v16.36.1 frappe-bench && cd frappe-bench
+bench get-app --branch version-16 payments
 bench get-app kamra https://github.com/Kamra-PMS/kamra-pms
 bench new-site pms.yourhotel.com --admin-password <strong-password>
 bench --site pms.yourhotel.com install-app kamra

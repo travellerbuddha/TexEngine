@@ -7,6 +7,9 @@ frontend bundles once, after every frontend change of the other batches has merg
 Frappe upgrade) is its own PR after 2Z (owner). Corrections found while doing it: Semgrep was 1.179.0 by then, the
 reviewed advisories were 61, the next free patch and ADR were p76 and ADR-073, and the rates contract page's
 `RuleDialog` (item 5's list) is another component, already mounted per opening.
+Item 2 was done in 2Z-F (PR #30, §6ZF, ADR-074). Corrections: 29 advisories remain, not 21 (the eight pypdf ones of
+2026-10-01 were listed after this card was written), and the move changed one Frappe contract TEX tests: an expired
+password's reset link is mailed after the two-factor code, no longer answered.
 
 Re-verified on 2026-10-01 at base `claude/inspiring-ptolemy-i6wdu2` @ **aac444a4** (merge of PR #16; its tree
 equals PR #16's tested head, so CI run #160 — run id 36877813099 — gives the current numbers). Facts checked on GitHub:

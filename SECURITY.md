@@ -90,7 +90,7 @@ Every pull request, every push to `main` / `develop` and a weekly schedule run
   the secret, and tell the owner.
 - **npm** — `audit-ci` over `npm audit` on `frontend/package-lock.json`, production dependencies,
   high and critical advisories; exceptions in `.github/supply-chain/audit-ci.jsonc`.
-- **Python** — `pip-audit` over the bench environment (Frappe v16.25.0 + payments; kamra declares
+- **Python** — `pip-audit` over the bench environment (Frappe v16.36.1 + payments version-16; kamra declares
   no runtime dependency). Every finding fails the job unless it is listed in
   `.github/supply-chain/pip-audit-ignore.txt` with its reason and a review date; the listed ones
   are fixed only by upgrading Frappe or payments, whose pins exclude the fixed releases.

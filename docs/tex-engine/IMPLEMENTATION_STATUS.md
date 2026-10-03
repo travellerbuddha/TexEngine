@@ -1923,7 +1923,7 @@ committed build carries no commit stamp. Cards: `HANDOFF_RELEASE.md` (each re-ve
   - the bundle workflow in the PR template, CONTRIBUTING, README, RELEASING, `.gitleaks.toml` and NATIVE.md;
   - SECURITY_MODEL's threat table; HANDOFF.md rewritten;
   - G-99 (the `payload_hash` LOW gap) recorded.
-- Frappe upgrade **NOT STARTED** (owner: its own PR after 2Z; `HANDOFF_RELEASE.md` §2).
+- Frappe upgrade: its own PR after 2Z (owner), **COMPLETE** in 2Z-F (§6ZF).
 - **Not done:**
   - the legacy MCP `/mcp/oauth/register` still lets a guest register a client without a rate limit (its redirects are
     limited to claude.ai and loopback; LOW, for the owner);

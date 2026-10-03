@@ -175,9 +175,9 @@ copied, so code you edit or pull is what the bench runs.
 Every option can also be set as an environment variable: `TEX_DIR`, `TEX_SITE`,
 `TEX_PORT`, `TEX_DB_ROOT_PASSWORD`, `TEX_ADMIN_PASSWORD`, `TEX_DEMO_PASSWORD`, `TEX_REPO`,
 `TEX_PYTHON`, `TEX_DB_HOST`, `TEX_DB_PORT`, `TEX_REDIS`, `TEX_BIND`, `TEX_TIME_ZONE`. A few
-more exist only as environment variables: `TEX_FRAPPE_BRANCH` (`v16.25.0`),
-`TEX_PAYMENTS_URL`, `TEX_PAYMENTS_BRANCH` (`develop`) and `TEX_PAYMENTS_REF` (the verified
-payments commit `86fefa9faf8ad825fe6f08c4753acfe44817900b`; set it empty to use the tip of
+more exist only as environment variables: `TEX_FRAPPE_BRANCH` (`v16.36.1`),
+`TEX_PAYMENTS_URL`, `TEX_PAYMENTS_BRANCH` (`version-16`) and `TEX_PAYMENTS_REF` (the verified
+payments commit `cca07d9f9392e2ea0e521c5975151db9e4b6c321`; set it empty to use the tip of
 `TEX_PAYMENTS_BRANCH`, not verified).
 
 Examples:
@@ -195,15 +195,15 @@ deploy/tex-local/setup-local.sh --redis redis://127.0.0.1:6379/2        # use yo
    character set is wrong, and warns about MariaDB versions outside 10.6–11.8. It refuses
    an existing bench it did not create (unless `--adopt`) and any bench with a site
    flagged `tex_production`, before it changes anything.
-2. **Creates the bench**: `bench init --frappe-branch v16.25.0 --python <3.14>
+2. **Creates the bench**: `bench init --frappe-branch v16.36.1 --python <3.14>
    --no-backups --skip-assets`. `--no-backups` means no crontab entry is added.
 3. **Writes the configuration.** Ports and Redis settings go into
    `sites/common_site_config.json`. It also writes a `Procfile` and two small wrappers in
    `tex-bench/tex-local/` that make the web and realtime servers listen on `--bind`. Frappe's
    own `bench serve` always listens on all network interfaces, with the Werkzeug debugger on.
-4. **Gets payments**: `bench get-app --branch develop https://github.com/frappe/payments`,
-   then checks out the verified commit `86fefa9` (payments' `develop` moves, and already
-   declares Frappe v17 as its target). It uses the full URL on purpose: short app names
+4. **Gets payments**: `bench get-app --branch version-16 https://github.com/frappe/payments`,
+   then checks out the verified commit `cca07d9` (the branch moves; payments' `develop`
+   already declares Frappe v17 as its target). It uses the full URL on purpose: short app names
    make bench call the GitHub API.
 5. **Links your checkout** as `apps/kamra` (a symlink) and installs it in the bench's
    Python in editable mode.
@@ -344,11 +344,25 @@ with the code. Instead of `bench migrate` you can re-run `setup-local.sh` (with 
 `--dir` if you changed it): it migrates the site and completes anything that is missing.
 
 * **payments** is pinned to a verified commit (a detached checkout, so `git pull` does not
-  work there). To move it, for example to payments' Frappe v16 branch (not verified with
-  TEX): `cd apps/payments && git fetch --depth 1 https://github.com/frappe/payments version-16 && git checkout --detach FETCH_HEAD && cd ../.. && bench --site tex.localhost migrate && bench build --apps frappe,payments`
-* **A different Frappe version:** the simplest way is a new bench next to the old one, for
-  example `TEX_FRAPPE_BRANCH=v16.26.0 deploy/tex-local/setup-local.sh --dir ~/tex-bench-new`.
-  Then remove the old one (§4).
+  work there), and so is Frappe (a release tag). A re-run of the script keeps both as they are
+  and says when the bench runs another Frappe version than the script's.
+* **A different Frappe version:** the simplest way is a new bench next to the old one
+  (`deploy/tex-local/setup-local.sh --dir ~/tex-bench-new`, or `TEX_FRAPPE_BRANCH=<tag>` for
+  another tag). Then remove the old one (§4).
+* **Moving a bench made before 2026-10-03** (Frappe v16.25.0, payments `develop`) to Frappe
+  v16.36.1 and payments `version-16` in place, as verified on the development bench (stop
+  `bench start` first; the backup is your way back):
+
+  ```bash
+  cd tex-bench
+  bench --site tex.localhost backup
+  git -C apps/frappe fetch --depth 1 https://github.com/frappe/frappe tag v16.36.1 && git -C apps/frappe checkout v16.36.1
+  git -C apps/payments fetch --depth 1 https://github.com/frappe/payments cca07d9f9392e2ea0e521c5975151db9e4b6c321 && git -C apps/payments checkout --detach FETCH_HEAD
+  bench setup requirements                      # Python and JavaScript dependencies of the new versions
+  env/bin/pip uninstall -y bleach               # Frappe v16.36.1 no longer uses it (optional)
+  bench build --apps frappe,payments
+  bench --site tex.localhost migrate
+  ```
 * **After a Frappe or payments update:** `bench build --apps frappe,payments`
 
 **For developers:**
