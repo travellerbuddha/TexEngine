@@ -3,12 +3,16 @@ now, on the web next) or who stayed and earned points in it (a matured earning);
 whatever they earned. Members get the program's members-only prices."""
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import add_to_date, now_datetime
 
 from kamra.tex.api import crm as crm_api
+from kamra.tex.api import crs as crs_api
 from kamra.tex.api import loyalty as loyalty_api
+from kamra.tex.api import policies as policy_api
+from kamra.tex.api import ui_crs
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
+from kamra.tex.money import D
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_crm_segments import OTHER, agent
 from kamra.tex.tests.integration.test_loyalty_admin import CLUB, LoyaltyCase
@@ -206,3 +210,114 @@ class TestMembership(MembershipCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "cannot move"):
 			doc.save(ignore_permissions=True)
 		self.assertEqual(frappe.db.get_value("TEX Loyalty Program", self.club, "property"), fx.PROPERTY)
+
+
+STAY = {"check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 13)), "rooms": [{"adults": 2, "children": []}],
+        "market": "DE", "channel": "CALL_CENTER"}
+
+
+class TestMemberPrices(MembershipCase):
+	"""C-04: a members-only promotion is saved and goes live; the call centre prices the caller it names at the
+	members' price when they are a member of the hotel's program, and such a price books only for a member."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.set_value("Guest", self.guest, {"first_name": "Mia", "last_name": "Member"})
+		self.members_ten = self.promotion()
+
+	def promotion(self, **kw) -> str:
+		doc = policy_api.save_record("TEX Promotion", {"promotion_name": "Members 10", "property": fx.PROPERTY,
+		                                               "trigger": "Automatic", "value_type": "PERCENT", "value": 10,
+		                                               "applies_to": "ACCOMMODATION", "member_only": 1, **kw})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		return doc["name"]
+
+	def search(self, guest: str | None = None, user: str | None = None, **kw) -> dict:
+		frappe.set_user(user or self.desk)  # nosemgrep: frappe-setuser -- the agent on the phone
+		try:
+			return ui_crs.search(**STAY, properties=[fx.PROPERTY], guest=guest, **kw)
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+	def flex(self, res: dict) -> dict:
+		return next(o for o in res["properties"][0]["offers"] if o["room_type"] == self.f["room_types"]["STD"]
+		            and o["board"] == "AI" and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+
+	def contact(self, guest: str) -> dict:
+		g = frappe.db.get_value("Guest", guest, ["first_name", "last_name", "email"], as_dict=True)
+		return {"first_name": g.first_name, "last_name": g.last_name, "email": g.email, "country": "Germany"}
+
+	def book(self, offer: dict, guest: dict) -> dict:
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- the agent books
+		try:
+			q = crs_api.quote(offer_key=offer["rooms"][0]["offer_key"])
+			return crs_api.book(quote_ids=[q["quote_id"]], guest=guest, payment_method="Pay at Hotel")
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+	def test_c04_a_members_only_promotion_is_saved_and_goes_live(self):
+		self.assertEqual(frappe.db.get_value("TEX Promotion", self.members_ten, ["member_only", "tex_status"]),
+		                 (1, "Active"))
+
+	def test_c04_the_call_centre_prices_a_member_at_the_members_price(self):
+		anyone = self.flex(self.search())
+		stranger = self.search(self.guest)                                     # named, not a member yet
+		self.assertEqual((stranger["properties"][0]["member"], self.flex(stranger)["total"]),
+		                 (False, anyone["total"]))
+		self.assertFalse(self.flex(stranger).get("member_price"))
+		self.join(self.guest)
+		member = self.search(self.guest)
+		offer = self.flex(member)
+		self.assertTrue(member["properties"][0]["member"])
+		self.assertTrue(offer["member_price"])
+		self.assertLess(D(offer["total"]), D(anyone["total"]))
+		applied = [p for p in offer["rooms"][0]["quote"]["promotions"] if p["applied"]]
+		self.assertIn((self.members_ten, True), [(p["promo_id"], p.get("member_only")) for p in applied])
+		self.assertFalse(anyone["member_price"])                                # nobody named: nobody's price
+
+	def test_c04_a_members_price_books_for_the_member_only(self):
+		self.join(self.guest)
+		offer = self.flex(self.search(self.guest))
+		done = self.book(offer, self.contact(self.guest))
+		self.assertEqual(frappe.db.get_value("TEX Booking", done["booking"], "booker_guest"), self.guest)
+		self.assertEqual(D(done["total"]), D(offer["total"]))
+		# another caller on the same quote's price: refused, and nothing is booked
+		again = self.flex(self.search(self.guest))
+		with self.assertRaisesRegex(frappe.ValidationError, "member"):
+			self.book(again, {"first_name": "Otto", "last_name": "Other", "email": "c04-otto@example.com",
+			                  "country": "Germany"})
+		self.assertFalse(frappe.db.exists("Guest", {"email": "c04-otto@example.com"}))
+
+	def test_c04_a_member_who_left_is_refused_the_members_price(self):
+		self.join(self.guest)
+		offer = self.flex(self.search(self.guest))
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff
+		crm_api.loyalty_leave(guest=self.guest, program=self.club, reason="asked to leave")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		with self.assertRaisesRegex(frappe.ValidationError, "member"):
+			self.book(offer, self.contact(self.guest))
+
+	def test_c04_a_price_without_a_members_promotion_books_for_anyone(self):
+		policy_api.archive("TEX Promotion", self.members_ten, reason="members price over")
+		self.join(self.guest)
+		offer = self.flex(self.search(self.guest))
+		self.assertFalse(offer.get("member_price"))
+		done = self.book(offer, {"first_name": "Otto", "last_name": "Other", "email": "c04-otto2@example.com",
+		                         "country": "Germany"})
+		self.assertTrue(done["booking"])
+
+	def test_c04_the_caller_named_must_be_one_the_agent_sees(self):
+		ent = frappe.db.get_value("Property", OTHER, "tex_enterprise")
+		theirs = frappe.get_doc({"doctype": "Guest", "first_name": "Far", "last_name": "Away",
+		                         "email": "c04-far@example.com", "tex_enterprise": ent}).insert(ignore_permissions=True)
+		with self.assertRaises(frappe.PermissionError):
+			self.search(theirs.name)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a member at the other hotel's program
+		self.assertFalse(loyalty.is_member(theirs.name, fx.PROPERTY))
+
+	def test_c04_a_member_is_priced_as_one_at_their_programs_hotels_only(self):
+		self.join(self.guest)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a group search across two hotels
+		res = crs_api.search(**STAY, properties=[fx.PROPERTY, OTHER], guest=self.guest)
+		member = {p["property"]: p["member"] for p in res["properties"]}
+		self.assertEqual(member, {fx.PROPERTY: True, OTHER: False})

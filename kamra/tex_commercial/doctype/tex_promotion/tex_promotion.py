@@ -21,10 +21,6 @@ class TEXPromotion(Document):
 			if D(self.min_basket or 0) > 0 and not self.currency:
 				# O-7 (D-18): the minimum is compared in the promotion's currency, converted to the sale's
 				frappe.throw(_("A minimum basket needs its currency."))
-			if self.member_only:
-				# G-57: no search or quote says the guest is a member, so it would never apply
-				frappe.throw(_("A members-only promotion cannot apply yet: no sale identifies a member. Use a "
-				               "promotion code sent to your members instead."))
 		if self.trigger == "Code":
 			self.code = code_key(self.code) or ""          # "wİnter" is WINTER (O-31)
 			if not self.code:

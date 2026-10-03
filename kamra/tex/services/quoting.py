@@ -418,8 +418,10 @@ def _from_total(offers: list[dict], n_rooms: int) -> tuple[str | None, str | Non
 
 
 def search(*, properties: list[str], check_in, check_out, rooms, market: str, channel: str,
-           currency: str | None = None, promo_codes=(), member=False, internal=False,
+           currency: str | None = None, promo_codes=(), member: bool | set[str] = False, internal=False,
            sale_at: datetime | None = None) -> dict:
+	"""``member``: the guest is a member of every hotel's program (True), of none (False), or of the programs of
+	the hotels in the set (C-04): a member's offers are priced with the members-only promotions."""
 	ci, co = _dates(check_in, check_out)
 	parties = parse_rooms(rooms, arrival=ci)
 	market = (market or "").upper()
@@ -429,8 +431,9 @@ def search(*, properties: list[str], check_in, check_out, rooms, market: str, ch
 		frappe.throw(_("Unknown sales channel {0}.").format(channel), refusal("SITE_CLOSED"))
 	out = []
 	for p in properties:
+		here = (p in member) if isinstance(member, set | frozenset) else bool(member)
 		res = search_property(p, check_in=ci, check_out=co, parties=parties, market=market, channel=channel,
-		                      currency=currency, promo_codes=promo_codes, member=member, internal=internal,
+		                      currency=currency, promo_codes=promo_codes, member=here, internal=internal,
 		                      sale_at=sale_at)
 		prop = frappe.db.get_value("Property", p, ["property_name", "city", "star_category"], as_dict=True) or {}
 		res.update({"property_name": prop.get("property_name"), "city": prop.get("city"),

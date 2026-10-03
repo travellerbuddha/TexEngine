@@ -412,3 +412,24 @@ class TestExtras(unittest.TestCase):
 		                       {"TRY": FxSnapshot("TRY", "EUR", FxMode.MANUAL, D("0.02"))})
 		self.assertEqual(o.amount, D("40.00"))
 		self.assertIn("at most", self.price(X("L", ExtraPricingMode.UNIT, max_quantity=2), qty=3).reason)
+
+
+class TestMembersPrice(unittest.TestCase):
+	"""C-04 (ADR-077): an applied members-only promotion says so, so the sale shows a member's price as one and a
+	booking checks its guest is a member; every other outcome keeps the keys it had."""
+
+	def test_an_applied_members_only_promotion_says_so(self):
+		_, out = promotions.apply_promotions([P("M", member_only=True), P("A")], amounts("100"), pctx(member=True),
+		                                     StackingMode.ADDITIVE, "EUR")
+		self.assertEqual([(o.promo_id, o.applied, o.member_only) for o in out], [("M", True, True), ("A", True, False)])
+		self.assertIs(out[0].to_dict()["member_only"], True)
+		self.assertNotIn("member_only", out[1].to_dict())
+		_, extra = promotions.apply_promotions([P("V", PromoValueType.VALUE_ADDED, "0", value_added="Spa",
+		                                          member_only=True)], amounts("100"), pctx(member=True),
+		                                       StackingMode.ADDITIVE, "EUR")
+		self.assertTrue(extra[0].member_only)
+
+	def test_a_refused_members_only_promotion_is_no_members_price(self):
+		chosen, rejected = promotions.select([P("M", member_only=True)], pctx())[:2]
+		self.assertEqual(chosen, [])
+		self.assertEqual([(o.applied, o.member_only) for o in rejected], [(False, False)])

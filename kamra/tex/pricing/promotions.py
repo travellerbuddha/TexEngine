@@ -96,6 +96,9 @@ class PromoOutcome:
 	# had no rate for, or COUPON_REJECTED; neither is part of the outcome's identity or its dict
 	explain_code: str = field(default="", compare=False)
 	fx_pair: tuple[str, str] | None = field(default=None, compare=False)
+	# an applied members-only promotion (C-04, ADR-077): the price is a member's, so the sale says so and a
+	# booking checks its guest is a member. In the dict only when set: every other outcome keeps its keys
+	member_only: bool = field(default=False, compare=False)
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
@@ -105,6 +108,8 @@ class PromoOutcome:
 		       "value_added": self.value_added, "source": self.source, "code": self.code, "stage": self.stage}
 		if self.rule:
 			out.update(rule=self.rule, minimum=to_str6(self.minimum))
+		if self.member_only:
+			out["member_only"] = True
 		return out
 
 
@@ -459,7 +464,8 @@ def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx:
 		ref = promo_ref(p)
 		if p.value_type == PromoValueType.VALUE_ADDED:
 			outcomes.append(PromoOutcome(p.promo_id, p.name, p.kind, True, "applied", ZERO,
-			                             tuple(n.isoformat() for n in nights), p.value_added, p.source, p.code))
+			                             tuple(n.isoformat() for n in nights), p.value_added, p.source, p.code,
+			                             member_only=p.member_only))
 			if explain is not None:
 				explain.add(stage, "PROMO_VALUE_ADDED", "{name}: includes {what}", rule=ref,
 				            name=p.name, what=p.value_added or "an inclusion")
@@ -501,7 +507,8 @@ def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx:
 		after_total = sum(running.values(), ZERO)
 		discount = before_total - after_total
 		outcomes.append(PromoOutcome(p.promo_id, p.name, p.kind, True, "applied", discount,
-		                             tuple(n.isoformat() for n in nights), "", p.source, p.code))
+		                             tuple(n.isoformat() for n in nights), "", p.source, p.code,
+		                             member_only=p.member_only))
 		if explain is not None:
 			explain.add(stage, "PROMO_APPLIED", "{name}: −{discount} on {count} night(s)",
 			            before=before_total, after=after_total, currency=currency, rule=ref,

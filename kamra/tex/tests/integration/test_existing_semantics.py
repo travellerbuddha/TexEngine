@@ -586,11 +586,11 @@ class TestSaleRuleChanges(TexTestCase):
 			self.promotion(min_basket=1000)
 		self.assertEqual(self.promotion(min_basket=1000, currency="EUR")["currency"], "EUR")
 
-	def test_a_members_only_promotion_is_refused(self):
-		"""G-57: main saved a members-only promotion that no sale could apply (no caller passes
-		``member``). Now the save is refused; without it, it saves as on main."""
-		with self.assertRaises(frappe.ValidationError):
-			self.promotion(member_only=1)
+	def test_a_members_only_promotion_saves_as_on_main(self):
+		"""G-57 reversed by the owner's C-04 (2026-10-03, ADR-077): main saved a members-only promotion that no
+		sale could apply, and 2C-2 refused it. The call centre now prices a member of the hotel's program as one,
+		so it saves as on main again (it applies to members only: test_loyalty_membership)."""
+		self.assertEqual(self.promotion(member_only=1)["member_only"], 1)
 		self.assertEqual(self.promotion(member_only=0)["member_only"], 0)
 
 	def test_an_equal_markup_is_not_activated(self):
