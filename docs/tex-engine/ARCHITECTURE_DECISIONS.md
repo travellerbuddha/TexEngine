@@ -9796,11 +9796,15 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   import at cut-over, a separate go-live item.
 - *The contract payload's digest is a pricing internal (G-99).* `payload_hash` is a sha256 of the frozen payload
   (its rates, offers and inherited policy rules): whoever holds it confirms a guess of those values offline. It goes
-  only to who holds `price.view_cost` at the hotel.
-  - TEX API: `strip_internal` removes `contract.payload_hash` (CRS search, a reservation's pricing, a modification's
-    proposed price); the CRS quote answers (`crs.quote`, `quote_rooms`), a simulation and a modification's sold
-    contract (`old.contract`) leave it out; `get_contract` and `publish_version` name it only with
-    `price.view_cost` (not `contract.edit`: an editor without cost is not shown inherited rules either).
+  where the version's rates go.
+  - Selling and reservations, `price.view_cost` at the hotel: `strip_internal` removes `contract.payload_hash` (CRS
+    search, a reservation's pricing, a modification's proposed price); the CRS quote answers (`crs.quote`,
+    `quote_rooms`), a simulation and a modification's sold contract (`old.contract`) leave it out.
+  - The contracts API, who sees the version's rates (`_sees_cost`: `price.view_cost` or `contract.edit`, as
+    `get_version` shows them): `get_contract` and `publish_version` leave it out otherwise; `get_version` keeps
+    main's answer for an editor (ADR-061 parity, pinned by `test_existing_semantics`). An editor without cost, a
+    custom profile only (every default profile with `contract.edit` holds `price.view_cost`), thereby holds the
+    digest over inherited policy rules it is not shown (LOW, IMPLEMENTATION_STATUS §6L).
   - The audit trail (`audit_log`) masks the digests an event records (a refused reprice's `recorded_hash` and
     `found_hash`, a publish's `payload_hash`) for a viewer without `price.view_cost` at its hotel; the stored event
     keeps them. A refused reprice's message names the version, no longer the digests' first 12 hex digits.
