@@ -98,16 +98,19 @@ function SidePanelCase() {
   )
 }
 
-/** What each overlay's content committed, in order (read by the spec through `window.__commits`). */
+/** What each overlay's content showed, commit by commit (read by the spec through `window.__commits`). */
 const commits: Record<string, string[]> = {}
 ;(window as unknown as { __commits: typeof commits }).__commits = commits
 
-/** Records the value of every commit it is part of: a frame can only show what was committed. */
-function Probe({ id, value }: { id: string; value: string }) {
+/** Records the value of every commit in which it can be seen (a frame paints only what was committed, and
+ * nothing under `visibility: hidden`); a hidden commit is recorded as "(hidden)". */
+function Probe({ id, value, shownBy }: { id: string; value: string; shownBy: unknown }) {
+  const input = useRef<HTMLInputElement>(null)
   useLayoutEffect(() => {
-    ;(commits[id] ??= []).push(value)
-  }, [id, value])
-  return <input aria-label={`${id} amount`} value={value} readOnly className="rounded border px-2 py-1" />
+    const seen = input.current && getComputedStyle(input.current).visibility === "visible"
+    ;(commits[id] ??= []).push(seen ? value : "(hidden)")
+  }, [id, value, shownBy])
+  return <input ref={input} aria-label={`${id} amount`} value={value} readOnly className="rounded border px-2 py-1" />
 }
 
 /**
@@ -122,13 +125,18 @@ function ResetCase({ kind }: { kind: "dialog" | "drawer" | "panel" }) {
   useEffect(() => {
     if (open) setValue(`fresh ${round}`)
   }, [open, round])
+  // re-renders the content in the pass after it opens, so the Probe sees a commit that only shows it
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (open) setTick((n) => n + 1)
+  }, [open])
   const close = () => {
     setOpen(false)
     setValue("last session")                   // what was typed before closing, kept while closed
   }
   const body = (
     <>
-      <Probe id={kind} value={value} />
+      <Probe id={kind} value={value} shownBy={tick} />
       <button type="button" className="rounded border px-2 py-1" onClick={close}>
         {`Done ${kind}`}
       </button>
