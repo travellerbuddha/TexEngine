@@ -1,15 +1,26 @@
 # Mandatory for Frappe Cloud Marketplace review.
-# Mirrors https://github.com/frappe/semgrep-rules#how-to-use-in-my-app
+# frappe/semgrep-rules as https://github.com/frappe/semgrep-rules#how-to-use-in-my-app describes, pinned (2Z,
+# ADR-073): pull requests and pushes scan with the reviewed rules and CLI below; the Monday run scans with the
+# newest rules. A red Monday run means upstream added a rule: review it, fix or `nosemgrep` with a reason, then
+# move the pin in a pull request.
 name: Linters
 
 on:
   pull_request:
   push:
-    branches: [main, develop]
+    branches: [main, develop, claude/inspiring-ptolemy-i6wdu2]
+  schedule:
+    - cron: "41 4 * * 1"      # Mondays: the newest rules (drift run)
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # reviewed 2026-10-03: the rules and CLI Linters #190 ran green with
+  FRAPPE_SEMGREP_RULES_REF: 81a6e3d47a328249e8ddf04c586e493dd5553002   # frappe/semgrep-rules
+  SEMGREP_RULES_REF: a84ff9cc2453ca91d581380de4b8b3f272f6f4be          # semgrep/semgrep-rules (python/lang/correctness)
+  SEMGREP_VERSION: "1.179.0"
 
 jobs:
   linter:
@@ -23,17 +34,31 @@ jobs:
           cache: pip
 
       - name: Download Semgrep rules
-        run: git clone --depth 1 https://github.com/frappe/semgrep-rules.git frappe-semgrep-rules
+        # outside the workspace, so the scan never reads the rules' own files; the Monday run takes the newest
+        run: |
+          frappe_ref="$FRAPPE_SEMGREP_RULES_REF"
+          semgrep_ref="$SEMGREP_RULES_REF"
+          if [ "${{ github.event_name }}" = "schedule" ]; then frappe_ref=develop; semgrep_ref=develop; fi
+          git init -q "$RUNNER_TEMP/frappe-rules"
+          git -C "$RUNNER_TEMP/frappe-rules" fetch -q --depth 1 https://github.com/frappe/semgrep-rules "$frappe_ref"
+          git -C "$RUNNER_TEMP/frappe-rules" checkout -q FETCH_HEAD
+          git init -q "$RUNNER_TEMP/semgrep-rules"
+          git -C "$RUNNER_TEMP/semgrep-rules" sparse-checkout set python/lang/correctness
+          git -C "$RUNNER_TEMP/semgrep-rules" fetch -q --depth 1 --filter=blob:none https://github.com/semgrep/semgrep-rules "$semgrep_ref"
+          git -C "$RUNNER_TEMP/semgrep-rules" checkout -q FETCH_HEAD
+          echo "frappe/semgrep-rules at $(git -C "$RUNNER_TEMP/frappe-rules" rev-parse HEAD)"
+          echo "semgrep/semgrep-rules at $(git -C "$RUNNER_TEMP/semgrep-rules" rev-parse HEAD)"
 
       - name: Run Semgrep rules
         # ERROR-severity only: Frappe's own tip. WARNING rules (translations,
         # guest whitelist, type hints) are reviewed by hand on the marketplace
         # audit; failing CI on 200+ style warnings would hide a real ERROR.
+        # python/lang/correctness is the registry's r/python.lang.correctness, read from its source at the pin.
         run: |
-          pip install semgrep
+          pip install "semgrep==$SEMGREP_VERSION"
           semgrep --error --severity=ERROR \
-            --config ./frappe-semgrep-rules/rules \
-            --config r/python.lang.correctness
+            --config "$RUNNER_TEMP/frappe-rules/rules" \
+            --config "$RUNNER_TEMP/semgrep-rules/python/lang/correctness"
 
   marketplace-install:
     name: Marketplace install simulation

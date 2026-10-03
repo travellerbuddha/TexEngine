@@ -9,13 +9,17 @@ name: Supply chain
 on:
   pull_request:
   push:
-    branches: [main, develop]
+    branches: [main, develop, claude/inspiring-ptolemy-i6wdu2]
   schedule:
     - cron: "17 3 * * 1"      # Mondays: new advisories appear without a push
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # the payments commit ci.yml, the Dockerfile and setup-local.sh install too (test_pins keeps them equal)
+  PAYMENTS_REF: 86fefa9faf8ad825fe6f08c4753acfe44817900b
 
 concurrency:
   group: supply-chain-${{ github.ref }}
@@ -120,10 +124,16 @@ jobs:
         # payments, as installed by bench
         run: |
           npm install -g yarn
-          pip install frappe-bench
+          pip install frappe-bench==5.31.0
           bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.25.0 frappe-bench
           cd frappe-bench
-          bench get-app --skip-assets payments
+          bench get-app --skip-assets --branch develop payments
+          if [ "$(git -C apps/payments rev-parse HEAD)" != "$PAYMENTS_REF" ]; then
+            git -C apps/payments fetch --quiet --depth 1 https://github.com/frappe/payments "$PAYMENTS_REF"
+            git -C apps/payments checkout --quiet --detach FETCH_HEAD
+            env/bin/pip install --quiet -e apps/payments
+          fi
+          echo "payments at $(git -C apps/payments rev-parse HEAD)"
           bench get-app --skip-assets kamra "${GITHUB_WORKSPACE}/kamra-src"
           env/bin/pip freeze --exclude-editable > "${GITHUB_WORKSPACE}/req.txt"
           wc -l "${GITHUB_WORKSPACE}/req.txt"

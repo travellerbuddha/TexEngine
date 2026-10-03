@@ -2,9 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    # the audit base too: a merge that combines two pull requests is checked again (2Z)
+    branches: [main, develop, claude/inspiring-ptolemy-i6wdu2]
   pull_request:
   workflow_dispatch:        # run it on any branch from the Actions tab (a full run takes ~30-40 min)
+
+env:
+  # payments' develop moves (it already declares Frappe v17): the commit the Dockerfile and setup-local.sh
+  # pin too (test_pins keeps them equal)
+  PAYMENTS_REF: 86fefa9faf8ad825fe6f08c4753acfe44817900b
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -111,7 +117,7 @@ jobs:
 
       - name: Init bench
         run: |
-          pip install frappe-bench
+          pip install frappe-bench==5.31.0
           # pinned to the stable release tag: the version-16 branch tip
           # currently ships an UnboundLocalError in frappe/locale.py
           bench init --skip-redis-config-generation --skip-assets \
@@ -125,7 +131,14 @@ jobs:
       - name: Install app & site
         run: |
           cd frappe-bench
-          bench get-app payments
+          bench get-app --branch develop payments
+          if [ "$(git -C apps/payments rev-parse HEAD)" != "$PAYMENTS_REF" ]; then
+            git -C apps/payments fetch --quiet --depth 1 https://github.com/frappe/payments "$PAYMENTS_REF"
+            git -C apps/payments checkout --quiet --detach FETCH_HEAD
+            env/bin/pip install --quiet -e apps/payments
+            bench build --app payments
+          fi
+          echo "payments at $(git -C apps/payments rev-parse HEAD)"
           bench get-app kamra "${GITHUB_WORKSPACE}/apps/kamra"
           # kamra's dev dependencies (freezegun: the scheduler smoke test freezes the clock, ADR-064)
           bench setup requirements --dev kamra
