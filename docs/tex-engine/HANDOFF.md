@@ -1,14 +1,15 @@
 # TEX Engine — Handover after audit Part 2 (2026-10-03)
 
 **Read this whole file before changing anything.** It replaces the 2026-10-01 handoff (that version is in git history).
-Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last. What is left waits for an owner decision,
+Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last; the Frappe v16.36.1 upgrade followed
+as 2Z-F (PR #30). What is left waits for an owner decision,
 an external party, or is a LOW leftover listed below. The session that takes over implements, verifies its own work and
 opens one pull request per batch; the owner, who writes in Turkish, reviews and merges. Never merge, never push to the
 base branch, never rebase or force-push a shared branch.
 
 Recover state in this order (CLAUDE.md): `CLAUDE.md` → this file → `IMPLEMENTATION_STATUS.md` (§6 sections, newest
-last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-073) → `PRODUCT_SPEC.md` → `git log` and
-the descriptions of PRs #3–#29 (each has its items, fail-first evidence, review rounds and "Kalanlar").
+last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-074) → `PRODUCT_SPEC.md` → `git log` and
+the descriptions of PRs #3–#30 (each has its items, fail-first evidence, review rounds and "Kalanlar").
 
 ## 1. Where things stand
 
@@ -43,12 +44,15 @@ the descriptions of PRs #3–#29 (each has its items, fail-first evidence, revie
 | 2K-5 guest booking frontend | #27 | LO-35, LO-14, LO-32, LO-33, LO-31, LO-49, LO-30 (§6K5) |
 | 2K-6 staff frontend, tests and tooling | #28 | LO-34, LO-38, LO-40, LO-45, LO-42, LO-27, LO-46, LO-36, LO-44, LO-29, LO-41, LO-43 (§6K6) |
 | 2Z release hygiene | #29 | reproducible committed bundles + 2 CI checks, Frappe OAuth registration off (p76), CI pins, the drawer first-frame race (§6Z, ADR-073) |
+| 2Z-F Frappe v16.36.1 | #30 | Frappe v16.36.1 + payments `version-16`, pip-audit list 61 → 29, the sign-in contract of an expired password (§6ZF, ADR-074) |
 
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
   modules, 1,305 tests (`test_scheduler_smoke` differs only locally, on the demo booking domain's DNS); Playwright
   203 passed, 9 skipped by design (212; 52 spec files); node unit 435; DOM 42; i18n complete in 6 languages; eval
-  76/76; banquet 101; front-desk journey 13/13; pip-audit 61 reviewed advisories.
+  76/76; banquet 101; front-desk journey 13/13; pip-audit 61 reviewed advisories. After 2Z-F (Frappe v16.36.1, local
+  runs): TEX unit 699; integration 49 modules, 1,306 tests; pip-audit 29 reviewed advisories; PR #30's description
+  has its CI runs.
 
 ## 2. What is left
 
@@ -56,7 +60,7 @@ Nothing planned remains. In order of likely need:
 
 | # | Item | Needs | Where |
 |---|---|---|---|
-| 1 | **2Z-F: Frappe v16.25.0 → v16.36.1** with payments `version-16` (closes 32 of the 61 reviewed advisories; none of PR #11's PyJWT/oauthlib ones, which only Frappe v17 moves) | owner chose: its own PR after 2Z (2026-10-03) | `HANDOFF_RELEASE.md` §2 (the procedure) |
+| 1 | ~~2Z-F: Frappe v16.25.0 → v16.36.1~~ **done** (PR #30). Left: the 29 reviewed advisories (PyJWT and oauthlib move on Frappe's `develop` only); re-check them when Frappe tags a newer v16 | none | §6ZF, ADR-074, `pip-audit-ignore.txt` |
 | 2 | Pre-upgrade migration package (O-34, O-35, O-36, O-39, P1-12) | **D-14**: is an existing Kamra or pilot database upgraded? | `HANDOFF_LEFTOVERS.md` §3 C-06 |
 | 3 | PMS adapters, SMS/WhatsApp providers, inbound PMS events (G-69r) | **D-15**: which PMS runs each go-live hotel? | C-07 |
 | 4 | O-6 deadlines in hotel-local time for UTC+7 hotels; LO-37 (the `fx_bridged` WARN of a MANUAL-mode pair) | D-13 answered **no** for wave 1; ask again when Cam Ranh / Phuket are planned | C-05, LO-37 |
@@ -142,9 +146,9 @@ Per batch:
 
 ## 5. Environment and CI
 
-- Local bench: `docs/tex-engine/DEV_ENVIRONMENT.md` (Frappe v16.25.0, Python 3.14, Node 24 in CI / 22 locally — the
+- Local bench: `docs/tex-engine/DEV_ENVIRONMENT.md` (Frappe v16.36.1, Python 3.14, Node 24 in CI / 22 locally — the
   build does not depend on the major, CI's drift check is the arbiter — MariaDB 11.x with `innodb_snapshot_isolation`
-  OFF, Redis, payments at commit 86fefa9). Pure tests: `python -m pytest kamra/tex/tests/unit -q`. Integration: `bench
+  OFF, Redis, payments `version-16` at commit cca07d9). Pure tests: `python -m pytest kamra/tex/tests/unit -q`. Integration: `bench
   --site test.localhost run-tests --module kamra.tex.tests.integration.<mod>`.
 - GitHub workflows on every PR and every push to the base:
   - **CI**: "Python lint (ruff)"; "Frontend typecheck & build" (build, **committed bundles equal this build**, node unit,
@@ -166,16 +170,17 @@ Per batch:
 
 - Patches up to **p76** (p57 sits in `[pre_model_sync]`). p26, p30, p32, p41–p44 and **p67** were never used — do not
   use them. **Next free: p77.**
-- ADRs up to **ADR-073**. **Next free: ADR-074.**
+- ADRs up to **ADR-074**. **Next free: ADR-075.**
 - `IMPLEMENTATION_STATUS.md` sections: 6, 6B, 6C1, 6C2, 6G1, 6D1, 6E1, 6I, 6E2, 6H1, 6D2, 6F1, 6H2, 6F2, 6G2, 6K1, 6K2,
-  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z. A new batch adds its own section at the END of the file.
+  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF. A new batch adds its own section at the END of the file.
 
 ## 7. Owner decisions
 
 Taken: D-1 … D-4, D-6 … D-11, D-16 … D-18 (applied in Part 2, see the 2026-10-01 handoff in git history for the
 wording); **D-5** markets per site and residents-only TR (ADR-070) with the CRS override `reservation.create` + a reason;
 **D-12** loyalty is live at go-live; **D-13** no — the UTC+7 hotels do not go live in wave 1 (O-6 and LO-37 deferred);
-2Z (2026-10-03): the Frappe upgrade is its own PR after 2Z, and the committed build carries no commit stamp.
+2Z (2026-10-03): the Frappe upgrade is its own PR after 2Z (done: PR #30), and the committed build carries no commit
+stamp.
 
 Open (ask the owner when the work needs it; never guess): **D-14** (an existing database upgraded?), **D-15** (PMS per
 hotel), the points policy (C-01), C-02 … C-16 with their defaults in `HANDOFF_LEFTOVERS.md` §3, and CLP/ISK minor
@@ -215,12 +220,14 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
   (`tests/dom/harness.css`).
 - A form kept mounted while closed and reset by a passive effect shows the last session's values for a frame and
   loses what is typed then: mount it per opening (keyed) or reset in a layout effect (ADR-073).
+- A Frappe tag move can change a contract TEX relies on: v16.36.1 stopped answering an expired password with the
+  reset link (ADR-074). Run every suite on a Frappe move, and read the diff of `frappe/auth.py`, `frappe/oauth.py` and
+  `frappe/integrations/oauth2.py` between the tags.
 
 ## 10. First steps for the session that takes over
 
-1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md`; skim PR #29's description
-   (the latest complete batch).
+1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md`; skim PR #29's and PR #30's
+   descriptions (the latest complete batches).
 2. Set up the bench (`docs/tex-engine/DEV_ENVIRONMENT.md`) and run the pure unit tests and one integration module.
-3. Ask the owner, in Turkish, only what the next item needs (§2: the Frappe upgrade needs no decision; D-14, D-15 and
-   C-01 … C-16 do). Never start an item that waits for an answer.
+3. Ask the owner, in Turkish, only what the next item needs (§2: D-14, D-15 and C-01 … C-16 need a decision). Never start an item that waits for an answer.
 4. Work as in §3; keep this file current: when a batch merges, mark it in §1 in your next batch's docs commit.

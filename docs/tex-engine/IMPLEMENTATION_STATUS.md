@@ -1934,3 +1934,37 @@ committed build carries no commit stamp. Cards: `HANDOFF_RELEASE.md` (each re-ve
     typed in that frame would be replaced by the full refundable amount; the user invite and contract dialogs; a scan of
     `useEffect` resets keyed on `open` lists them). LOW: one frame. Proposed: one fix in the design system's
     Dialog/Drawer (ADR-073), not a sweep of each.
+
+## 6ZF. Audit Part 2Z-F — Frappe v16.36.1 (2026-10-03)
+
+The owner decided on 2026-10-03 that the Frappe upgrade is its own PR after 2Z. Card: `HANDOFF_RELEASE.md` §2,
+re-verified first (its "21 remain" missed the eight pypdf advisories listed on 2026-10-01: 29 remain). ADR-074.
+
+- Pins **COMPLETE**: Frappe v16.36.1 and payments `version-16` at cca07d9 in CI, the supply-chain check, the tex-local
+  Dockerfile and `setup-local.sh` (and DEV_ENVIRONMENT). payments' `develop` declares Frappe ≥ 17 (bench installed it
+  on v16 anyway). Test: unit `test_pins.test_payments_branch_follows_the_frappe_major` (red before: `develop` in all
+  four files). `setup-local.sh` says when a bench it keeps runs another Frappe; NATIVE.md §5 has the in-place steps,
+  as run on the development bench (its migrate ran Frappe's six new patches, none on a TEX DocType).
+- Supply chain **COMPLETE**: pip-audit 2.10.1 over the new environment no longer reports 32 of the 61 reviewed
+  findings (bleach 3 — Frappe no longer depends on it —, cryptography 4, Pillow 13, pypdf 7, sqlparse 5) and reports
+  none new; 29 remain, each outside a pin of Frappe v16.36.1 or of payments (pypdf 11, PyJWT 13, WeasyPrint 2,
+  pdfkit, setuptools, oauthlib). The oauthlib and PyJWT reviews were redone on v16.36.1.
+- The sign-in contract **COMPLETE**: Frappe v16.36.1 no longer answers an expired password with the reset link
+  (`redirect_to`), which handed out a reset key for the password alone, before a two-factor code. It asks the code
+  first and mails the link to the account's address.
+  - `test_entry_branding`'s expired-password test asserted the link in the answer (red on v16.36.1: OutgoingEmailError
+    from the mail it now sends). It now asserts the answer has no link and the one mail goes to the account (red on
+    v16.25.0's `auth.py`: `'redirect_to' unexpectedly found`). The changed assertion is declared in the PR.
+  - New: a two-factor account's code comes before any reset (red on v16.25.0's `auth.py`: no code step,
+    `KeyError: 'verification'`).
+  - The admin sign-in page already reads an answer without `redirect_to` (it says to use "Forgot password?"); only
+    comments changed, the bundles are unchanged.
+- Local runs on the upgraded bench: TEX unit 699; integration 49 modules, 1,306 tests (`test_scheduler_smoke` differs
+  only locally, on the demo booking domain's DNS); eval 76/76; banquet 101; front-desk journey 13/13; node unit 435;
+  DOM 42; i18n complete; a rebuild of the bundles is identical; ruff clean.
+- **Not done:**
+  - the expired-password notice could say that the link was mailed (wording; the e2e asserts today's text);
+  - a site with `force_user_to_reset_password` and no outgoing Email Account cannot sign that user in: Frappe raises
+    OutgoingEmailError (HTTP 500) and the admin page shows its generic "Wrong email, username or password."; go-live
+    needs SMTP anyway (GO_LIVE_READINESS "Pins"). LOW;
+  - the 29 advisories wait for a later Frappe tag (PyJWT and oauthlib move on Frappe's `develop` only).
