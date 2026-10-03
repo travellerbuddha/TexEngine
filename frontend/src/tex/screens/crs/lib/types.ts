@@ -57,6 +57,8 @@ export interface PromoOutcome {
   value_added: string
   source: string
   code: string | null
+  /** An applied members-only promotion: a member's price (C-04). */
+  member_only?: boolean
 }
 
 export interface ExtraOutcome {
@@ -226,6 +228,8 @@ export interface Offer {
   /** At least one room fits, no restriction, `available > 0`. */
   bookable: boolean
   reasons?: (Reason & { room_index?: number })[]
+  /** A members-only promotion priced it: the caller's member price, booked for that member only (C-04). */
+  member_price?: boolean
 }
 
 export interface RoomContent {
@@ -255,6 +259,8 @@ export interface PropertyResult {
   from_currency?: string | null
   /** Rooms of the party no available room type fits. */
   unplaced_rooms?: number[]
+  /** The caller named in the search is a member of this hotel's loyalty program (C-04). */
+  member?: boolean
 }
 
 export interface SearchResult {

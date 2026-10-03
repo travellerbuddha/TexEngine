@@ -202,6 +202,12 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   const [formErrors, setFormErrors] = useState<FieldErrors>({})
   const [result, setResult] = useState<SearchResult>()
   const [lastArgs, setLastArgs] = useState<SearchArgs>()
+  // the caller the Call Center names in its search: priced as a member where they are one (C-04). A ref, so a
+  // search started right after the caller is picked already names them
+  const priceFor = useRef<string | undefined>(undefined)
+  const setPriceFor = useCallback((guest?: string | null) => {
+    priceFor.current = guest || undefined
+  }, [])
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<TexApiError>()
 
@@ -363,6 +369,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         currency: f.currency || undefined,
         promo_codes: f.promo.length ? f.promo : undefined,
         properties: f.properties,
+        guest: priceFor.current,
       }
       const prevSelection = selection
       const seq = ++searchSeq.current
@@ -767,6 +774,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     searching,
     searchError,
     runSearch,
+    setPriceFor,
     propertyResult,
     findOffer,
     roomCandidates,
