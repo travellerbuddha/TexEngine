@@ -685,5 +685,6 @@
   "refusal.MEMBER_CONSENT_REQUIRED": "Bifați caseta pentru a confirma înscrierea în programul de loialitate.",
   "refusal.MEMBER_LINK_INVALID": "Acest link nu este valid sau a expirat. Vă rugăm să cereți unul nou.",
   "refusal.MEMBER_SESSION_ENDED": "Ați fost deconectat. Conectați-vă din nou pentru a vedea prețurile de membru.",
-  "refusal.NOT_A_MEMBER": "Nu există încă o calitate de membru cu acest e-mail. Vă puteți înscrie în program."
+  "refusal.NOT_A_MEMBER": "Nu există încă o calitate de membru cu acest e-mail. Vă puteți înscrie în program.",
+  "refusal.MEMBERS_ONLY": "Acest preț de membru este doar pentru membrul conectat. Rezervați cu propriul nume și e-mail sau căutați din nou."
 }

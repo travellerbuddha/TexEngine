@@ -10,6 +10,7 @@ from frappe.utils import add_days, add_to_date, now_datetime
 
 from kamra.tex.api import public
 from kamra.tex.crm import loyalty, members
+from kamra.tex.money import D
 from kamra.tex.services import notify
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import SLUG
@@ -212,3 +213,100 @@ class TestMemberSessionsAndPrivacy(WebMemberCase):
 		                    add_days(now_datetime(), -(members.PURGE_AFTER_DAYS + 1)))
 		self.assertEqual(members.purge_sessions(), 1)
 		self.assertFalse(frappe.db.exists("TEX Member Session", {"guest": self.guest}))
+
+
+STAY = {"check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 13)), "rooms": [{"adults": 2, "children": []}]}
+
+
+class TestMemberPricesOnTheWeb(WebMemberCase):
+	"""C-04 on the web: a signed-in member is priced as one at the site's hotels whose program they are a member of;
+	anyone else sees the member price as "Member price" (applied only when signed in, the owner's choice), never an
+	offer they could book at it; a member's price books for that member only (MEMBERS_ONLY)."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.api import policies as policy_api
+
+		doc = policy_api.save_record("TEX Promotion", {"promotion_name": "Web members 10", "property": fx.PROPERTY,
+		                                               "trigger": "Automatic", "value_type": "PERCENT", "value": 10,
+		                                               "applies_to": "ACCOMMODATION", "member_only": 1})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		self.members_ten = doc["name"]
+
+	def signed_in(self, guest: str | None = None) -> str:
+		self.ask(frappe.db.get_value("Guest", guest or self.guest, "email"))
+		return self.verify(self.token())["session"]
+
+	def search(self, session: str | None = None) -> dict:
+		return self.as_guest(public.search, site=SLUG, member_session=session, **STAY)
+
+	def flex(self, res: dict) -> dict:
+		return next(o for o in res["properties"][0]["offers"] if o["room_type"] == self.f["room_types"]["STD"]
+		            and o["board"] == "AI" and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+
+	def book(self, offer: dict, email: str, session: str | None = None) -> dict:
+		q = self.as_guest(public.quote, site=SLUG, offer_key=offer["rooms"][0]["offer_key"])
+		return self.as_guest(public.book, site=SLUG, quote_ids=[q["quote_id"]],
+		                     guest={"first_name": "Mia", "last_name": "Member", "email": email, "country": "DE"},
+		                     payment_method="Pay at Hotel", idempotency_key=f"c04f-{frappe.generate_hash(length=8)}")
+
+	def test_c04f_a_visitor_sees_the_member_price_but_cannot_book_it(self):
+		from kamra.tex.services import quoting
+
+		res = self.search()
+		offer = self.flex(res)
+		self.assertEqual(res["member"], {"signed_in": False, "hotels": []})
+		self.assertFalse(offer["member_price"])
+		self.assertLess(D(offer["member_total"]), D(offer["total"]))            # the teaser: 10 % less
+		self.assertEqual(D(offer["member_total"]), D(offer["total"]) * D("0.9"))
+		self.assertLess(D(offer["rooms"][0]["member_total"]), D(offer["rooms"][0]["quote"]["totals"]["total"]))
+		for o in res["properties"][0]["offers"]:                                # every key is anyone's price
+			for r in o["rooms"]:
+				self.assertFalse(quoting.verify(r["offer_key"])["member"])
+
+	def test_c04f_a_signed_in_member_is_priced_as_one_and_books_at_it(self):
+		self.join(self.guest)
+		session = self.signed_in()
+		anyone = self.flex(self.search())
+		res = self.search(session)
+		offer = self.flex(res)
+		self.assertEqual(res["member"], {"signed_in": True, "hotels": [fx.PROPERTY]})
+		self.assertTrue(offer["member_price"])
+		self.assertEqual(D(offer["total"]), D(anyone["member_total"]))
+		self.assertNotIn("member_total", offer)                                 # no teaser: it is their price
+		self.assertIn(True, [p.get("member_only") for p in offer["rooms"][0]["quote"]["promotions"]])
+		done = self.book(offer, self.email, session)
+		self.assertEqual(D(done["total"]), D(offer["total"]))
+		self.assertEqual(frappe.db.get_value("TEX Booking", done["booking"], "booker_guest"), self.guest)
+
+	def test_c04f_a_members_price_books_for_that_member_only(self):
+		self.join(self.guest)
+		offer = self.flex(self.search(self.signed_in()))
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.book(offer, "c04f-friend@example.com")                         # a friend's booking at it
+		self.assertEqual(code_of(caught.exception), "MEMBERS_ONLY")
+		self.assertFalse(frappe.db.exists("Guest", {"email": "c04f-friend@example.com"}))
+
+	def test_c04f_a_signed_in_guest_who_is_no_member_sees_the_teaser(self):
+		session = self.signed_in()                                              # a profile, no membership
+		res = self.search(session)
+		offer = self.flex(res)
+		self.assertEqual(res["member"], {"signed_in": True, "hotels": []})
+		self.assertFalse(offer["member_price"])
+		self.assertTrue(offer["member_total"])
+
+	def test_c04f_an_ended_session_is_priced_as_anyone(self):
+		self.join(self.guest)
+		session = self.signed_in()
+		self.as_guest(public.member_sign_out, site=SLUG, member_session=session)
+		res = self.search(session)
+		self.assertEqual(res["member"], {"signed_in": False, "hotels": []})
+		self.assertFalse(self.flex(res)["member_price"])
+
+	def test_c04f_no_members_promotion_no_teaser(self):
+		from kamra.tex.api import policies as policy_api
+
+		policy_api.archive("TEX Promotion", self.members_ten, reason="over")
+		offer = self.flex(self.search())
+		self.assertNotIn("member_total", offer)
+		self.assertNotIn("member_total", offer["rooms"][0])

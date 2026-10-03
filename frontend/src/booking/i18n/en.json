@@ -685,5 +685,6 @@
   "refusal.MEMBER_CONSENT_REQUIRED": "Please tick the box to confirm that you join the loyalty program.",
   "refusal.MEMBER_LINK_INVALID": "This link is not valid or has expired. Please ask for a new one.",
   "refusal.MEMBER_SESSION_ENDED": "You are signed out. Please sign in again to see your member prices.",
-  "refusal.NOT_A_MEMBER": "There is no membership with this e-mail yet. You can join the program instead."
+  "refusal.NOT_A_MEMBER": "There is no membership with this e-mail yet. You can join the program instead.",
+  "refusal.MEMBERS_ONLY": "This member price is for the signed-in member only. Book with your own name and e-mail, or search again."
 }

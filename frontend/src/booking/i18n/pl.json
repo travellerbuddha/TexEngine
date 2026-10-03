@@ -685,5 +685,6 @@
   "refusal.MEMBER_CONSENT_REQUIRED": "Zaznacz pole, aby potwierdzić dołączenie do programu lojalnościowego.",
   "refusal.MEMBER_LINK_INVALID": "Ten link jest nieprawidłowy lub wygasł. Poproś o nowy.",
   "refusal.MEMBER_SESSION_ENDED": "Wylogowano Cię. Zaloguj się ponownie, aby zobaczyć ceny dla członków.",
-  "refusal.NOT_A_MEMBER": "Z tym adresem e-mail nie ma jeszcze członkostwa. Możesz dołączyć do programu."
+  "refusal.NOT_A_MEMBER": "Z tym adresem e-mail nie ma jeszcze członkostwa. Możesz dołączyć do programu.",
+  "refusal.MEMBERS_ONLY": "Ta cena dla członków dotyczy tylko zalogowanego członka. Zarezerwuj na własne imię i e-mail albo wyszukaj ponownie."
 }

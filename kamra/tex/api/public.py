@@ -248,7 +248,7 @@ def residency(market: versions.MarketDef | str | None) -> dict | None:
 # a reason by its code, the room it is about and the limit it names (MAX_ADULTS / MAX_CHILDREN / MAX_OCCUPANTS)
 _REASON_LIMITS = ("max_adults", "max_children", "max_occupants")
 # what the booking app shows of a promotion
-_PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added")
+_PROMOTION_KEYS = ("promo_id", "name", "applied", "discount", "code", "value_added", "member_only")
 
 
 def _guest_reasons(reasons) -> list[dict]:
@@ -308,7 +308,12 @@ def _guest_answer(out: dict) -> dict:
 @refusals.coded
 def search(site: str, check_in: str, check_out: str, rooms, currency: str | None = None,
            promo_code: str | None = None, market: str | None = None, country: str | None = None,
-           hotel: str | None = None, session_id: str | None = None):
+           hotel: str | None = None, session_id: str | None = None, member_session: str | None = None):
+	"""``member_session``: a member signed in on this site (C-04, ADR-078) is priced as one at the hotels whose program
+	they are a member of; anyone else is shown the member price as ``member_total`` (never an offer at it) where a
+	members-only promotion is live. ``member``: whether the session is signed in, and where it is a member."""
+	from kamra.tex.crm import members
+
 	s = _site(site)
 	props = _site_properties(s)
 	if hotel:
@@ -320,9 +325,18 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 		frappe.throw(_("Currency not offered."), refusal("CURRENCY_NOT_OFFERED"))
 	m = _market(s, market, country)
 	mkt = m.code
-	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
-	                     channel=_channel(s), currency=currency or s.default_currency or None,
-	                     promo_codes=[promo_code] if promo_code else (), internal=False)
+	guest = members.session_guest(s, text(member_session, 200))
+	members_at = members.member_hotels(s, guest) & set(props)
+	asked = {"properties": props, "check_in": check_in, "check_out": check_out, "rooms": rooms, "market": mkt,
+	         "channel": _channel(s), "currency": currency or s.default_currency or None,
+	         "promo_codes": [promo_code] if promo_code else (), "internal": False}
+	res = quoting.search(**asked, member=members_at)
+	_member_prices(res, members_at)
+	teaser = members.teaser_hotels(s, [p for p in props if p not in members_at])
+	if teaser:
+		# the same search as a member's where anyone may be shown the member price: its totals only, never its keys
+		_teaser(res, quoting.search(**{**asked, "properties": sorted(teaser)}, member=True))
+	res["member"] = {"signed_in": bool(guest), "hotels": sorted(members_at)}
 	# a residents-only market's prices: checkout asks the guest's country of residence (O-8)
 	res["residency"] = residency(m)
 	content.Localizer(content.guest_language()).search(res)
@@ -402,6 +416,38 @@ def member_sign_out(site: str, member_session: str):
 
 def _ticked(value) -> bool:
 	return booking_svc.consent_given(value)
+
+
+def _member_prices(res: dict, members_at: set[str]) -> None:
+	"""Each offer says whether a members-only promotion priced it (``member_price``): the signed-in member's price."""
+	for p in res["properties"]:
+		for o in p["offers"] + p["unavailable"]:
+			o["member_price"] = p["property"] in members_at and any(
+				booking_svc.member_priced(r["quote"]) for r in o["rooms"])
+
+
+def _teaser(res: dict, as_member: dict) -> None:
+	"""The member price beside anyone's price ("Member price", applied only when signed in): ``member_total`` on an
+	offer and on each of its rooms where a member pays less, ``member_from_total`` on a hotel. Only totals are taken
+	from the member's search: its offer keys, quotes and the rest never reach the guest."""
+	key = lambda o: (o["room_type"], o["board"], o.get("rate_plan"))  # noqa: E731
+	theirs = {(p["property"], *key(o)): o for p in as_member["properties"] for o in p["offers"]}
+	from_total = {p["property"]: p.get("from_total") for p in as_member["properties"]}
+	for p in res["properties"]:
+		for o in p["offers"]:
+			m = theirs.get((p["property"], *key(o)))
+			if not m or not any(booking_svc.member_priced(r["quote"]) for r in m["rooms"]):
+				continue
+			if o.get("total") and m.get("total") and D(m["total"]) < D(o["total"]):
+				o["member_total"] = m["total"]
+			mine = {r["room_index"]: r for r in m["rooms"]}
+			for r in o["rooms"]:
+				t = (mine.get(r["room_index"]) or {}).get("quote", {}).get("totals", {}).get("total")
+				if t and D(t) < D(r["quote"]["totals"]["total"]):
+					r["member_total"] = t
+		low = from_total.get(p["property"])
+		if low and p.get("from_total") and D(low) < D(p["from_total"]) and p.get("from_currency"):
+			p["member_from_total"] = low
 
 
 # a guest sees whether a limited extra can still be booked on a day, and "few left", never

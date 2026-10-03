@@ -208,6 +208,15 @@ def member_hotels(site, guest: str | None) -> set[str]:
 	return {p for p in site_properties(site) if loyalty.is_member(guest, p)} if guest else set()
 
 
+def teaser_hotels(site, props: list[str]) -> set[str]:
+	"""Of ``props``, the hotels whose program has a members-only promotion live now: where anyone is shown the member
+	price as "Member price" (the owner's choice; applied only to a member signed in)."""
+	from kamra.tex.commercial import context
+
+	now = now_datetime()
+	return {p for p in props if loyalty.program_for(p) and any(x.member_only for x in context.promotions(p, now))}
+
+
 def status(site, guest: str) -> dict:
 	"""What the booking app shows a signed-in guest: their name and e-mail (their own), whether they are a member at
 	any of the site's hotels and at which."""

@@ -685,5 +685,6 @@
   "refusal.MEMBER_CONSENT_REQUIRED": "Sadakat programına katıldığınızı onaylamak için kutuyu işaretleyin.",
   "refusal.MEMBER_LINK_INVALID": "Bu bağlantı geçersiz ya da süresi dolmuş. Lütfen yeni bir bağlantı isteyin.",
   "refusal.MEMBER_SESSION_ENDED": "Oturumunuz kapandı. Üye fiyatlarınızı görmek için yeniden giriş yapın.",
-  "refusal.NOT_A_MEMBER": "Bu e-posta adresiyle henüz bir üyelik yok. Bunun yerine programa katılabilirsiniz."
+  "refusal.NOT_A_MEMBER": "Bu e-posta adresiyle henüz bir üyelik yok. Bunun yerine programa katılabilirsiniz.",
+  "refusal.MEMBERS_ONLY": "Bu üye fiyatı yalnızca giriş yapmış üye içindir. Kendi adınız ve e-postanızla rezervasyon yapın ya da yeniden arayın."
 }
