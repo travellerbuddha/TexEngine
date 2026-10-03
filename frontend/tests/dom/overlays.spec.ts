@@ -236,3 +236,24 @@ test("Ctrl+A selects the whole grid on a Cyrillic layout too (key ф, code KeyA)
   expect(await press("ф", "KeyA")).toBe(true)
   await expect(count).toHaveText("9")
 })
+
+// 2L (ADR-073's proposal): a Dialog or Drawer shows its content one effect pass after it opens, so a
+// form its parent resets in a passive effect on opening is never committed, painted or typed into with
+// the last session's values. Each overlay is opened twice: the second time after a close that left
+// "last session" in the parent's state.
+for (const kind of ["dialog", "drawer", "panel"] as const) {
+  test(`a ${kind} never shows the last session's form values in its first frame`, async ({ page }) => {
+    const commits = () => page.evaluate((k) => (window as unknown as { __commits: Record<string, string[]> }).__commits[k] ?? [], kind)
+    for (const round of [1, 2]) {
+      await page.evaluate((k) => {
+        ;(window as unknown as { __commits: Record<string, string[]> }).__commits[k] = []
+      }, kind)
+      await page.getByRole("button", { name: `Open reset ${kind}` }).click()
+      await expect(page.getByLabel(`${kind} amount`)).toHaveValue(`fresh ${round}`)
+      expect(await commits(), `opening ${round}`).not.toContain("last session")
+      expect(await commits()).toContain(`fresh ${round}`)
+      await page.getByRole("button", { name: `Done ${kind}` }).click()
+      await expect(page.getByLabel(`${kind} amount`)).toHaveCount(0)
+    }
+  })
+}

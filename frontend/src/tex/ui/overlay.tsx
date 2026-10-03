@@ -11,6 +11,19 @@ import { tabbables, useIsPhone } from "./popover"
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
 
+/**
+ * `open`, one passive-effect pass late; closing is at once. A parent that resets its form in a passive
+ * effect when its overlay opens (`useEffect(() => { if (open) setForm(...) }, [open])`, about thirty TEX
+ * dialogs) does so in that same pass, so the content is first committed, painted and typed into with the
+ * reset form, never with the last session's values (ADR-073, 2L). The content's own refs exist from that
+ * render on: an effect that reaches into it when `open` turns true must try again when it is there.
+ */
+function useShown(open: boolean) {
+  const [shown, setShown] = useState(false)
+  useEffect(() => setShown(open), [open])
+  return open && shown
+}
+
 /** Focus trap + Esc + restore focus on close (WAI-ARIA dialog pattern). */
 function useModal(open: boolean, onClose: () => void) {
   const panel = useRef<HTMLDivElement>(null)
@@ -71,11 +84,12 @@ export function Dialog({
   footer?: ReactNode
   size?: "sm" | "md" | "lg" | "xl"
 }) {
-  const panel = useModal(open, onClose)
+  const shown = useShown(open)
+  const panel = useModal(shown, onClose)
   const titleId = useId()
   const descId = useId()
   const { t } = useTexT()
-  if (!open) return null
+  if (!shown) return null
   const width = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" }[size]
   return createPortal(
     <div className="tex-root fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
@@ -173,9 +187,10 @@ function DrawerBody({ titleId, title, onClose, children, footer }: { titleId: st
 }
 
 function ModalDrawer({ open, onClose, title, children, footer, width }: DrawerProps) {
-  const panel = useModal(open, onClose)
+  const shown = useShown(open)
+  const panel = useModal(shown, onClose)
   const titleId = useId()
-  if (!open) return null
+  if (!shown) return null
   return createPortal(
     <div className="tex-root fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" aria-hidden onClick={onClose} />
@@ -216,22 +231,23 @@ function syncSidePanels() {
 }
 
 function SidePanel({ open, onClose, title, children, footer, width }: DrawerProps) {
+  const shown = useShown(open)
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   useEffect(() => {
-    if (!open) return
+    if (!shown) return
     openPanels.push(width)
     syncSidePanels()
     return () => {
       openPanels.splice(openPanels.indexOf(width), 1)
       syncSidePanels()
     }
-  }, [open, width])
+  }, [shown, width])
   useEffect(() => {
     const el = panel.current
-    if (!open || !el) return
+    if (!shown || !el) return
     const opener = document.activeElement as HTMLElement | null
     const first = el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>(FOCUSABLE)
     ;(first ?? el).focus({ preventScroll: true })
@@ -254,8 +270,8 @@ function SidePanel({ open, onClose, title, children, footer, width }: DrawerProp
       if (now && now !== document.body && !el.contains(now)) return
       if (opener?.isConnected) opener.focus({ preventScroll: true })
     }
-  }, [open])
-  if (!open) return null
+  }, [shown])
+  if (!shown) return null
   return createPortal(
     <div
       ref={panel}

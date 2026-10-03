@@ -125,12 +125,13 @@ export function AddExtrasDialog({
       focused.current = false
       return
     }
-    if (!opts || focused.current) return
+    // the Dialog shows its content a pass after it opens (2L): until the form is there, wait for the list
+    if (!opts || focused.current || !formRef.current) return
     focused.current = true
     const active = document.activeElement
-    const panel = formRef.current?.closest<HTMLElement>("[role=dialog]")
+    const panel = formRef.current.closest<HTMLElement>("[role=dialog]")
     if (panel && active && panel.contains(active) && active.tagName !== "BUTTON" && active !== panel) return
-    formRef.current?.querySelector<HTMLInputElement>("input[type=number]:not([disabled])")?.focus()
+    formRef.current.querySelector<HTMLInputElement>("input[type=number]:not([disabled])")?.focus()
   }, [open, opts])
 
   const stay: StayDates | undefined = opts ? { check_in: opts.check_in, check_out: opts.check_out } : undefined

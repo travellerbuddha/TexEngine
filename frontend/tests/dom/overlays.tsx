@@ -1,9 +1,9 @@
 // Harness page for tests/dom/overlays.spec.ts (and a manual keyboard check): the real Popover,
 // Menu, Tooltip, Drawer and grid hooks with the app's styles, sized to overflow a short viewport.
-import { StrictMode, useRef, useState } from "react"
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import "./harness.css"
-import { Drawer, Menu, MenuItem, Popover, Tooltip, useGridNavigation, useGridSelection } from "../../src/tex/ui"
+import { Dialog, Drawer, Menu, MenuItem, Popover, Tooltip, useGridNavigation, useGridSelection } from "../../src/tex/ui"
 
 const ITEMS = Array.from({ length: 50 }, (_, i) => `Item ${i}`)
 const FIELDS = Array.from({ length: 40 }, (_, i) => `f${i}`)
@@ -98,6 +98,67 @@ function SidePanelCase() {
   )
 }
 
+/** What each overlay's content committed, in order (read by the spec through `window.__commits`). */
+const commits: Record<string, string[]> = {}
+;(window as unknown as { __commits: typeof commits }).__commits = commits
+
+/** Records the value of every commit it is part of: a frame can only show what was committed. */
+function Probe({ id, value }: { id: string; value: string }) {
+  useLayoutEffect(() => {
+    ;(commits[id] ??= []).push(value)
+  }, [id, value])
+  return <input aria-label={`${id} amount`} value={value} readOnly className="rounded border px-2 py-1" />
+}
+
+/**
+ * A form kept mounted while its overlay is closed and reset by a passive effect when it opens: the
+ * pattern of about thirty TEX dialogs (ADR-073). The overlay's content must never be committed with the
+ * last session's value, or its first frame shows it and what is typed then is lost.
+ */
+function ResetCase({ kind }: { kind: "dialog" | "drawer" | "panel" }) {
+  const [open, setOpen] = useState(false)
+  const [round, setRound] = useState(0)
+  const [value, setValue] = useState("last session")
+  useEffect(() => {
+    if (open) setValue(`fresh ${round}`)
+  }, [open, round])
+  const close = () => {
+    setOpen(false)
+    setValue("last session")                   // what was typed before closing, kept while closed
+  }
+  const body = (
+    <>
+      <Probe id={kind} value={value} />
+      <button type="button" className="rounded border px-2 py-1" onClick={close}>
+        {`Done ${kind}`}
+      </button>
+    </>
+  )
+  return (
+    <>
+      <button
+        type="button"
+        className="rounded border px-2 py-1"
+        onClick={() => {
+          setRound((r) => r + 1)
+          setOpen(true)
+        }}
+      >
+        {`Open reset ${kind}`}
+      </button>
+      {kind === "dialog" ? (
+        <Dialog open={open} onClose={close} title="Reset dialog">
+          {body}
+        </Dialog>
+      ) : (
+        <Drawer open={open} onClose={close} title={`Reset ${kind}`} modal={kind === "drawer"}>
+          {body}
+        </Drawer>
+      )}
+    </>
+  )
+}
+
 function Grid() {
   const selection = useGridSelection({ rows: 3, cols: 3 })
   const nav = useGridNavigation({ rows: 3, cols: 3, selection })
@@ -149,6 +210,11 @@ function Harness() {
       {/* on the left: the side panel covers the right of the page */}
       <div className="mt-2 flex items-center gap-2">
         <SidePanelCase />
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <ResetCase kind="dialog" />
+        <ResetCase kind="drawer" />
+        <ResetCase kind="panel" />
       </div>
       {/* the page scrolls too */}
       <div style={{ height: 2000 }} />
