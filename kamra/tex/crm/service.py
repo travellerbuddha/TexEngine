@@ -886,10 +886,8 @@ def guest_on_update(doc, method=None) -> None:
 	phone_withdrawn = (before.get("tex_consent_sms") or before.get("tex_consent_whatsapp")) and not phone_ok
 	if cleared or ((withdrawn or phone_withdrawn) and not (phone_ok or doc.get("tex_consent_email"))):
 		forget_contact(doc.name, emails={before.get("email"), doc.get("email")})
-	elif withdrawn:
+	elif withdrawn:                                 # SMS or WhatsApp still holds: the phone stays (C-03)
 		forget_contact(doc.name, emails={before.get("email"), doc.get("email")}, keep_phone=True)
-		if phone_withdrawn:
-			forget_phone(doc.name)
 	elif phone_withdrawn:
 		forget_phone(doc.name)                      # no SMS or WhatsApp consent left: no phone on the cases (O-26)
 
@@ -1233,9 +1231,15 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 		dst.set(f, 1 if v else 0)
 	dst.flags.tex_consent_source = "merge"             # a change is stamped and audited (``guest_validate``)
 	dst.save(ignore_permissions=True)
-	if not consent["tex_consent_email"]:
-		# the duplicate's cases came with the links; without consent they keep no contact data
-		forget_contact(target, emails={src.email, dst.email})
+	# the duplicate's cases came with the links: each keeps the contact the merged consent allows (C-03)
+	phone_ok = consent["tex_consent_sms"] or consent["tex_consent_whatsapp"]
+	if not (consent["tex_consent_email"] or phone_ok):
+		forget_contact(target, emails={src.email, dst.email})          # no consent: no contact data
+	else:
+		if not consent["tex_consent_email"]:
+			forget_contact(target, emails={src.email, dst.email}, keep_phone=True)
+		if not phone_ok:
+			forget_phone(target)                                        # a phone is for SMS or WhatsApp (O-26)
 	for doctype in ("Reservation", "Folio"):
 		if moved.get(doctype) and frappe.db.has_column(doctype, "guest_name"):
 			for chunk in _chunks(moved[doctype]):
