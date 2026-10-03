@@ -53,7 +53,8 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   Desk/REST write access, and every hotel-bound TEX DocType (incl. parent-scoped ones and
   `Guest`) is read-scoped (ADR-022).
 - **Withheld fields** (ADR-056): pricing internals (`Reservation.tex_pricing_snapshot`,
-  `tex_cost_amount`, `tex_margin_amount`, `tex_fx_rate`, `TEX Quote.result_json`,
+  `tex_cost_amount`, `tex_margin_amount`, `tex_fx_rate`, `tex_payload_hash`, `TEX Quote.result_json`,
+  `payload_hash` (the frozen payload's digest confirms a guess of its cost, G-99, ADR-075),
   `TEX Reservation Revision.snapshot_before` / `snapshot_after`) and a guest's stored totals over
   every tenant (`Guest.tex_stays`, `tex_lifetime_value`, `tex_lifetime_currency`, `tex_last_stay`,
   `tex_loyalty_points`) are at Frappe permlevel 1, which only System Manager reads. Desk and REST

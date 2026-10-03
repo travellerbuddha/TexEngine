@@ -9749,6 +9749,7 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   and duplicates dialogs, the contract and version dialogs, the user invite dialog): one frame of the last session's
   values, LOW. The proposed fix is one change in the design system's Dialog and Drawer (show the content one effect
   pass after `open`, so a parent's reset lands before the first visible frame), not thirty.
+  *Done in Part 2L (ADR-075).*
 - The Frappe v16.36.1 upgrade (it closes 32 of the reviewed advisories, none of PR #11's PyJWT/oauthlib ones) is its
   own pull request after 2Z (owner, 2026-10-03). ENGINE_VERSION, prices and schema unchanged.
 
@@ -9787,3 +9788,31 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
 - *Existing benches.* `setup-local.sh` keeps a bench it finds and now says when its Frappe differs; NATIVE.md §5 has
   the in-place steps used on the development bench (fetch the tag and the commit, `bench setup requirements`, build,
   migrate). The committed bundles do not depend on Frappe: a rebuild after the move is identical.
+
+## ADR-075 LOW leftovers: the payload digest withheld, overlays show their content a pass late (audit Part 2L)
+- *D-14 (owner, 2026-10-03): no existing database is upgraded.* No Kamra or TEX pilot database with data to keep
+  exists; every hotel starts from a fresh install. The pre-upgrade package (O-34, O-35, O-36, O-39, P1-12 and the
+  legacy-data leftovers of HANDOFF_LEFTOVERS C-06) does not apply. The data of the current systems reaches TEX by
+  import at cut-over, a separate go-live item.
+- *The contract payload's digest is a pricing internal (G-99).* `payload_hash` is a sha256 of the frozen payload,
+  cost and markups included: whoever holds it confirms a guess of those values offline. It goes only where the
+  payload's cost goes.
+  - TEX API: `get_contract` names it only to who sees cost (`_sees_cost`, as `get_version`); `strip_internal`
+    removes `contract.payload_hash`, so staff quotes, CRS searches, a reservation's pricing and a modification
+    preview carry none without `price.view_cost`.
+  - Desk / REST: `Reservation.tex_payload_hash` and `TEX Quote.payload_hash` are withheld fields (ADR-056): permlevel
+    1, left out of reads and generic-write responses, masked in the change history.
+  - No patch: the field metadata syncs on migrate. Change-history rows written before keep their values; by D-14
+    no such database goes live.
+  - Server code that ties a booking to its version (booking, modification, `sold_terms`) reads the digest from the
+    internal quote or the stored record, as before.
+- *An overlay shows its content one effect pass after it opens (ADR-073's proposal).* About thirty dialogs keep their
+  form mounted while closed and reset it in a passive effect when they open, so the content was first committed with
+  the last session's values. The design system's Dialog, modal Drawer and side panel now render their content when
+  `open` has been true for one passive-effect pass (`useShown`); closing is at once. The parent's reset runs in that
+  same pass, so the first commit already carries the reset form. Focus, Escape, the scroll lock and the side panel's
+  page width follow what is shown. Mounting per opening (keyed) or a layout-effect reset stay the patterns for a new
+  form; the overlay's rule covers what does not follow them.
+  - A consumer effect that reaches into the content when `open` turns true must wait until the content is there:
+    the content's refs are null in the render that opens it. Only AddExtrasDialog's first-quantity focus did; a
+    scan of every Dialog / Drawer consumer found no other.
