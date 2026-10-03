@@ -13,7 +13,11 @@ frontend/tsconfig.tsbuildinfo
 
 # Frappe
 kamra/public/dist/
-kamra/public/node_modules/
+# bench links the app's node_modules into its assets, which are kamra/public: a symlink, which a trailing
+# slash would not match (2Z, NEW-4)
+/kamra/public/node_modules
+# written by bench's `yarn install --check-files` in the app root (no dependencies there)
+/yarn.lock
 *.log
 
 # Local

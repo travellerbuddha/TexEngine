@@ -1,9 +1,9 @@
 {
   "name": "kamra",
   "private": true,
-  "description": "Build entrypoint for the Kamra front-end SPA. Frappe Cloud runs `yarn build` here on deploy; the built assets are also committed under kamra/public/frontend so a plain `bench get-app` install serves the UI with no node build.",
+  "description": "Build entrypoint for the Kamra front-end SPA. Frappe Cloud runs `yarn build` here on deploy; the built assets are also committed under kamra/public/frontend (and kamra/public/tex) so a plain `bench get-app` install serves the UI with no node build. `npm ci`: a build never rewrites frontend/package-lock.json, and CI checks that the committed bundles equal a fresh build (ADR-073).",
   "scripts": {
-    "build": "cd frontend && npm install && npm run build",
+    "build": "cd frontend && npm ci && npm run build",
     "dev": "cd frontend && npm run dev"
   }
 }
