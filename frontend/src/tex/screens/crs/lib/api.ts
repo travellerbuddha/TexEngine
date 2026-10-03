@@ -25,6 +25,8 @@ export interface SearchArgs {
   currency?: string
   promo_codes?: string[]
   properties?: string[]
+  /** The caller's profile: priced as a member where they are one (C-04). */
+  guest?: string
 }
 
 /** POST: a party may carry a child's date of birth, which never goes into a URL (G-52 review). */

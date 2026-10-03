@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { Award, Gift, SlidersHorizontal } from "lucide-react"
+import { Award, Gift, SlidersHorizontal, UserMinus, UserPlus } from "lucide-react"
 import { tex, useTexMutation, useTexQuery, type TexModule } from "../../../lib/api"
 import { useProperty, useSession } from "../../../lib/session"
 import { date, month, num, pct } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
 import { isInteger, useEvent, useIntentKey } from "../lib"
-import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyProgramInfo, Stay } from "../types"
+import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyMembership, LoyaltyProgramInfo, Stay } from "../types"
 
 /** Our optional helper module (kamra/tex/api/ui_backoffice_crm_payments.py). */
 export const UI_MODULE: TexModule = "ui_backoffice_crm_payments"
@@ -35,6 +35,7 @@ export function LoyaltyPanel({
   const current = useProperty()
   const [adjust, setAdjust] = useState<string | null>(null)
   const [redeem, setRedeem] = useState(false)
+  const [membership, setMembership] = useState<{ program: string; mode: "join" | "leave" } | null>(null)
   // programs this guest can collect in (also when the ledger is still empty)
   const programs = useTexQuery<LoyaltyProgramInfo[]>(UI_MODULE, "loyalty_programs", { guest: guest.name }, [guest.name])
   const programOptions = useMemo(() => {
@@ -46,6 +47,14 @@ export function LoyaltyPanel({
   const redeemable = stays.some((s) => s.tex_booking && s.status !== "Cancelled" && can("payment.link", s.property))
   const closeAdjust = useEvent(() => setAdjust(null))
   const closeRedeem = useEvent(() => setRedeem(false))
+  const closeMembership = useEvent(() => setMembership(null))
+  // the hotels a membership or an adjustment can be made for: the program's own, or its hotels the user sees the guest
+  // through (a hotel group's program; C-04 review round 1)
+  const programHotels: ProgramHotels = Object.fromEntries(
+    (programs.data ?? []).map((p) => [p.program, { own: p.program_property ?? null, hotels: p.hotels ?? [p.property] }]),
+  )
+  // memberships of the programs the guest can collect in now (enabled; a disabled one has no member prices)
+  const memberPrograms = (programs.data ?? []).map((p) => ({ value: p.program, label: p.program_name }))
 
   const actions = (
     <div className="flex flex-wrap gap-2">
@@ -64,6 +73,9 @@ export function LoyaltyPanel({
 
   return (
     <div className="space-y-4">
+      {memberPrograms.length > 0 && (
+        <Memberships programs={memberPrograms} accounts={accounts} canEdit={canEdit} onAct={(program, mode) => setMembership({ program, mode })} />
+      )}
       {!accounts.length ? (
         <EmptyState
           icon={<Award className="size-5" />}
@@ -159,12 +171,24 @@ export function LoyaltyPanel({
         open={adjust !== null}
         program={adjust ?? ""}
         programs={programOptions}
-        programHotels={Object.fromEntries((programs.data ?? []).map((p) => [p.program, p.property]))}
+        programHotels={programHotels}
         hotels={hotels.filter((h) => can("crm.edit", h))}
         defaultHotel={current}
         accounts={accounts}
         guest={guest.name}
         onClose={closeAdjust}
+        onDone={onChanged}
+      />
+      <MembershipDialog
+        open={membership !== null}
+        mode={membership?.mode ?? "join"}
+        program={membership?.program ?? ""}
+        programName={memberPrograms.find((p) => p.value === membership?.program)?.label ?? ""}
+        programHotels={programHotels}
+        hotels={hotels.filter((h) => can("crm.edit", h))}
+        defaultHotel={current}
+        guest={guest.name}
+        onClose={closeMembership}
         onDone={onChanged}
       />
       <RedeemDialog
@@ -177,6 +201,179 @@ export function LoyaltyPanel({
         onDone={onChanged}
       />
     </div>
+  )
+}
+
+/** program → its own hotel (none for a hotel group's program) and its hotels the user sees the guest through */
+type ProgramHotels = Record<string, { own: string | null; hotels: string[] }>
+
+/** The hotels a membership or an adjustment of `program` can be made for: the program's own hotel, else those of
+ * its hotels where the user may edit the guest (`editable`). Not listed (loading): every hotel the user may edit. */
+function hotelChoices(programHotels: ProgramHotels, program: string, editable: string[]): string[] {
+  const p = programHotels[program]
+  if (!p) return editable
+  return p.own ? [p.own] : p.hotels.filter((h) => editable.includes(h))
+}
+
+/** The guest's membership of each program (C-04, ADR-077): a member gets its members-only prices. Staff who may
+ * edit the guest join them (with the guest's word, audited) or end the membership with a reason. */
+function Memberships({
+  programs,
+  accounts,
+  canEdit,
+  onAct,
+}: {
+  programs: { value: string; label: string }[]
+  accounts: LoyaltyAccount[]
+  canEdit: boolean
+  onAct: (program: string, mode: "join" | "leave") => void
+}) {
+  const { t } = useTexT()
+  return (
+    <ul aria-label={t("crm.loyalty.member.title")} className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+      {programs.map((p) => {
+        const acc = accounts.find((a) => a.program === p.value)
+        const member = Boolean(acc?.member)
+        return (
+          <li key={p.value} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium text-zinc-900">{p.label}</span>
+              <MemberBadge member={member} membership={acc?.membership} />
+            </div>
+            {canEdit &&
+              (member ? (
+                <Button variant="secondary" size="sm" icon={<UserMinus className="size-4" aria-hidden />} onClick={() => onAct(p.value, "leave")}>
+                  {t("crm.loyalty.member.leave")}
+                </Button>
+              ) : (
+                <Button variant="secondary" size="sm" icon={<UserPlus className="size-4" aria-hidden />} onClick={() => onAct(p.value, "join")}>
+                  {t("crm.loyalty.member.join")}
+                </Button>
+              ))}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function MemberBadge({ member, membership }: { member: boolean; membership?: LoyaltyMembership | null }) {
+  const { t } = useTexT()
+  // another hotel's membership of a shared program: when, by month only (ADR-056)
+  const when = (d: string | null) => (d ? (membership?.other_hotel ? month(d) : date(d)) : "")
+  if (member)
+    return (
+      <>
+        <Badge tone="success">{t("crm.loyalty.member.yes")}</Badge>
+        <span className="text-xs text-zinc-500">
+          {membership?.joined_at ? t("crm.loyalty.member.since", { date: when(membership.joined_at) }) : t("crm.loyalty.member.by_stays")}
+        </span>
+      </>
+    )
+  if (membership?.status === "Left")
+    return (
+      <>
+        <Badge tone="neutral">{t("crm.loyalty.member.left")}</Badge>
+        {membership.left_at && <span className="text-xs text-zinc-500">{t("crm.loyalty.member.left_on", { date: when(membership.left_at) })}</span>}
+      </>
+    )
+  return <Badge tone="neutral">{t("crm.loyalty.member.no")}</Badge>
+}
+
+function MembershipDialog({
+  open,
+  mode,
+  program,
+  programName,
+  programHotels,
+  hotels,
+  defaultHotel,
+  guest,
+  onClose,
+  onDone,
+}: {
+  open: boolean
+  mode: "join" | "leave"
+  program: string
+  programName: string
+  programHotels: ProgramHotels
+  /** the hotels through which the user may edit this guest */
+  hotels: string[]
+  defaultHotel: string | null | undefined
+  guest: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const { t } = useTexT()
+  const toast = useToast()
+  const [reason, setReason] = useState("")
+  const [hotel, setHotel] = useState("")
+  // a membership is made at one hotel of the program, whose staff read it in full (as an adjustment, ADR-056)
+  const hotelOptions = hotelChoices(programHotels, program, hotels)
+  const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
+  const m = useTexMutation<{ guest: string; program: string; reason?: string; property?: string }, { name: string; status: string }>(
+    "crm",
+    mode === "join" ? "loyalty_join" : "loyalty_leave",
+  )
+  const close = useEvent(() => {
+    if (!m.pending) onClose()
+  })
+  useEffect(() => {
+    if (open) {
+      setReason("")
+      setHotel(defaultHotel && hotels.includes(defaultHotel) ? defaultHotel : "")
+      m.clearError()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+  const valid = Boolean(program) && (Boolean(chosenHotel) || hotelOptions.length === 0) && (mode === "join" || reason.trim().length > 2)
+  const submit = async () => {
+    if (!valid) return
+    try {
+      await m.run({ guest, program, ...(mode === "leave" ? { reason: reason.trim() } : {}), ...(chosenHotel ? { property: chosenHotel } : {}) })
+      toast.success(t(mode === "join" ? "crm.loyalty.member.joined" : "crm.loyalty.member.ended", { program: programName }))
+      onDone()
+      onClose()
+    } catch {
+      /* inline */
+    }
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title={t(mode === "join" ? "crm.loyalty.member.join_title" : "crm.loyalty.member.leave_title", { program: programName })}
+      description={t(mode === "join" ? "crm.loyalty.member.join_desc" : "crm.loyalty.member.leave_desc")}
+      footer={
+        <>
+          <Button variant="secondary" onClick={close} disabled={m.pending}>
+            {t("core.action.cancel")}
+          </Button>
+          <Button loading={m.pending} disabled={!valid} onClick={submit} variant={mode === "leave" ? "danger" : undefined}>
+            {t(mode === "join" ? "crm.loyalty.member.join" : "crm.loyalty.member.leave")}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {hotelOptions.length > 1 && (
+          <Field label={t("crm.loyalty.member.hotel")} required>
+            <Select
+              value={chosenHotel}
+              onChange={(e) => setHotel(e.target.value)}
+              options={[{ value: "", label: t("crm.loyalty.adjust_hotel_pick") }, ...hotelOptions.map((h) => ({ value: h, label: h }))]}
+              data-autofocus
+            />
+          </Field>
+        )}
+        {mode === "leave" && (
+          <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} autoComplete="off" data-autofocus />
+          </Field>
+        )}
+        <InlineError error={m.error} />
+      </div>
+    </Dialog>
   )
 }
 
@@ -195,8 +392,7 @@ function AdjustDialog({
   open: boolean
   program: string
   programs: { value: string; label: string }[]
-  /** program → its hotel (empty for a hotel group's program) */
-  programHotels: Record<string, string | null | undefined>
+  programHotels: ProgramHotels
   /** the hotels through which the user may edit this guest */
   hotels: string[]
   defaultHotel: string | null | undefined
@@ -212,8 +408,7 @@ function AdjustDialog({
   const [points, setPoints] = useState("")
   const [reason, setReason] = useState("")
   // an adjustment belongs to one hotel of the program, whose staff see its reason (ADR-056 second review)
-  const own = programHotels[program]
-  const hotelOptions = own ? [own] : hotels
+  const hotelOptions = hotelChoices(programHotels, program, hotels)
   const [hotel, setHotel] = useState("")
   const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
   const m = useTexMutation<{ guest: string; program: string; points: number; reason: string; property?: string }, { name: string }>(

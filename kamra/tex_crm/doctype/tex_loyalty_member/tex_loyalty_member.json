@@ -1,0 +1,113 @@
+{
+ "actions": [],
+ "creation": "2026-09-24 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "program",
+  "guest",
+  "status",
+  "source",
+  "member_column_1",
+  "joined_at",
+  "joined_by",
+  "property",
+  "left_at",
+  "left_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "program",
+   "fieldtype": "Link",
+   "label": "Program",
+   "options": "TEX Loyalty Program",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "guest",
+   "fieldtype": "Link",
+   "label": "Guest",
+   "options": "Guest",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nLeft",
+   "default": "Active",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Joined through",
+   "options": "Staff\nWeb",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "member_column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "joined_at",
+   "fieldtype": "Datetime",
+   "label": "Joined at"
+  },
+  {
+   "fieldname": "joined_by",
+   "fieldtype": "Link",
+   "label": "Joined by",
+   "options": "User",
+   "description": "The staff member who joined the guest"
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "description": "The hotel the membership was made at (for a member by their stays who left: where it ended)"
+  },
+  {
+   "fieldname": "left_at",
+   "fieldtype": "Datetime",
+   "label": "Left at"
+  },
+  {
+   "fieldname": "left_reason",
+   "fieldtype": "Small Text",
+   "label": "Why the membership ended"
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-03 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX CRM",
+ "name": "TEX Loyalty Member",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "hash",
+ "naming_rule": "Random",
+ "track_changes": 1,
+ "in_create": 1
+}

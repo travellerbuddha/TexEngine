@@ -64,6 +64,13 @@ export function OfferBadges({ offer, rooms, showAvailability = true }: { offer: 
       {rooms > 1 && offer.complete === false && fitting.length > 0 && (
         <Badge tone="info">{t("crs.offer.fits", { count: fitting.length, rooms: fitting.map((i) => i + 1).join(", ") })}</Badge>
       )}
+      {/* the caller's member price (C-04): it books for that member only */}
+      {offer.member_price && (
+        <Badge tone="success" title={t("crs.offer.member_price_hint")}>
+          <span>{t("crs.offer.member_price")}</span>
+          <span className="sr-only"> — {t("crs.offer.member_price_hint")}</span>
+        </Badge>
+      )}
       {applied.map((p) => (
         <Badge key={p.promo_id} tone="brand">
           {p.code ? t("crs.offer.promo_code", { code: p.code }) : p.name}

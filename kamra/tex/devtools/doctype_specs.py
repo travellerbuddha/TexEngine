@@ -1330,6 +1330,23 @@ CRM_SPECS = [
 	], perms=READONLY_AUDIT,
 	   autoname="LYL-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
 	   extra={"modified": "2026-09-26 10:00:00.000000"}),  # the JSON's own stamp (LO-44)
+
+	# C-04 (ADR-077): a guest who joined a program (or left it); one per guest and program. A guest who stayed
+	# and earned in the program is a member without one (``loyalty.is_member``)
+	dt("TEX Loyalty Member", R, [
+		F("program", "Link", "Program", "TEX Loyalty Program", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("guest", "Link", "Guest", "Guest", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("status", "Select", "Status", ["Active", "Left"], default="Active", in_list_view=1),
+		F("source", "Select", "Joined through", ["Staff", "Web"], in_list_view=1),
+		F("member_column_1", "Column Break"),         # named: a counted break would renumber the specs after it
+		F("joined_at", "Datetime", "Joined at"),
+		F("joined_by", "Link", "Joined by", "User", description="The staff member who joined the guest"),
+		F("property", "Link", "Hotel", "Property",
+		  description="The hotel the membership was made at (for a member by their stays who left: where it ended)"),
+		F("left_at", "Datetime", "Left at"),
+		F("left_reason", "Small Text", "Why the membership ended"),
+	], perms=READONLY_AUDIT, autoname="hash", naming_rule="Random", sort_field="creation", in_create=True,
+	   extra={"modified": "2026-10-03 23:00:00.000000"}),
 ]
 
 # ═══ TEX Connect ══════════════════════════════════════════════════════════

@@ -26,10 +26,14 @@ INTERNAL_CHANNELS = ("CALL_CENTER", "B2B", "API", "DIRECT_WEB", "META", "OTA")
 @frappe.whitelist(methods=["POST"])   # a party may carry a child's date of birth
 def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CALL_CENTER",
            properties=None, hotel_group: str | None = None, destination: str | None = None,
-           currency: str | None = None, promo_codes=None):
+           currency: str | None = None, promo_codes=None, guest: str | None = None):
 	"""Group search across every hotel the agent may sell (R-24), on a channel the agent may
 	price on at each of them (ADR-050): hotels where they may not are left out, and a channel
-	they may price nowhere among the chosen hotels is refused."""
+	they may price nowhere among the chosen hotels is refused.
+
+	``guest``: the caller's profile, which the agent must see (``crm.view``). At each hotel whose loyalty program
+	the guest is a member of (``loyalty.is_member``) the offers are a member's: priced with the members-only
+	promotions, ``member_price`` where one applied; each hotel says whether the guest is a member there (C-04)."""
 	if channel not in INTERNAL_CHANNELS:
 		frappe.throw(_("Unknown channel."))
 	allowed = scope.permitted_properties()
@@ -48,10 +52,22 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 		frappe.throw(_("You may not sell on the {0} channel at the chosen hotels.").format(channel),
 		             frappe.PermissionError)
 	props = selling
+	caller = text(guest, 140)
+	members_at: set[str] = set()
+	if caller:
+		from kamra.tex.crm import loyalty
+		from kamra.tex.crm import service as crm
+
+		seen = crm.require_guest(caller)                   # the agent sees this profile (and through which hotels)
+		members_at = {p for p in props if p in seen and loyalty.is_member(caller, p)}
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=market,
 	                     channel=channel, currency=currency, promo_codes=parse(promo_codes, []) or (),
-	                     internal=True)
+	                     member=members_at, internal=True)
 	for p in res["properties"]:
+		p["member"] = p["property"] in members_at
+		for group in ("offers", "unavailable"):
+			for o in p[group]:
+				o["member_price"] = any(booking_svc.member_priced(r["quote"]) for r in o["rooms"])
 		if not scope.has_capability("price.view_cost", p["property"]):
 			for group in ("offers", "unavailable"):
 				for o in p[group]:

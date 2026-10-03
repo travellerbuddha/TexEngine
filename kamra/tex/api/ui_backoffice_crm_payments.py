@@ -34,6 +34,10 @@ def loyalty_programs(guest: str):
 			"program_name": prog.program_name,
 			"currency": prog.currency,
 			"property": prop,
+			# the program's own hotel (none for a hotel group's), and its hotels the user sees the guest through:
+			# a membership or an adjustment is made for one of them (C-04 review round 1)
+			"program_property": prog.property or None,
+			"hotels": sorted(h for h in loyalty.program_properties(prog) if h in via),
 			"min_redeem_points": int(prog.min_redeem_points or 0),
 			"max_redeem_percent": api_value(prog.max_redeem_percent if prog.max_redeem_percent is not None else 100),
 		}

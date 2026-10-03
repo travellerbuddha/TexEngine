@@ -177,6 +177,20 @@ export interface LoyaltyAccount {
   value: string
   tier: string | null
   entries: LoyaltyEntry[]
+  /** a member of the program: joined and not left, or (no membership record) stayed and earned points (C-04) */
+  member?: boolean
+  /** the guest's membership record: joined (Active) or left; null for a member by their stays only */
+  membership?: LoyaltyMembership | null
+}
+
+/** kamra.tex.crm.loyalty.membership_view (C-04, ADR-077) */
+export interface LoyaltyMembership {
+  status: "Active" | "Left"
+  source: "Staff" | "Web" | null
+  /** made at another hotel of a shared program: its dates by month only */
+  other_hotel: boolean
+  joined_at: string | null
+  left_at: string | null
 }
 
 /** kamra.tex.api.ui_backoffice_crm_payments.loyalty_programs */
@@ -185,6 +199,10 @@ export interface LoyaltyProgramInfo {
   program_name: string
   currency: string | null
   property: string
+  /** the program's own hotel; null for a hotel group's program */
+  program_property?: string | null
+  /** the program's hotels the user sees the guest through */
+  hotels?: string[]
   min_redeem_points: number
   max_redeem_percent: string
 }

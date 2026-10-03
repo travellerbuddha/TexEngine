@@ -208,6 +208,25 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 	return doc.name, asked, []
 
 
+def member_priced(result: dict) -> bool:
+	"""A room priced with a members-only promotion (C-04, ADR-077): a member's price."""
+	return any(p.get("applied") and p.get("member_only") for p in result.get("promotions") or [])
+
+
+def require_member(profile: str | None, property: str, *, lock: bool = False) -> None:
+	"""A member's price is booked for a member of the hotel's program only (C-04, ADR-077). ``lock``: read as
+	committed now (``loyalty.member_of``)."""
+	from kamra.tex.crm import loyalty
+
+	if not (profile and loyalty.is_member(profile, property, lock=lock)):
+		refuse_members_price()
+
+
+def refuse_members_price() -> None:
+	frappe.throw(_("This price is for members of the hotel's loyalty program, and this guest is not a member. "
+		               "Search again for this guest, or join them to the program first."), refusal("SEARCH_AGAIN"))
+
+
 def _record_consent(guest: str, booking: str, property: str, granted: list[str], requested: list[str],
                     staff: bool) -> None:
 	"""Consent given with a booking is on the guest's consent record (ADR-046); a request that
@@ -728,6 +747,12 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 
 		if not pay.method_offered(property, payment_method, market=market, currency=currency, channel=channel):
 			frappe.throw(_("This payment method is not available."), refusal("PAYMENT_METHOD_UNAVAILABLE"))
+	# a member's price books for a member (C-04): the profile the booking will join, read before anything is
+	# locked or written; checked again under its lock once the booking has it (``resolve_guest``)
+	members_price = any(member_priced(r[2]) for r in rows)
+	if members_price:
+		require_member(_find_profile(guest, frappe.db.get_value("Property", property, "tex_enterprise"), staff),
+		               property)
 	# a quote of a room type disabled since it was made no longer books (LO-03, ADR-048)
 	for rt in sorted({r[1]["room_type"] for r in rows}):
 		if frappe.db.get_value("Room Type", rt, "disabled"):
@@ -801,6 +826,15 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	                                                                                      web=not staff))
 	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
 	                                                               language=language, staff=staff)
+	booker_member = None
+	if any(r[1].get("member") for r in rows):
+		# offers of a member's search: the profile is locked, its membership read with locking reads, so a leave
+		# committed meanwhile is seen (this request's plain reads still see its old read view: review round 1)
+		from kamra.tex.crm import loyalty
+
+		booker_member = loyalty.is_member(guest_name, property, lock=True)
+		if members_price and not booker_member:
+			refuse_members_price()
 	booker = booker or {}
 	token, token_digest = new_manage_token()
 	manage_days = int(frappe.db.get_single_value("TEX Settings", "manage_link_days") or 365)
@@ -843,6 +877,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		# payload by version and hash (ADR-058)
 		priced = get_datetime(result["request"]["sale_at"])
 		snapshot = {**result, "accepted_at": str(now), "priced_at": str(priced), "quote_id": row.name}
+		if booker_member is False:
+			# a non-member booked an offer of a member's search no members-only promotion priced: the stay is
+			# recorded as a non-member's, so a change or a simulation never prices it as a member's (review round 2)
+			snapshot["request"] = {**result["request"], "member": False}
 		res = frappe.get_doc({
 			"doctype": "Reservation", "property": property, "guest": guest_name, "room_type": req["room_type"],
 			"check_in_date": req["check_in"], "check_out_date": req["check_out"], "adults": int(req["adults"]),

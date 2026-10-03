@@ -1995,13 +1995,14 @@ class TestPromotionSaveChecks(TexTestCase):
 		self.assertRefused(self.draft, trigger="Code", code="çağ")
 		self.assertRefused(self.draft, trigger="Code", code="CAG")
 
-	def test_a_member_only_promotion_is_refused_until_a_sale_knows_members(self):
-		"""G-57: no search or quote tells the engine the guest is a member, so a members-only promotion
-		never applied. It is refused on a draft's save and activation; a live one stays archivable."""
-		self.assertRefused(self.draft, member_only=1)
-		name = self.draft()
-		frappe.db.set_value("TEX Promotion", name, "member_only", 1)
-		self.assertRefused(policy_api.activate, "TEX Promotion", name)
+	def test_a_member_only_promotion_saves_and_goes_live_now_that_a_sale_knows_members(self):
+		"""G-57 reversed by the owner's C-04 (2026-10-03, ADR-077): the call centre's search names the caller and
+		prices a member of the hotel's program as one, so a members-only promotion is saved and activated (it was
+		refused while no sale knew a member); a live one stays archivable. Its prices: test_loyalty_membership."""
+		name = self.draft(member_only=1)
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "member_only"), 1)
+		policy_api.activate("TEX Promotion", name)
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "tex_status"), "Active")
 		old = self.live(member_only=1)
 		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
 		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")

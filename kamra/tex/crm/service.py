@@ -898,8 +898,8 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	the alias instead of the booker's name, e-mail and phone; the profile's change history goes, and that
 	of its bookings, links and stays keeps which field changed, never the value (ADR-056 second review);
 	the copies of the profiles merged into it (Deleted Documents, ``MERGE_COPY_DAYS``) go too (third
-	review). Re-runnable: → what it changed (``changed``: 0 when nothing was left); ``audit_event``:
-	``guest.erase`` is audited (p48 audits only a run that changed something)."""
+	review); its loyalty memberships end (C-04). Re-runnable: → what it changed (``changed``: 0 when nothing
+	was left); ``audit_event``: ``guest.erase`` is audited (p48 audits only a run that changed something)."""
 	from kamra.tex.security.internals import mask_history
 
 	forgotten = forget_contact(guest, emails=emails)
@@ -930,9 +930,10 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	for f in files:
 		frappe.delete_doc("File", f, ignore_permissions=True)            # identity documents
 	copies = _drop_merge_copies(merged_into(guest))
+	ended = loyalty.end_memberships(guest, "erased")    # no member prices for a profile nobody is (C-04)
 	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
-	       "history_rows_removed": history, "merge_copies_removed": copies}
-	out["changed"] = forgotten + named + history + masked + len(files) + copies
+	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended}
+	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended
 	if audit_event:
 		audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
 	return out
@@ -1178,7 +1179,8 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 
 	What moves: every link to the duplicate (from the meta: TEX and legacy DocTypes, custom fields), its
 	comments, mail, tasks, shares, activity, attachments and history; its loyalty entries, so the balance
-	is one and the tier follows the merged lifetime. The profile that stays keeps its own data and takes
+	is one and the tier follows the merged lifetime; its memberships, one per program (where both have one,
+	the one changed last stays, C-04). The profile that stays keeps its own data and takes
 	the duplicate's where it has none; VIP and blacklist are kept if either has them. Consent is the
 	stricter of the two: a channel stays consented only when both profiles consented to it. The duplicate
 	is then deleted and kept as a Deleted Document for ``MERGE_COPY_DAYS``; the merge is audited with
@@ -1209,6 +1211,7 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 	if len(ents) > 1:
 		frappe.throw(_("Profiles of different enterprises cannot be merged."))
 	before = {g.name: {f: bool(g.get(f)) for f in CONSENT} for g in (src, dst)}
+	dropped = loyalty.merge_memberships(source, target)   # one membership per program (C-04); the rest move below
 	moved = _repoint(source, target, links, dynamic)
 	filled = [f for f in MERGE_FILL if not dst.get(f) and src.get(f)]
 	for f in filled:
@@ -1260,9 +1263,9 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 	      enterprise=next(iter(ents)) if ents else None,
 	      old={"source": source, "consent": before},
 	      new={"moved": counts, "records": records, "filled": sorted(filled), "consent": consent, "copy": copy,
-	           "copy_kept_days": MERGE_COPY_DAYS})
+	           "copy_kept_days": MERGE_COPY_DAYS, "memberships_dropped": dropped})
 	return {"target": target, "source": source, "moved": counts, "records": records, "filled": sorted(filled),
-	        "consent": consent}
+	        "consent": consent, "memberships_dropped": dropped}
 
 
 def _drop_merge_copies(sources) -> int:

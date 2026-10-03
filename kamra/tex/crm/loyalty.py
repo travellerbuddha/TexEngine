@@ -397,6 +397,16 @@ def mask_other_hotel(entry: dict) -> None:
 		entry["creation"] = str(entry["creation"])[:7]
 
 
+def membership_view(m: dict, hotels: set[str] | None, program_hotel: str | None) -> dict:
+	"""A membership as staff see it: joined or left, through whom, and when; when it was made at another hotel of a
+	shared program, its dates by month only, as that hotel's ledger entries (ADR-056)."""
+	elsewhere = other_hotel(m.property, hotels, program_hotel)
+	day = (lambda v: str(v)[:7]) if elsewhere else str
+	return {"status": m.status, "source": m.source, "other_hotel": elsewhere,
+	        "joined_at": day(m.joined_at) if m.joined_at else None,
+	        "left_at": day(m.left_at) if m.left_at else None}
+
+
 def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> list[dict]:
 	"""The guest's accounts in ``programs``, the programs the viewer may see (their hotels' own
 	or their group's; another tenant's program is never shown, G-65).
@@ -406,8 +416,10 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 	status and the month it was written, never its booking, reason, dates or who made it (ADR-056
 	and its second review; as consent entries made at another hotel, ADR-046)."""
 	out = []
-	for p in frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "program": ("in", list(programs) or [""])},
-	                        pluck="program", distinct=True, order_by="program asc"):
+	among = {"guest": guest, "program": ("in", list(programs) or [""])}
+	listed = set(frappe.get_all("TEX Loyalty Ledger", filters=among, pluck="program", distinct=True))
+	listed |= set(frappe.get_all("TEX Loyalty Member", filters=among, pluck="program"))   # joined, no points yet
+	for p in sorted(listed):
 		prog = frappe.get_cached_doc("TEX Loyalty Program", p)
 		b = balances(guest, p)
 		tier = tier_of(prog, b["lifetime_earned"])
@@ -426,18 +438,20 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 			e.pop("property", None)
 		# below zero: points spent before a stay changed and earned less (O-21); owed, paid off by the next ones
 		# earned, never money (LO-25)
+		m = membership(guest, p)
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
+		            # a disabled program has no members, and no member prices (review round 1)
+		            "enabled": bool(prog.enabled), "member": bool(prog.enabled) and member_of(guest, p),
+		            "membership": membership_view(m, hotels, prog.property) if m else None,
 		            "debt": max(0, -b["available"]),
 		            "value": to_str(quantize(db_dec(prog.point_value) * max(0, b["available"]), prog.currency or "EUR")),
 		            "tier": tier.tier_name if tier else None, "entries": entries})
 	return out
 
 
-def adjust(guest: str, program: str, points: int, reason: str, property: str | None = None) -> str:
-	"""A manual adjustment, made for one hotel of the program (``property``; the only one the user may
-	edit guests at when not given): the hotel it belongs to, whose staff see its reason and who made
-	it (ADR-056 second review)."""
-	prog = frappe.get_doc("TEX Loyalty Program", program)
+def _staff_hotel(prog, property: str | None, choose: str) -> str:
+	"""The hotel of the program a staff action is made for (``property``; the only one the user may edit guests
+	at when not given), refused without ``crm.edit`` there. ``choose``: the message when several are possible."""
 	props = [prog.property] if prog.property else frappe.get_all("Property", filters={
 		"tex_hotel_group": prog.hotel_group}, pluck="name")
 	permitted = scope.permitted_properties()
@@ -446,8 +460,17 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 		frappe.throw(_("Not permitted: {0}.").format("crm.edit"), frappe.PermissionError)
 	if not property:
 		if len(editable) > 1:
-			frappe.throw(_("Choose the hotel this adjustment is made for."))
+			frappe.throw(choose)
 		property = editable[0]
+	return property
+
+
+def adjust(guest: str, program: str, points: int, reason: str, property: str | None = None) -> str:
+	"""A manual adjustment, made for one hotel of the program (``property``; the only one the user may
+	edit guests at when not given): the hotel it belongs to, whose staff see its reason and who made
+	it (ADR-056 second review)."""
+	prog = frappe.get_doc("TEX Loyalty Program", program)
+	property = _staff_hotel(prog, property, _("Choose the hotel this adjustment is made for."))
 	if not (reason or "").strip():
 		frappe.throw(_("A reason is required."))
 	points = int(points)
@@ -468,6 +491,137 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 	audit("loyalty.adjust", reference_doctype="TEX Loyalty Ledger", reference_name=doc.name,
 	      property=property, new={"guest": guest, "points": points}, reason=reason)
 	return doc.name
+
+
+# ─── membership (C-04, ADR-077) ──────────────────────────────────────────
+
+MEMBER_FIELDS = ["name", "status", "source", "joined_at", "property", "left_at", "left_reason"]
+
+
+def membership(guest: str | None, program: str | None, *, lock: bool = False) -> dict | None:
+	"""The guest's membership record of ``program`` (joined, or left), or None."""
+	if not (guest and program):
+		return None
+	return frappe.db.get_value("TEX Loyalty Member", {"guest": guest, "program": program}, MEMBER_FIELDS,
+	                           as_dict=True, for_update=lock)
+
+
+# a matured earning of the guest in the program: read with a share lock when ``lock`` (as committed now)
+MATURED_EARNING = """SELECT name FROM `tabTEX Loyalty Ledger` WHERE guest=%(g)s AND program=%(p)s AND entry_type='Earn'
+                     AND status IN %(s)s LIMIT 1 LOCK IN SHARE MODE"""
+
+
+def member_of(guest: str | None, program: str | None, *, lock: bool = False) -> bool:
+	"""A member of ``program``: one who joined it and has not left, or, with no membership record, one who stayed
+	and earned points in it (an earning that matured: Available, Used or Expired, never Pending or Reversed). A
+	guest who left is not one, whatever they earned; an erased profile is nobody's (review round 1). ``lock``:
+	locking reads, which see what is committed now (a plain read sees this request's read view: a leave committed
+	meanwhile is not in it)."""
+	if not (guest and program):
+		return False
+	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=lock):
+		return False
+	m = membership(guest, program, lock=lock)
+	if m:
+		return m.status == "Active"
+	if lock:
+		return bool(frappe.db.sql(MATURED_EARNING, {"g": guest, "p": program, "s": FINAL}))
+	return bool(frappe.db.exists("TEX Loyalty Ledger", {"guest": guest, "program": program, "entry_type": "Earn",
+	                                                    "status": ("in", list(FINAL))}))
+
+
+def is_member(guest: str | None, property: str, *, lock: bool = False) -> bool:
+	"""A member of the hotel's program (its own, else its group's): who the program's members-only prices are for.
+	``lock``: as ``member_of``."""
+	return member_of(guest, program_for(property), lock=lock) if guest else False
+
+
+def join(guest: str, program: str, *, property: str | None = None) -> dict:
+	"""Staff join the guest to the program, for one of its hotels they may edit guests at: the guest's word, taken
+	by staff accountable for it (as consent, ADR-046). A membership the guest left is made active again; one
+	that is active is returned as it is. Audited (``loyalty.member_join``)."""
+	from kamra.tex.crm.service import require_live_guest
+
+	prog = frappe.get_doc("TEX Loyalty Program", program)
+	property = _staff_hotel(prog, property, _("Choose the hotel the guest joins at."))
+	if not prog.enabled:
+		frappe.throw(_("This program is not enabled."))
+	require_live_guest(guest)                          # the profile locked first, as every write of its records
+	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=True):       # locked above: as committed now
+		frappe.throw(_("An erased profile cannot join a program."))
+	m = membership(guest, program, lock=True)
+	if m and m.status == "Active":
+		return {"name": m.name, "status": m.status}
+	now = now_datetime()
+	values = {"status": "Active", "source": "Staff", "joined_at": now, "joined_by": frappe.session.user,
+	          "property": property, "left_at": None, "left_reason": None}
+	if m:
+		frappe.db.set_value("TEX Loyalty Member", m.name, values)
+		name = m.name
+	else:
+		name = frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest,
+		                       **values}).insert(ignore_permissions=True).name
+	audit("loyalty.member_join", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
+	      new={"guest": guest, "program": program, "source": "Staff"})
+	return {"name": name, "status": "Active"}
+
+
+def leave(guest: str, program: str, *, reason: str, property: str | None = None) -> dict:
+	"""Staff end the guest's membership, with a reason: a guest who left is no member, whatever they earned (their
+	points stay theirs). A guest without a record (a member by their stays) gets one that says they left."""
+	from kamra.tex.crm.service import require_live_guest
+
+	prog = frappe.get_doc("TEX Loyalty Program", program)
+	property = _staff_hotel(prog, property, _("Choose the hotel the membership ends at."))
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required."))
+	require_live_guest(guest)
+	m = membership(guest, program, lock=True)
+	values = {"status": "Left", "left_at": now_datetime(), "left_reason": reason.strip()[:500]}
+	if m:
+		frappe.db.set_value("TEX Loyalty Member", m.name, values)
+		name = m.name
+	else:
+		name = frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest,
+		                       "property": property, **values}).insert(ignore_permissions=True).name
+	audit("loyalty.member_leave", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
+	      new={"guest": guest, "program": program}, reason=reason)
+	return {"name": name, "status": "Left"}
+
+
+# a profile's memberships, read with a lock (what is committed now: a join committed after this request began
+# included), by the (guest, program) index (p77)
+MEMBERSHIPS_OF = """SELECT name, program, modified FROM `tabTEX Loyalty Member` WHERE guest=%(g)s FOR UPDATE"""
+
+
+def merge_memberships(source: str, target: str) -> list[str]:
+	"""A merge (both profiles locked): where both have a membership of a program, the one changed last decides (the
+	same person's last word: joined, or left) and stays on ``target``; the other goes. The rest move with the
+	other links. Locking reads (review round 1). → the memberships removed (the merge's audit names them)."""
+	mine = {m.program: m for m in frappe.db.sql(MEMBERSHIPS_OF, {"g": target}, as_dict=True)}
+	dropped = []
+	for m in frappe.db.sql(MEMBERSHIPS_OF, {"g": source}, as_dict=True):
+		kept = mine.get(m.program)
+		if not kept:
+			continue
+		if m.modified > kept.modified:
+			fields = [f for f in MEMBER_FIELDS if f != "name"] + ["joined_by"]
+			frappe.db.set_value("TEX Loyalty Member", kept.name,
+			                    frappe.db.get_value("TEX Loyalty Member", m.name, fields, as_dict=True))
+		frappe.db.delete("TEX Loyalty Member", {"name": m.name})
+		dropped.append(m.name)
+	return dropped
+
+
+def end_memberships(guest: str, reason: str) -> int:
+	"""Right to erasure: the guest's memberships end (their records stay, naming the blanked profile). A member by
+	their stays only is no member once erased either (``member_of``). Locking reads, as a merge's."""
+	names = frappe.db.sql("""SELECT name FROM `tabTEX Loyalty Member` WHERE guest=%(g)s AND status='Active'
+	                         FOR UPDATE""", {"g": guest}, pluck=True)
+	for name in names:
+		frappe.db.set_value("TEX Loyalty Member", name, {"status": "Left", "left_at": now_datetime(),
+		                                                 "left_reason": reason})
+	return len(names)
 
 
 # the points already on a booking, read with locks that each go by an index — the booking, or the charges'

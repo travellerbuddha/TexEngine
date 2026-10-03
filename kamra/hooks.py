@@ -237,7 +237,8 @@ _TEX_SCOPED = (
 	"TEX Tax Policy", "TEX Extra Inventory Day", "TEX Extra Allocation",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
 	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Audit Scope", "TEX Reservation Revision",
-	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation", "TEX Guest Segment",
+	"TEX Contract Version", "TEX Loyalty Ledger", "TEX Loyalty Member", "Guest", "TEX Content Translation",
+	"TEX Guest Segment",
 	"TEX Channel Mapping", "TEX Channel ARI Day", "TEX Channel Inbound",
 	"TEX Access Grant", "TEX Enterprise", "TEX Hotel Group", "TEX Guest Change Request",
 	# legacy Kamra DocTypes bound to a hotel (G-94): the TEX scope, not only Frappe's User Permissions

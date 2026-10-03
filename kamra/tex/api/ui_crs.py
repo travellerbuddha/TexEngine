@@ -43,13 +43,13 @@ def _per_night(total, nights: int, currency: str) -> str | None:
 @frappe.whitelist(methods=["POST"])   # a party may carry a child's date of birth
 def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CALL_CENTER",
            properties=None, hotel_group: str | None = None, destination: str | None = None,
-           currency: str | None = None, promo_codes=None):
-	"""``crs.search`` (same arguments, same checks) with ``per_night`` on every offer
-	and every room of an offer."""
+           currency: str | None = None, promo_codes=None, guest: str | None = None):
+	"""``crs.search`` (same arguments, same checks; ``guest``: the caller, priced as a member where they are one)
+	with ``per_night`` on every offer and every room of an offer."""
 	scope.require("price.view", None)
 	res = crs.search(check_in=check_in, check_out=check_out, rooms=rooms, market=market, channel=channel,
 	                 properties=properties, hotel_group=hotel_group, destination=destination, currency=currency,
-	                 promo_codes=promo_codes)
+	                 promo_codes=promo_codes, guest=guest)
 	nights = int(res.get("nights") or 0)
 	for p in res["properties"]:
 		for group in ("offers", "unavailable"):

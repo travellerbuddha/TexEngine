@@ -750,4 +750,5 @@ def _apply_basket_promo(p: Promotion, categories: dict[str, Decimal], currency: 
 	                       category=p.applies_to.value, ref=p.code))
 	ex.add("coupon", "COUPON_APPLIED", "{name}: −{discount} on {scope}", after=discount, currency=currency,
 	       rule=promotions.promo_ref(p), name=p.name, discount=discount, scope=p.applies_to.value)
-	return promotions.PromoOutcome(p.promo_id, p.name, p.kind, True, "applied", discount, (), "", p.source, p.code)
+	return promotions.PromoOutcome(p.promo_id, p.name, p.kind, True, "applied", discount, (), "", p.source, p.code,
+	                               member_only=p.member_only)

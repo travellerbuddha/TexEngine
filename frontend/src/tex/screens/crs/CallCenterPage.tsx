@@ -244,6 +244,7 @@ export default function CallCenterPage() {
 
   const newCall = useCallback(() => {
     flow.resetAll(false)
+    flow.setPriceFor(null)
     setSelectNotice(null)
     setCaller(null)
     setEvents([])
@@ -255,15 +256,25 @@ export default function CallCenterPage() {
     window.setTimeout(() => callerRef.current?.focus(), 0)
   }, [flow, t])
 
+  // the offers shown are priced for the caller named (a member's price where they are one, C-04): naming
+  // another caller, or none, prices the last search again for that caller, keeping the rooms picked
+  const repriceFor = useCallback((g: GuestRow | null) => void flow.repriceFor(g?.name), [flow])
+
   const pickCaller = useCallback(
     (g: GuestRow) => {
       setCaller(g)
       flow.applyGuest(g)
+      repriceFor(g)
       log(t("crs.cc.ev.caller", { name: g.full_name }))
       setAnnounce(t("crs.cc.caller_set", { name: g.full_name }))
     },
-    [flow, log, t],
+    [flow, log, t, repriceFor],
   )
+
+  const clearCaller = useCallback(() => {
+    setCaller(null)
+    repriceFor(null)
+  }, [repriceFor])
 
   // ── global shortcuts ──
   useEffect(() => {
@@ -353,7 +364,7 @@ export default function CallCenterPage() {
       {/* row 1: who is calling + the running call log; row 2: search/offers + quote/guest/book.
           DOM order = visual order = tab order (caller → notes → search → offers → quote → guest → book). */}
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start">
-        <CallerPanel caller={caller} onPick={pickCaller} onClear={() => setCaller(null)} inputRef={callerRef} />
+        <CallerPanel caller={caller} onPick={pickCaller} onClear={clearCaller} inputRef={callerRef} />
         <div className="min-w-0">
           <Card>
             <CardHeader
@@ -814,6 +825,8 @@ function OfferListbox({
             <span>
               {p.property_name}
               {p.city ? <span className="font-normal text-zinc-500"> · {p.city}</span> : null}
+              {/* the caller is a member of this hotel's program: its member prices are shown (C-04) */}
+              {p.member ? <span className="font-normal text-emerald-800"> · {t("crs.cc.member_here")}</span> : null}
             </span>
             {p.unplaced_rooms?.length ? (
               <span className="font-normal text-amber-800">{t("crs.results.unplaced_short", { count: p.unplaced_rooms.length, rooms: roomList(p.unplaced_rooms) })}</span>

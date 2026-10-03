@@ -460,7 +460,8 @@ TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link
                     "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view",
                     # a guest's profile (personal data, consent, merges), points and abandoned bookings: the CRM's
                     # (2K-4 review round 1, LO-28)
-                    "Guest": "crm.view", "TEX Loyalty Ledger": "crm.view", "TEX Abandoned Booking": "crm.view"}
+                    "Guest": "crm.view", "TEX Loyalty Ledger": "crm.view", "TEX Loyalty Member": "crm.view",
+                    "TEX Abandoned Booking": "crm.view"}
 VERSION_TABLES = TRAIL_COST - {"TEX Contract", "TEX Contract Version"}
 
 

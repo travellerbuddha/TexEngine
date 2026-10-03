@@ -84,3 +84,4 @@ kamra.patches.tex.p73_ledger_booking_index
 kamra.patches.tex.p74_outbox_order_index
 kamra.patches.tex.p75_payment_last_reverified
 kamra.patches.tex.p76_oauth_registration_off
+kamra.patches.tex.p77_loyalty_member_index
