@@ -350,19 +350,24 @@ with the code. Instead of `bench migrate` you can re-run `setup-local.sh` (with 
   (`deploy/tex-local/setup-local.sh --dir ~/tex-bench-new`, or `TEX_FRAPPE_BRANCH=<tag>` for
   another tag). Then remove the old one (§4).
 * **Moving a bench made before 2026-10-03** (Frappe v16.25.0, payments `develop`) to Frappe
-  v16.36.1 and payments `version-16` in place, as verified on the development bench (stop
-  `bench start` first; the backup is your way back):
+  v16.36.1 and payments `version-16` in place. These are the steps used on the development bench;
+  the backup is your way back:
 
   ```bash
   cd tex-bench
-  bench --site tex.localhost backup
+  bench --site tex.localhost backup             # while `bench start` still runs
+  # stop `bench start` (Ctrl+C), then:
   git -C apps/frappe fetch --depth 1 https://github.com/frappe/frappe tag v16.36.1 && git -C apps/frappe checkout v16.36.1
   git -C apps/payments fetch --depth 1 https://github.com/frappe/payments cca07d9f9392e2ea0e521c5975151db9e4b6c321 && git -C apps/payments checkout --detach FETCH_HEAD
   bench setup requirements                      # Python and JavaScript dependencies of the new versions
   env/bin/pip uninstall -y bleach               # Frappe v16.36.1 no longer uses it (optional)
   bench build --apps frappe,payments
-  bench --site tex.localhost migrate
   ```
+
+  Then migrate with Redis running: `bench migrate` refuses to run without it, and the bench's
+  private Redis runs inside `bench start`. Either re-run `deploy/tex-local/setup-local.sh` from
+  your checkout (with the same `--dir`; it starts that Redis for its own steps and migrates), or
+  start `bench start` again and run `bench --site tex.localhost migrate` in a second terminal.
 * **After a Frappe or payments update:** `bench build --apps frappe,payments`
 
 **For developers:**
