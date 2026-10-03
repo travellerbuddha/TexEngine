@@ -1,8 +1,9 @@
 """2Z (ADR-073): CI, the supply-chain check and the local install paths build the same bench.
 
 CI and the supply-chain check took payments' default branch (develop, which already declares Frappe v17) and the
-newest frappe-bench, while the Dockerfile and setup-local.sh pinned one payments commit and bench 5.31.0: CI
-equalled the image only while develop did not move. Semgrep's rules, its CLI and the registry pack were fetched
+newest frappe-bench, while the Dockerfile and setup-local.sh pinned one payments commit (and the Dockerfile bench
+5.31.0; setup-local.sh installed the newest when none was on PATH): CI equalled the image only while develop did not
+move. Semgrep's rules, its CLI and the registry pack were fetched
 unpinned on every run, so a new upstream rule could turn the base red overnight (2026-09-30). Each pin is named
 once per file here, and the files must agree; a pin changed in one file alone is red."""
 
@@ -45,7 +46,7 @@ class TestPins(unittest.TestCase):
 		self.assertEqual(len(set().union(*commits.values())), 1, commits)
 
 	def test_one_bench_cli_everywhere(self):
-		versions = found(BENCH_CLI, (CI, SUPPLY, DOCKER))
+		versions = found(BENCH_CLI, (CI, SUPPLY, DOCKER, LOCAL))
 		for path, names in versions.items():
 			self.assertTrue(names, f"{path} installs frappe-bench unpinned")
 		self.assertEqual(len(set().union(*versions.values())), 1, versions)

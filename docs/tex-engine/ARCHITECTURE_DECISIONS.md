@@ -9735,7 +9735,8 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
 - *Pins.* Semgrep's rules (frappe/semgrep-rules, semgrep/semgrep-rules `python/lang/correctness`) and CLI are pinned,
   fetched outside the workspace; a Monday run scans with the newest rules, so a new upstream rule turns that run red,
   not a pull request. payments is installed at one commit and frappe-bench at one version in CI, the supply-chain
-  check, the Dockerfile and setup-local.sh (`test_pins` keeps them equal). CI, Linters and Supply chain also run on
+  check, the Dockerfile and setup-local.sh (which installs that version when no bench is on PATH; `test_pins` keeps
+  them equal). CI, Linters and Supply chain also run on
   pushes to the audit base, so a merge that combines two pull requests is checked again.
 - *A drawer starts from what it opens.* A form kept mounted while closed and reset by a passive effect after it opens
   shows the last session's values for a frame and loses what is typed then (the channels.spec "already mapped"
