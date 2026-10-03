@@ -250,6 +250,14 @@ class TestGroupRule(unittest.TestCase):
 		self.assertEqual({o.promo_id: o.applied for o in q.promotions}, {"EB15": True, "LS7": False})
 		self.assertEqual(q.totals["accommodation"], D("510.00"))
 
+	def test_the_older_promotion_wins_also_from_prm_100000_on(self):
+		"""LO-41: promotion ids are PRM-.##### (five digits, then six from PRM-100000). Compared as text,
+		PRM-100000 sorted before PRM-99999 and the newer promotion won the tie: they compare by number."""
+		old, new = P("PRM-99999", value="10", group="EB"), P("PRM-100000", value="25", group="EB")
+		self.assertEqual(self.price(new, old), (D("540.00"), {"PRM-99999": True, "PRM-100000": False}))
+		chosen, _rejected = promotions.select((new, old), pctx())
+		self.assertEqual([p.promo_id for p in chosen], ["PRM-99999"])
+
 	def test_a_top_member_refused_by_stacking_leaves_the_group_open(self):
 		"""The group closes only on a member that applies: its top member refused as not stackable (another
 		promotion already applies) lets the next member of the group apply."""
