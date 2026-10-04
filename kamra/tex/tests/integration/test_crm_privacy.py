@@ -934,6 +934,33 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 		self.assertNotIn(digest[:12], str(cm.exception))
 		self.assertNotIn("0" * 12, str(cm.exception))
 
+	def test_2p_desk_and_rest_never_serve_a_refused_reprices_digests(self):
+		"""§6L "Not done" (batch 2P): a refused reprice's event holds both digests; the TEX trail masks them without
+		price.view_cost (G-99), but Desk and REST served the event as it is to the hotel's Hotel Admin. There only a
+		platform administrator reads it now (as a contract's events, G-97); the TEX trail still serves it, masked."""
+		from kamra.tex.security.audit import audit
+
+		digest = frappe.db.get_value("Reservation", self.res, "tex_payload_hash")
+		audit("reservation.reprice_refused", reference_doctype="Reservation", reference_name=self.res,
+		      property=fx.PROPERTY, new={"use": "simulate", "recorded_hash": digest, "found_hash": digest})
+		kept = {"action": "reservation.reprice_refused", "reference_name": self.res}
+		event = frappe.db.get_value("TEX Audit Event", kept)
+		as_user(self.clerk)
+		self.assertTrue(frappe.has_permission("Reservation", "read", doc=self.res))
+		reads = {
+			"get_list": lambda: frappe.client.get_list("TEX Audit Event", filters=kept, fields=["name", "new_value"]),
+			"frappe.client.get": lambda: frappe.client.get("TEX Audit Event", event),
+			"GET /api/resource (v1)": lambda: frappe.api.v1.read_doc("TEX Audit Event", event),
+			"Desk form": lambda: self.desk_form("TEX Audit Event", event)[0],
+		}
+		seen = [label for label, call in reads.items() if digest in json.dumps(self.refused_or(call), default=str)]
+		self.assertEqual(seen, [])
+		[row] = admin_api.audit_log(reference_doctype="Reservation", reference_name=self.res,
+		                            action="reservation.reprice_refused", limit=10)
+		self.assertEqual(row["new_value"]["found_hash"], "*****")              # the TEX trail, masked
+		as_user(self.platform)
+		self.assertEqual(frappe.get_list("TEX Audit Event", filters=kept, pluck="name"), [event])
+
 	def test_g99_staff_quotes_simulations_and_proposals_carry_no_digest_without_cost(self):
 		"""Review round 1 (2L): the CRS quote answers, a simulation and a proposed change named the digest too."""
 		def answers() -> dict:
