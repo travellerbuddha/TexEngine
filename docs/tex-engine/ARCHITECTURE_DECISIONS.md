@@ -10020,3 +10020,63 @@ link**; after review round 1 (B1), **30 days on a hotel's own host, the tab only
   the session on the quote and the booking (they check the membership of the booking's profile, which the e-mail
   names, as for the call centre: a session would only add a second identity to keep equal); the platform's host
   keeping the session 30 days (B1: another hotel's tag container could read it).
+- *Addendum (batch 2O, 2026-10-04; ADR-079).* The owner answered the open question above (HANDOFF §2 6b, option b):
+  staff who end a membership may block a rejoin on the web (`rejoin_blocked`), lifted only by staff joining the guest.
+  An erasure now drops the links mailed to the address and not opened yet, and staff see and end a guest's sessions in
+  the CRM. The "Not done" lines of this ADR on these three points are closed by ADR-079.
+
+## ADR-079 Batch 2O: a web rejoin staff blocked (C-04h), CLP and ISK in whole units, and the LOW leftovers (audit Part 2O)
+The owner chose (2026-10-04) the recommended batch: the LOW leftovers that need no decision, with two answers folded
+in: HANDOFF §2 6b, option (b), and CLP / ISK, option (a). C-08, C-09 and C-11 keep their defaults (channel-scoped
+allotments not needed; surcharges by length of stay or arrival day only when a live contract needs them; product
+scope prioritised after go-live), and C-13 is D-12's answer (loyalty is live at go-live).
+- *A web rejoin staff blocked* (C-04h). `TEX Loyalty Member.rejoin_blocked` (a Check, 0 by default; the model sync adds
+  it, no patch: every hotel starts from a fresh install, D-14). `crm.loyalty_leave(block_rejoin=1)` sets it with the
+  leave, for a reason such as abuse; the leave's audit says `rejoin_blocked`. Staff joining the guest
+  (`crm.loyalty_join`) lift it (the join's audit says `unblocked`): staff decide, as they did when they blocked it. A
+  membership left without the block is rejoined on the web as before (a guest who asked to leave may come back).
+  `loyalty.join_web` skips a blocked membership, read with a lock under the profile's lock, so a join link asked
+  before the block joins nobody. A web join asked for an address blocked wherever it could join on the site (every
+  program of the site it is no member of) gets the same answer as any address; the mail, which only the address's
+  owner reads, says the membership cannot be renewed online and to contact the hotel, and carries no link
+  (`member_blocked`, six languages). The block is part of the membership the CRM shows ("may not rejoin online", to
+  staff of every hotel of the program, as it applies to the whole program) and a merge keeps it with the membership
+  changed last. Alternatives: keep reactivating (a), or block every membership staff end (c): the owner chose (b).
+- *CLP and ISK.* `money.MINOR_UNITS` gives both 0 (ISO 4217); both apps' tables follow (`minor-units` keeps them
+  equal). Rounding, splits, FX results and every amount sent follow `minor_units()`. The Turkish gateways do not take
+  either currency; their wire format is unchanged.
+- *Links mailed before an erasure.* The erasure blanks the profile's e-mail, so a join link opened after it found no
+  profile and made a new one from the name typed before (worse than the LOW the ADR-078 "Not done" listed). Each link's
+  hash is also kept in the address's pending set (Redis, by enterprise and the address's hash; the link, the set and
+  its expiry in one transaction, the set outliving its links); `members.drop_links` deletes them, called by
+  `crm.erase_traces` with the e-mails `anonymize_guest` gives it. A request that failed after taking a link puts it
+  back only while it is still pending, and reads no database to do so (the enterprise travels in the link's data).
+  Not taken: matching the erased profile at verify (its e-mail is gone).
+- *Staff and a guest's web sessions.* `crm.member_sessions(guest)` (`crm.view`) lists the guest's sessions on the
+  booking sites of the hotels the user sees the guest through (a session of a group site belongs to the site's
+  hotels, as `perm` reads site records): site, since, until, signed out, active; never a token or its hash.
+  `crm.end_member_sessions(guest, session=None)` (`crm.edit`) signs the guest out of every open session the user sees,
+  or the one named, audited `member.sessions_end` on the guest to the hotels it reached. CRM → Loyalty shows them.
+- *A signed-in join for a profile e-mail that cannot take a link* (staff typed an address that is not one plain ASCII
+  address) is refused with `MEMBER_EMAIL_UNUSABLE` (it answered "sent" and sent nothing): the guest is signed in to
+  that profile, so nobody else learns anything.
+- *A malformed party in a search* is refused by code: a body that is not JSON, or not a list of room objects,
+  `INVALID_REQUEST`; adults that are not a whole number `PARTY_INVALID`; a child's age that is not a whole number
+  ("four", 4.5, true) `CHILD_AGE_INVALID`; no age and no date of birth `CHILD_AGE_REQUIRED`. Any spelling of a whole
+  number counts, read through `money.whole_number` (never float). It was an uncoded 500, and `int()` took 4.5 for 4.
+- *Money kept on the booking (G-93) is no overpayment.* A "Kept on the booking" close records on the change request
+  the whole excess the booking holds on purpose then (`staff_kept_excess`, the booking read under the close's lock)
+  and when (`staff_kept_at`). The overpaid check reads the latest decision, as a "Credit on booking" (LO-17): the
+  latest staff keep when it is not older than the latest credit request, else that credit. Not taken: adding staff
+  keeps up (a later credit request already includes what was kept before it).
+- *Staff re-verification records when it asked* (`payments.mark_reverified`, also the job's): the charge's row only,
+  after its question; when the gateway confirms nothing, the step is committed before the refusal, which would undo
+  it (the request is not run again after a committed step).
+- *A channel mapping of a disabled room type* is never made enabled (new, enabled again, or moved onto that type);
+  one enabled before its type was disabled stays editable and keeps sending the close-out (LO-03).
+- *"Redeem" on a channel's booking.* `crm.profile` says `channel_booking` per stay; the CRM's bookings for points come
+  from one pure helper (`profile/redeem.ts`), so the button and the dialog agree.
+- *The command palette* resets its query in a layout effect (ADR-073): the first commit after opening showed the last
+  query (read as the 2Z payment drawer was, `payments-setup.spec`).
+- *Tests only:* an e2e of "Not paid (checked with the bank)" (LO-18) with this run's own sandbox Virtual POS account
+  and a payment link fixed to it, so no other spec's card payments change.
