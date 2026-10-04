@@ -317,6 +317,34 @@ class TestChangesOutsideTex(LegacyPricingCase):
 class TestHotelsOutsideTex(LegacyPricingCase):
 	"""A hotel outside TEX keeps the legacy auto-price (the upstream suites rely on it)."""
 
+	def test_2q_a_legacy_booking_and_an_import_take_one_plain_address(self):
+		"""Batch 2Q (§6P): the legacy booking page (a hotel outside TEX) and the migration import stored their e-mail with
+		a direct write, whatever it was (a display name, a Turkish dotted İ, a trailing dot): a profile no TEX booking
+		joins (ADR-080). A guest typing one is refused, as the TEX booking refuses it."""
+		from kamra import public_api
+
+		other = self.legacy_hotel()
+		stay = {"property": other["hotel"], "room_type": other["room_type"], "check_in_date": str(self.ci),
+		        "check_out_date": str(self.co), "guest_name": "Ana Plain", "phone": "+49 30 5550291"}
+		with self.assertRaisesRegex(frappe.ValidationError, "one plain e-mail address"):
+			public_api.book(**stay, email="Ana <ana.2q@example.de>")
+		frappe.clear_messages()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back to the test's user
+		self.assertFalse(frappe.db.exists("Guest", {"phone": "+49 30 5550291"}))
+
+	def test_2q_an_import_leaves_an_odd_address_out(self):
+		"""Batch 2Q (§6P): see the test above; a migration's row is another system's data, so its address is left out."""
+		from kamra import migrate
+
+		other = self.legacy_hotel()
+		ci, co = self.ci.strftime("%d/%m/%Y"), self.co.strftime("%d/%m/%Y")
+		csv_text = ("Guest Name,Mobile No,Email,Room Type,Arrival Date,Departure Date,Adult,Child,Total Amount\n"
+		            f"Odd Address,+49 30 5550292,İNFO.2Q@HOTEL.COM,G92,{ci},{co},2,0,180.00\n")
+		out = migrate.run_import(other["hotel"], csv_text, "auto", currency="EUR")
+		self.assertEqual(out["created"], 1, out)
+		guest = frappe.db.get_value("Reservation", out["reservations"][0], "guest")
+		self.assertFalse(frappe.db.get_value("Guest", guest, "email"))
+
 	def test_a_legacy_hotel_is_still_auto_priced(self):
 		from kamra.pricing import quote
 		from kamra.tex.legacy import is_tex_hotel

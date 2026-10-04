@@ -461,6 +461,17 @@ def _save_id_image(guest: str, data_url: str,
 	return fdoc.file_url
 
 
+def _one_plain_address(email: str) -> str:
+	"""A guest's e-mail as typed, trimmed: one plain address, or blank (TEX Engine, batch 2Q, ADR-081). A profile
+	keeps no other (a display name, a Turkish dotted İ, a trailing dot), which no TEX booking joins (ADR-080)."""
+	from kamra.tex.services.booking import plain_email
+
+	email = (email or "").strip()
+	if email and not plain_email(email):
+		frappe.throw("Please enter one plain e-mail address.")
+	return email
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=20, seconds=3600)
 def precheckin_submit(token: str, id_type: str, id_number: str,
@@ -475,6 +486,7 @@ def precheckin_submit(token: str, id_type: str, id_number: str,
 	photo of their ID - camera capture or upload - stored privately."""
 	if not id_type or not id_number.strip():
 		frappe.throw("ID type and number are required.")
+	email = _one_plain_address(email)
 	res = _res_by_token(token)
 	if res.precheckin_status == "Verified":
 		frappe.throw("Check-in details were already verified by the desk.")
@@ -491,7 +503,8 @@ def precheckin_submit(token: str, id_type: str, id_number: str,
 	frappe.db.set_value("Guest", res.guest, {
 		"id_type": id_type,
 		"id_number": id_number.strip(),
-		"email": email or None,
+		# a blank field keeps the profile's address: the CRM takes one away (TEX Engine, batch 2Q)
+		**({"email": email} if email else {}),
 		"nationality": nationality or None,
 		"address_line": address_line or None,
 		"city": city or None,
@@ -692,6 +705,7 @@ def book(property: str, room_type: str, check_in_date: str,
 	refuse_legacy_sale(property)
 	if not guest_name.strip() or not phone.strip():
 		frappe.throw("Name and phone are required.")
+	email = _one_plain_address(email)
 
 	prop = frappe.get_cached_doc("Property", property)
 
