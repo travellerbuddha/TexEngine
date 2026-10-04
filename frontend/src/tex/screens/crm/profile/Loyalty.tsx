@@ -7,7 +7,7 @@ import { date, month, num, pct } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Checkbox, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
 import { isInteger, useEvent, useIntentKey } from "../lib"
-import { redeemableBookings } from "./redeem"
+import { programOf, redeemableBookings } from "./redeem"
 import { WebSessions } from "./WebSessions"
 import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyMembership, LoyaltyProgramInfo, Stay } from "../types"
 
@@ -571,7 +571,7 @@ function RedeemDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   const stay = bookings.find((b) => b.tex_booking === booking)
-  const prog = programs.find((p) => p.property === stay?.property)
+  const prog = programOf(programs, stay?.property)
   const account = accounts.find((a) => a.program === prog?.program) ?? (accounts.length === 1 ? accounts[0] : undefined)
   const validPoints = isInteger(points) && Number(points) > 0
   const valid = Boolean(booking) && validPoints

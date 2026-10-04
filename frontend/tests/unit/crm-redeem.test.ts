@@ -22,3 +22,17 @@ test("a channel's booking, a cancelled one and one without the right are left ou
   assert.deepEqual(redeemableBookings(stays, can).map((s) => s.tex_booking), ["TB-1"])
   assert.deepEqual(redeemableBookings([stays[2]], can), [])
 })
+
+test("a stay's program is its hotel's own, else its hotel group's, as the server picks it (§6N1, batch 2P)", async () => {
+  const { programOf } = await import("../../src/tex/screens/crm/profile/redeem.ts")
+  // the server lists each program once, under the first hotel the user sees the guest through (`property`)
+  const group = { program: "GROUP", property: "Aurora", program_property: null, hotels: ["Aurora", "Borealis", "Cyan"] }
+  const own = { program: "CYAN", property: "Cyan", program_property: "Cyan", hotels: ["Cyan"] }
+  const programs = [group, own]
+  assert.equal(programOf(programs, "Aurora")?.program, "GROUP")
+  assert.equal(programOf(programs, "Borealis")?.program, "GROUP")     // before: no program, so no hint
+  assert.equal(programOf(programs, "Cyan")?.program, "CYAN")          // a hotel's own program wins (loyalty.program_for)
+  assert.equal(programOf([own, group], "Cyan")?.program, "CYAN")
+  assert.equal(programOf(programs, "Elsewhere"), undefined)
+  assert.equal(programOf(programs, undefined), undefined)
+})
