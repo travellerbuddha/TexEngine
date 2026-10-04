@@ -75,3 +75,15 @@ test("each change says whether it is the room's price or the total", () => {
   assert.equal(priceChange(0, made(quote("210.00", "210.00")), null, offer)?.basis, "room")
   assert.equal(priceChange(0, made(quote("200.00", "204.00"), { price_changed: true, previous_total: "200.00" }), null, offer)?.basis, "total")
 })
+
+// §6K5 (batch 2Q): the checkout makes its quotes again after 25 minutes, and a change the notice already shows (the
+// guest went on without "OK, continue") was found again: the booking stopped, the notice took the focus once more, and
+// only the next submit booked. A change the guest was shown no longer stops it; a new one still does
+test("a change already on screen is not new; another price, room or basis is", async () => {
+  const { unseenChanges } = await import("../../src/booking/lib/priceChange.ts")
+  const shown = [{ room: 0, from: "200.00", to: "210.00", currency: "EUR", basis: "room" as const }]
+  assert.deepEqual(unseenChanges([{ ...shown[0] }], shown), [])
+  for (const c of [{ ...shown[0], to: "215.00" }, { ...shown[0], room: 1 }, { ...shown[0], basis: "total" as const }])
+    assert.deepEqual(unseenChanges([c], shown), [c])
+  assert.deepEqual(unseenChanges([{ ...shown[0] }], []), [shown[0]])
+})

@@ -203,7 +203,8 @@ export function FlowErrorAlert() {
 
 /** Shown after quoting when the server's price differs from the search result. Focused and scrolled into view
  * when it appears (LO-33): on a phone the guest books from the foot of the page, far below it. Again whenever quotes
- * made again find a change still not accepted (a new list): the submit stopped for it. */
+ * made again find a new change (a new list): the submit stopped for it. A change it already shows, found again when the
+ * quotes are made again after 25 minutes, keeps the list and books (§6K5, batch 2Q). */
 export function PriceChangeNotice() {
   const { t, money } = useI18n()
   const b = useBooking()

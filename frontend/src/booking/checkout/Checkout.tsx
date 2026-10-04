@@ -19,6 +19,7 @@ import type { MemberStatus, PaymentMethod, PaymentStart, QuoteResponse, SiteExtr
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
+import { unseenChanges } from "../lib/priceChange"
 import { basketExpiry, basketFailureText, checkoutChoices, searchesAgain } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
@@ -644,8 +645,9 @@ function PaymentStep() {
         return setFlowError(error)
       }
       // an extra can no longer be added, or a price changed: the guest sees it (and the new total)
-      // before booking; their next submit books the quotes just made (fresh, in the flow)
-      if (rejected.length || changes.length) return setPending(false)
+      // before booking; their next submit books the quotes just made (fresh, in the flow). A change the
+      // notice already shows was seen: it does not stop the booking again (§6K5, batch 2Q)
+      if (rejected.length || unseenChanges(changes, flow.priceChanges).length) return setPending(false)
       fresh = quotes
     }
     const res = await book({ quotes: fresh })
