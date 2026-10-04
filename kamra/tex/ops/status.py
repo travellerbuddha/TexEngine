@@ -361,8 +361,9 @@ def _bookings_overpaid(props, now) -> dict:
 	(LO-17); money above that credit is. Each such change stores the whole excess kept at its time, so the
 	latest one's amount is the credit, never their sum. Money staff kept on the booking when closing a change's
 	money ("Kept on the booking", G-93) is such a decision too, at the time it was made (batch 2O): the later of
-	the two says what is kept. ``staff_kept_at`` is NULL until staff keep money: only rows with one are read
-	(ADR-064, the explicit IS NOT NULL)."""
+	the two says what is kept. A credit is decided when staff approve it (``credit_at``), or, applied at once, when
+	the guest made it (``creation``; review round 1 S2). ``staff_kept_at`` and ``credit_at`` are NULL until set: only
+	keeps with a time are read, a credit without one is as of its creation (ADR-064, explicit NULL semantics)."""
 	params: dict = {}
 	cond = _scope("b.property", props, params)
 	rows = frappe.db.sql(f"""SELECT b.property, COUNT(*) n, SUM(b.status = 'Cancelled') cancelled, MIN(b.modified) since
@@ -371,13 +372,13 @@ def _bookings_overpaid(props, now) -> dict:
 	                           SELECT g.name FROM `tabTEX Guest Change Request` g
 	                           WHERE g.booking = b.name AND g.settlement = 'Credit on booking'
 	                             AND g.status IN ('Applied', 'Approved')
-	                           ORDER BY g.creation DESC, g.name DESC LIMIT 1)
+	                           ORDER BY COALESCE(g.credit_at, g.creation) DESC, g.name DESC LIMIT 1)
 	                         LEFT JOIN `tabTEX Guest Change Request` s ON s.name = (
 	                           SELECT g.name FROM `tabTEX Guest Change Request` g
 	                           WHERE g.booking = b.name AND g.staff_kept_at IS NOT NULL
 	                           ORDER BY g.staff_kept_at DESC, g.name DESC LIMIT 1)
 	                         WHERE b.paid_amount > b.total_amount + CASE
-	                             WHEN s.name IS NOT NULL AND (k.name IS NULL OR s.staff_kept_at >= k.creation)
+	                             WHEN s.name IS NOT NULL AND (k.name IS NULL OR s.staff_kept_at >= COALESCE(k.credit_at, k.creation))
 	                             THEN s.staff_kept_excess ELSE COALESCE(k.settlement_amount, 0) END
 	                           AND b.status != 'Draft'{cond}
 	                         GROUP BY b.property""", params, as_dict=True)

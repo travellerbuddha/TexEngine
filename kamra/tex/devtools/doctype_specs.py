@@ -958,11 +958,13 @@ BOOKING_SPECS = [
 		# then, and when; the overpaid check reads the latest such decision, as a "Credit on booking" (LO-17)
 		F("staff_kept_excess", "Currency", "Kept on the booking", options="currency", read_only=1),
 		F("staff_kept_at", "Datetime", "Kept on the booking at", read_only=1),
+		# when staff approved a lower price as credit (review round 1 S2): the credit's decision, not the guest's ask
+		F("credit_at", "Datetime", "Credit decided at", read_only=1),
 	], perms=IMMUTABLE_LOG, autoname="GCR-.YYYY.-.#####", naming_rule="Expression (old style)",
 	   sort_field="creation", in_create=True,
-	   # the staff fields, then the refund-run fields, then the refunds made, then the money kept (2O), came after
-	   # the first migration: a newer stamp makes migrate load them
-	   extra={"modified": "2026-10-04 12:00:00.000000"}),
+	   # the staff fields, then the refund-run fields, then the refunds made, then the money kept and the credit's
+	   # time (2O), came after the first migration: a newer stamp makes migrate load them
+	   extra={"modified": "2026-10-04 13:00:00.000000"}),
 
 	dt("TEX Booking Domain", B, [
 		F("domain", "Data", "Domain", reqd=1, in_list_view=1,

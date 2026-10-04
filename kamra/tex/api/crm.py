@@ -142,8 +142,10 @@ def loyalty_leave(guest: str, program: str, reason: str, property: str | None = 
 def member_sessions(guest: str):
 	"""The guest's sessions on the booking sites of the hotels the user sees them through (batch 2O)."""
 	from kamra.tex.crm import members
+	from kamra.tex.security import scope
 
-	return members.staff_sessions(guest, crm.require_guest(guest))
+	via = crm.require_guest(guest)
+	return members.staff_sessions(guest, via, {p for p in via if scope.has_capability("crm.edit", p)})
 
 
 @frappe.whitelist(methods=["POST"])

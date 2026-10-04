@@ -169,7 +169,7 @@ export function LoyaltyPanel({
           ))}
         </>
       )}
-      <WebSessions guest={guest.name} canEdit={canEdit} />
+      <WebSessions guest={guest.name} />
       <AdjustDialog
         open={adjust !== null}
         program={adjust ?? ""}

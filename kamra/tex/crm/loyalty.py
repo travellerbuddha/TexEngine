@@ -608,8 +608,11 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None,
 		frappe.throw(_("A reason is required."))
 	require_live_guest(guest)
 	m = membership(guest, program, lock=True)
+	# a block stays until staff join the guest (the owner's option b): ending a blocked membership again without the
+	# tick keeps it (review round 1, NIT 2)
+	blocked = bool(block_rejoin or (m and m.status == "Left" and m.rejoin_blocked))
 	values = {"status": "Left", "left_at": now_datetime(), "left_reason": reason.strip()[:500],
-	          "rejoin_blocked": 1 if block_rejoin else 0}
+	          "rejoin_blocked": 1 if blocked else 0}
 	if m:
 		frappe.db.set_value("TEX Loyalty Member", m.name, values)
 		name = m.name
@@ -617,7 +620,7 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None,
 		name = frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest,
 		                       "property": property, **values}).insert(ignore_permissions=True).name
 	audit("loyalty.member_leave", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
-	      new={"guest": guest, "program": program, "rejoin_blocked": bool(block_rejoin)}, reason=reason)
+	      new={"guest": guest, "program": program, "rejoin_blocked": blocked}, reason=reason)
 	return {"name": name, "status": "Left"}
 
 

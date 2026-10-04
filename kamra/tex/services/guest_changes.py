@@ -1861,6 +1861,9 @@ def _approve(req, settlement: str | None, reason: str) -> bool:
 	if settlement and over > 0:
 		req.settlement = settlement
 		req.settlement_amount = over
+		if settlement == "Credit on booking":
+			# the whole excess kept as of now: the overpaid check orders decisions by when they were made (2O, S2)
+			req.credit_at = now_datetime()
 		if settlement == "Refund":
 			req.settle_pending = 1
 			return True

@@ -310,6 +310,28 @@ class TestOverpaidBookings(TexTestCase):
 		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 3)
 
 
+	def test_2o_r1_s2_a_credit_staff_approve_is_decided_when_approved(self):
+		"""Review round 1 (S2): a lower price staff approve as credit stores the whole excess when they approve it, not
+		when the guest asked; a "Kept on the booking" close made in between is the older decision. The check read the
+		credit as of its request's creation and took the keep (30 of the 50 kept): an overpayment shown for nothing."""
+		before = check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"]
+		b = self.overpaid("2o-r1-s2")                                     # 50 over
+		res = frappe.db.get_value("Reservation", {"tex_booking": b}, "name")
+		ccy = frappe.db.get_value("TEX Booking", b, "currency")
+		asked, kept, approved = (add_to_date(now_datetime(), hours=h) for h in (-3, -2, -1))
+		credit = frappe.get_doc({"doctype": "TEX Guest Change Request", "property": fx.PROPERTY, "booking": b,
+		                         "reservation": res, "status": "Approved", "currency": ccy,
+		                         "settlement": "Credit on booking", "settlement_amount": 50,
+		                         "credit_at": approved}).insert(ignore_permissions=True).name
+		keep = frappe.get_doc({"doctype": "TEX Guest Change Request", "property": fx.PROPERTY, "booking": b,
+		                       "reservation": res, "status": "Rejected", "currency": ccy, "staff_kept_excess": 30,
+		                       "staff_kept_at": kept}).insert(ignore_permissions=True).name
+		frappe.db.sql("UPDATE `tabTEX Guest Change Request` SET creation = %s WHERE name = %s", (asked, credit))
+		frappe.db.sql("UPDATE `tabTEX Guest Change Request` SET creation = %s WHERE name = %s",
+		              (add_to_date(kept, minutes=-5), keep))
+		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"], before)
+
+
 class TestUnverifiedPayments(TexTestCase):
 	"""P1-8 (audit 2E-2): a card payment of a gateway TEX cannot ask for its outcome (the Virtual POS) still
 	pending 10 minutes after its deadline fails the hotel's pending-payments check; one without a deadline

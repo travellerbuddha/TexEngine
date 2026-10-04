@@ -97,7 +97,9 @@ test("finance marks a virtual POS payment not paid after checking it with the ba
     expect(after.message.status).toBe("Failed")
     noErrors()
   } finally {
+    // an account is never deleted (its record is audited): this run's is disabled (CI's database is new each run)
     if (link) await pageApi(admin, "kamra.tex.api.payments.cancel_link", { name: link, reason: "E2E clean-up (not paid)" })
-    await pageApi(admin, "kamra.tex.api.payments.save_account", { property: HOTEL, data: { name: account.message.name, enabled: 0 } })
+    if (account.message?.name)
+      await pageApi(admin, "kamra.tex.api.payments.save_account", { property: HOTEL, data: { name: account.message.name, enabled: 0 } })
   }
 })

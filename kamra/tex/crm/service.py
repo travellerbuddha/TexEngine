@@ -940,8 +940,10 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	from kamra.tex.crm import members
 
 	sessions = members.end_sessions(guest)              # signed out on every booking site (ADR-078)
-	# the sign-in and join links mailed to its address and not opened yet (batch 2O)
-	pending = members.drop_links(frappe.db.get_value("Guest", guest, "tex_enterprise"), emails)
+	# the sign-in and join links mailed to its address and not opened yet (batch 2O); again once this is committed, for
+	# a link a request filed meanwhile from the profile as it was before (review round 1, NIT 4)
+	pending = members.drop_links(emails)
+	frappe.db.after_commit.add(lambda: members.drop_links(emails))
 	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
 	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended,
 	       "sessions_ended": sessions, "member_links_dropped": pending}

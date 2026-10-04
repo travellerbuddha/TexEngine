@@ -195,6 +195,8 @@ export interface MemberSession {
   expires_at: string | null
   signed_out_at: string | null
   active: boolean
+  /** open, at a hotel where the user may edit the guest: they may sign it out */
+  can_end: boolean
 }
 
 /** kamra.tex.crm.loyalty.membership_view (C-04, ADR-077) */

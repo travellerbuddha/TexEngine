@@ -10,7 +10,7 @@ from kamra.tex.commercial.revisions import block_delete, guard_immutable
 OUTCOME = ("status", "payment_transaction", "attempt", "settlement", "settlement_amount", "refunded_amount",
            "settle_pending", "staff_open", "staff_amount", "staff_reason", "unknown_refund", "refund_in_flight", "refund_rows", "staff_settled",
            "returned_charges", "settle_claim", "settle_claimed_until", "revision", "error", "resolved_by",
-           "resolved_at", "resolution", "staff_kept_excess", "staff_kept_at")
+           "resolved_at", "resolution", "staff_kept_excess", "staff_kept_at", "credit_at")
 
 
 class TEXGuestChangeRequest(Document):
