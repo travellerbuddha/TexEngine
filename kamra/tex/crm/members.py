@@ -30,7 +30,7 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.utils import EMAIL_MATCH_PATTERN, add_days, add_to_date, get_datetime, now_datetime
+from frappe.utils import add_days, add_to_date, get_datetime, now_datetime
 
 from kamra.tex.crm import loyalty
 from kamra.tex.services.refusals import refusal
@@ -77,13 +77,16 @@ def site_enterprise(site) -> str | None:
 
 
 def _email(raw) -> str:
-	"""One plain address in ASCII, in lower case: the limit, the profile and the mail are all keyed by it. The whole
+	"""One plain address in ASCII, in lower case (``booking.plain_email``, as a booking keys its guest since batch 2P):
+	the limit, the profile and the mail are all keyed by it. The whole
 	string must be Frappe's own address pattern (review round 1: its check takes a display name, a list or an invisible
 	character, each of which would differ; round 2: an apostrophe is an address's, o'brien@…). ASCII only, as the
 	database compares accents away (utf8mb4_unicode_ci): an accented domain would find an ASCII member's profile and
 	have its link mailed to the look-alike address (round 2)."""
-	email = str(raw or "").strip().lower()
-	if len(email) > 140 or not email.isascii() or not EMAIL_MATCH_PATTERN.fullmatch(email):
+	from kamra.tex.services import booking
+
+	email = booking.plain_email(raw)
+	if not email:
 		frappe.throw(_("Please enter a valid e-mail address."), refusal("GUEST_EMAIL_INVALID"))
 	return email
 

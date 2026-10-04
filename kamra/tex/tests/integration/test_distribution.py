@@ -243,6 +243,23 @@ class TestInbound(DistributionCase):
 		self.assertEqual((b.status, {frappe.db.get_value("Reservation", r.reservation, "status") for r in b.rooms}),
 		                 ("Cancelled", {"Cancelled"}))
 
+	def test_2p_a_guest_address_no_profile_can_keep_is_left_out(self):
+		"""Batch 2P: an address Frappe's e-mail field refuses (an accented one) passed the channel's own check and failed
+		the message when the booking stored it: retried, then parked, the stay never in. The booking goes in without
+		it, and its guest is never the profile of a plain look-alike (the same address only, ADR-080)."""
+		plain = frappe.get_doc({"doctype": "Guest", "first_name": "Mia", "last_name": "Berg",
+		                        "email": "mia.berg@example.com"}).insert(ignore_permissions=True).name
+		msg = message(ref="OTA-2P")
+		msg["guest"]["email"] = "mia.bérg@example.com"
+		self.send(msg)
+		dist.process_inbound()
+		row = frappe.db.get_value("TEX Channel Inbound", {"provider_ref": "OTA-2P"}, ["status", "last_error"],
+		                          as_dict=True)
+		self.assertEqual(row.status, "Applied", row.last_error)
+		b = frappe.get_doc("TEX Booking", {"external_ref": "OTA-2P"})
+		self.assertNotEqual(b.booker_guest, plain)
+		self.assertEqual((b.booker_email, frappe.db.get_value("Guest", b.booker_guest, "email")), (None, None))
+
 	def test_an_unmapped_room_waits_for_its_mapping(self):
 		self.send(message(ref="OTA-200", room="SUITE"))
 		dist.process_inbound()

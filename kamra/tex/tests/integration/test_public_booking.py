@@ -1041,3 +1041,18 @@ class TestBookingIdentity(TexTestCase):
 	def test_2p_the_same_address_in_another_case_is_the_same_guest(self):
 		frappe.db.set_value("Guest", self.accented, "email", "Ana.Muller.2P@Example.DE")    # staff typed it so
 		self.assertEqual(self.booker("ana.muller.2p@EXAMPLE.de", "2p-id-2"), self.accented)
+
+	def test_2p_an_address_no_profile_can_keep_is_refused_by_its_code(self):
+		"""Batch 2P: an address Frappe's e-mail field refuses (an accented one, a stray or invisible character) passed
+		the booking's own check (an "@", at most 140 characters) and failed only when the booking stored it, with no
+		code: the guest read "something went wrong". Until the exact address (ADR-080) it joined its plain look-alike's
+		profile instead."""
+		from kamra.tex.services import refusals
+
+		for i, raw in enumerate(("ana.müller.2p.new@example.de", "ana@@example.de", "ana\u200b.2p@example.de")):
+			with self.subTest(raw=raw):
+				with self.assertRaises(frappe.ValidationError) as cm:
+					self.booker(raw, f"2p-id-bad-{i}")
+				self.assertEqual((refusals.code_of(cm.exception), frappe.local.response.get("tex_code")),
+				                 ("GUEST_EMAIL_INVALID", "GUEST_EMAIL_INVALID"))
+				frappe.clear_messages()

@@ -46,10 +46,10 @@ def _guest(g: dict | None, *, property: str, market: str, ref: str) -> str:
 	g = g or {}
 	first = (g.get("first_name") or "").strip() or _("Channel guest")
 	last = (g.get("last_name") or "").strip() or ref
-	email = (g.get("email") or "").strip().lower() or None
-	if email and ("@" not in email or len(email) > 140):
-		email = None
-	return booking_svc.find_or_create_guest({"first_name": first[:80], "last_name": last[:80], "email": email,
+	# an address that is not one plain address is left out (the guest is booked without it), never refused: the
+	# channel sold the stay (batch 2P)
+	return booking_svc.find_or_create_guest({"first_name": first[:80], "last_name": last[:80],
+	                                         "email": booking_svc.plain_email(g.get("email")),
 	                                         "phone": (g.get("phone") or None), "country": g.get("country")},
 	                                        property=property, market=market, language=None)
 
@@ -180,7 +180,7 @@ def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, 
 		"market": first.market, "created_via": "Channel", "sale_at": now, "channel_connection": conn,
 		"external_ref": ref, "booker_guest": guest,
 		"booker_name": " ".join(x for x in (g.get("first_name"), g.get("last_name")) if x) or ref,
-		"booker_email": (g.get("email") or None), "booker_phone": (g.get("phone") or None), "currency": ccy,
+		"booker_email": booking_svc.plain_email(g.get("email")), "booker_phone": (g.get("phone") or None), "currency": ccy,
 		"total_amount": total, "paid_amount": 0, "balance_amount": total, "amount_due_now": 0,
 		"payment_status": "Pay at Hotel", "payment_method": "Channel",
 		"notes": f"{data.get('channel_name') or ''} {data.get('notes') or ''}".strip()[:2000],

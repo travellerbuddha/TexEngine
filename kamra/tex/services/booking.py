@@ -16,7 +16,7 @@ from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
+from frappe.utils import EMAIL_MATCH_PATTERN, add_days, add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.reservation_state import EXPIRY_NOTE
 from kamra.tex.availability import extras_repository as xinv
@@ -67,6 +67,16 @@ def new_manage_token() -> tuple[str, str]:
 	return token, token_hash(token)
 
 
+def plain_email(raw) -> str | None:
+	"""One plain address in ASCII, trimmed and in lower case, or None: what a guest's profile and a booking are keyed
+	by (the same address is the same guest, ADR-080). Frappe's own address pattern, matched whole (its field check
+	takes a display name, a list or an invisible character, each of which would be another identity), in ASCII (the
+	database compares accents away, and Frappe's field refuses an accented address only when it is stored), at most
+	140 characters."""
+	email = str(raw or "").strip().lower()
+	return email if len(email) <= 140 and email.isascii() and EMAIL_MATCH_PATTERN.fullmatch(email) else None
+
+
 def _clean_guest(g: dict) -> dict:
 	g = {k: (v.strip() if isinstance(v, str) else v) for k, v in (g or {}).items()}
 	if not g.get("first_name"):
@@ -76,8 +86,8 @@ def _clean_guest(g: dict) -> dict:
 	if not (g.get("email") or g.get("phone")):
 		frappe.throw(_("An email or phone number is required."), refusal("GUEST_CONTACT_REQUIRED"))
 	if g.get("email"):
-		g["email"] = g["email"].lower()
-		if "@" not in g["email"] or len(g["email"]) > 140:
+		g["email"] = plain_email(g["email"])
+		if not g["email"]:
 			frappe.throw(_("Invalid email address."), refusal("GUEST_EMAIL_INVALID"))
 	for f in ("first_name", "last_name"):
 		if len(g[f]) > 80:
