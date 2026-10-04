@@ -292,6 +292,9 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
   found by `booking.profile_of_email` (ADR-080).
 - Stop `bench worker` and `bench schedule` before the integration suites (start them again for Playwright,
   `manage-money.spec`; DEV_ENVIRONMENT): a worker left running from an e2e run takes the test site's jobs.
+- **e2e stay dates are random** (`stayDates`: an offset plus up to 119 days): a test comparing prices must keep away
+  from dates where the demo data makes them equal (the DE and GLOBAL bed-and-breakfast prices meet in July–August,
+  2P), and its window moves one day a day.
 - A Frappe tag move can change a contract TEX relies on: v16.36.1 stopped answering an expired password with the
   reset link (ADR-074). Run every suite on a Frappe move, and read the diff of `frappe/auth.py`, `frappe/oauth.py` and
   `frappe/integrations/oauth2.py` between the tags.

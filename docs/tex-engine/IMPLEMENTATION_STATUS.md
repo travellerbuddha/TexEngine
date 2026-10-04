@@ -2354,9 +2354,13 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   `Refusal: Invalid email address.` while seeding). Test: `test_public_booking.TestBookingIdentity.test_2p_the_demo_
   guests_have_plain_addresses`.
 - Local runs on the final head: TEX unit 703; integration 51 modules, 1,419 tests (`test_scheduler_smoke` differs only
-  locally); node unit 455; DOM 45; Playwright 218 tests (208 passed, 9 skipped by design; `booking.spec`'s mobile
-  campaign-link test failed once on "DE prices differ" and passed on its rerun, both projects: not reproduced, outside
-  the batch's code); eval 76/76; banquet 101; front-desk journey 13/13; i18n complete; ruff clean.
+  locally); node unit 455; DOM 45; Playwright 218 tests (209 passed, 9 skipped by design); eval 76/76; banquet 101;
+  front-desk journey 13/13; i18n complete; ruff clean.
+- CI (e2e) **COMPLETE**: `booking.spec`'s campaign-link test failed on "DE prices differ" (CI run 37210508985, mobile;
+  once locally): its random stay window (today + 160…279 days on the phone) reached July 2027, where the demo's DE
+  and GLOBAL contracts give the same bed-and-breakfast price ((70 + 55) × 1.08 = 80 + 55, July–August) — a stay of 4–6
+  July 2027 shows €475.20 and €540.00 in both. Not this batch's code: it would fail on the base too, more often each
+  day. Setup only, assertions unchanged: the test moves a stay with a night in July or August two months back.
 - **Not done:**
   - 2P-4, a basket refused as gone still offers "Try again" (§6K5): `booking.spec`'s LO-14 assertion would change
     (owner);
