@@ -82,6 +82,10 @@ bench --site test.localhost execute kamra.tex.devtools.demo_seed.execute --kwarg
 bench --site test.localhost set-config -p tex_public_write_limit 1000
 bench --site test.localhost set-config -p tex_public_search_limit 1000
 bench serve --port 8000        # test.localhost must resolve to 127.0.0.1
+# a paid guest change and a refund are made by a job: a worker runs them (CI does the same; the site's scheduler stays
+# off). Without it manage-money.spec's two paid changes wait for nothing (2O's full run lost them this way)
+bench worker --queue short,default &
+bench schedule &
 cd frontend && TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD='TexDemo#2026' \
   PW_CHROMIUM=/opt/pw-browsers/chromium npx playwright test -c e2e
 ```

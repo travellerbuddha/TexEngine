@@ -10033,7 +10033,8 @@ scope prioritised after go-live), and C-13 is D-12's answer (loyalty is live at 
 - *A web rejoin staff blocked* (C-04h). `TEX Loyalty Member.rejoin_blocked` (a Check, 0 by default; the model sync adds
   it, no patch: every hotel starts from a fresh install, D-14). `crm.loyalty_leave(block_rejoin=1)` sets it with the
   leave, for a reason such as abuse; the leave's audit says `rejoin_blocked`. Staff joining the guest
-  (`crm.loyalty_join`) lift it (the join's audit says `unblocked`): staff decide, as they did when they blocked it. A
+  (`crm.loyalty_join`) lift it (the join's audit says `unblocked`): staff decide, as they did when they blocked it;
+  ending a blocked membership again keeps the block (review round 1). A
   membership left without the block is rejoined on the web as before (a guest who asked to leave may come back).
   `loyalty.join_web` skips a blocked membership, read with a lock under the profile's lock, so a join link asked
   before the block joins nobody. A web join asked for an address blocked wherever it could join on the site (every

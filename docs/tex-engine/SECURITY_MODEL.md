@@ -185,6 +185,12 @@ the guest's manage token.
   the link, …) and Low items fixed with fail-first tests; round 2: an accented look-alike domain matched
   an ASCII member's profile (refused now: ASCII addresses only) and apostrophes were refused (PR #34).
 
+- 2026-10-04 batch 2O (ADR-079): a web rejoin staff may block; an erasure drops the member links mailed and not
+  opened yet; staff see and end a guest's web sessions. Independent review round 1: 2 Medium (the erasure missed the
+  links of a profile of no enterprise, which matches every enterprise's site: the pending links are the address's
+  now; a staff-approved credit ordered by its request's creation in the overpaid check) and Low items fixed with
+  fail-first tests (PR #35).
+
 ## 7. Known gaps (tracked)
 
 The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). The security-relevant items

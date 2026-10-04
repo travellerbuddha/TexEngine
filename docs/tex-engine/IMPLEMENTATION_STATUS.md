@@ -2246,3 +2246,12 @@ re-verified against the code first; all held (the erasure item was worse than li
 - Docs: ADR-078 addendum and ADR-079; HANDOFF (§1, §2, §6, §7, §10); DEV_ENVIRONMENT (Node 24 for Frappe v16.36.1,
   `cron`, the frappe user's CA variables, a new site's `encryption_key`, the MariaDB 11.8 repository); SECURITY_MODEL (the member row, the review log). No patch: the new fields are Checks, Currency and Datetime
   the model sync adds (D-14).
+- Review round 1 **COMPLETE** (an independent read-only reviewer; no BLOCKER, 2 SHOULD, 6 NITs): S1, the erasure
+  missed the links of a profile of no enterprise (it matches every enterprise's site; the pending set was the
+  site's enterprise's): the set is the address's only; S2, a credit staff approve was ordered by its request's
+  creation, so a keep made in between won: `credit_at` set on approval, read by the check; NITs: the erasure drops
+  the links again after its commit; MEMBER_EMAIL_UNUSABLE carries its own message only; a second leave keeps the
+  block; `can_end` per session; the e2e's clean-up. Not taken: NIT 6 (the `member_blocked` mail names every program
+  of a multi-program site; cosmetic). Tests: `test_member_web` +3, `test_system_status.test_2o_r1_s2_…`. Red: S1
+  `ValidationError not raised`; S2 `1 != 0`; `'valid e-mail address' unexpectedly found`; `('Left', 0) != ('Left',
+  1)`; `KeyError: 'can_end'`.
