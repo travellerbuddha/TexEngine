@@ -10163,3 +10163,76 @@ the confirmation) are asked when it starts; until then the booker's address deci
   took what the server refuses (`plainEmail`). NITs: the apps trim as Python's `strip()` does (a BOM passed, an
   information separator was refused); `profile_of_email` checks a stored address's ASCII before lower case (a Desk
   profile stored with a KELVIN SIGN was joined by every booking for `kate@…`); two docs lines.
+
+## ADR-081 Batch 2Q: the LOW leftovers that need no decision; a booking for someone else follows the address entered (audit Part 2Q)
+The owner chose (2026-10-04, "4 numarayı komple yap") a LOW batch of every leftover that needs no decision of theirs,
+and answered HANDOFF §2 item 11, a booking made for someone else: **everything follows the e-mail address entered in
+the booking** ("hangi e-posta adresi girildiyse ona gider."; "Evet" to the points and the member price). The
+confirmation and the manage link go to that address; that address's profile is the booking's guest, earns its points
+and is checked for the member price (ADR-077, ADR-080). In the call centre a separate booker gets the confirmation at
+`booker_email`, else the guest's address. This is how TEX works today: no code changes for it.
+- Cards. Three independent read-only reviewers re-verified 27 candidate cards against `e8e3333`: 13 held and are this
+  batch; 8 need the owner (they change an existing test assertion or a behaviour rule) and were not started; 3 touch
+  money and go to their own batch; the rest were done already, cannot occur, or were dropped (§6Q lists each).
+- *One plain address on every path* (§6P): `Guest.validate` (`crm.service._one_plain_address`, whoever saves: the Desk
+  form, REST, Data Import, banquet, the legacy channel manager) refuses an address that changes and is not one plain
+  address (`booking.plain_email`, ADR-080). Only a changed address is checked: a profile stored before keeps saving, and
+  a merge moves an address as it is stored (`flags.tex_merge`; nobody typed it). The direct writes are covered at
+  their source: the legacy channel manager and the migration import leave such an address out (another system's data,
+  as a TEX channel's booking does); the legacy booking page and the pre-arrival check-in refuse it (a guest typed it).
+  The pre-arrival check-in (public, by the stay's token, legacy and not fenced for TEX hotels) also stopped clearing
+  the profile's address when its field is left blank: a blank field keeps it, and an address is taken away only in
+  the CRM, audited (ADR-056).
+- *A rate the hotel cannot sell now* (`RATE_UNAVAILABLE`: a fixed amount it cannot convert, a payload that fails its
+  check) offers "See available rooms" where the basket offered "Try again" and the booking "Refresh prices", each
+  failing the same way; its own text asks for a new search (`lib/methods.searchesAgain`). The other refusals keep
+  their answer: LO-14's "Try again" for `QUOTE_INVALID` / `SEARCH_AGAIN` is HANDOFF §2 item 12, the owner's.
+- *A later room's share of a fixed deposit* (§6K5): the checkout reads each room's share from the basket
+  (`rooms[].due_now`, by quote) and a later room that pays part of the booking's deposit names it
+  (`policy.depositShare`); a share of nothing, or a basket not read yet, reads as before (LO-35).
+- *A price change already shown* (§6K5): quotes made again after 25 minutes that find the same change the notice
+  shows (room, prices, currency and basis) book; only a new change stops the booking and takes the focus
+  (`priceChange.unseenChanges`; the list is kept when nothing new changed). Within 25 minutes an unaccepted notice never
+  stopped a booking either.
+- *The occupancy ladder's sample parties* (§6K6): a fit counts only the children and the infants, and more infants
+  never hurts, so whether a party size fits is counted and the listing walks only combinations within the children
+  allowed outside the infant bands; the parties and their order are unchanged (20 bands: 14.7 s → 7 ms).
+- *An expired password whose reset mail could not be sent* (§6ZF): Frappe v16.36.1 raises `OutgoingEmailError` (HTTP
+  501) at sign-in without an outgoing Email Account; the admin page says so (`core.login.reset_mail_failed`), the
+  fields not marked, also after a two-factor code. Go-live needs SMTP anyway (GO_LIVE_READINESS).
+- *An extra's capacity refusal by code* (§6G3): `extras.capacity_reason` gives the engine's `ExtraOutcome` a
+  `reason_code` (`SOLD_OUT`, `NOT_ENOUGH`, `CLOSED`; never a count) and a `reason_date` beside its text, and the
+  booking app tells the guest by them (else by the text, as before). `to_dict` emits them only when set, so every
+  other quote and snapshot is byte-identical (ADR-061 parity). Not coded: an extra added after booking and a change's
+  warnings (their messages name the extra; a later change).
+- *The blocked-rejoin mail* (§6O) names the programs the block keeps the guest out of, never one they are still a
+  member of.
+- *Blocking an ended membership's rejoin* (§6O; C-04h): `crm.loyalty_block_rejoin` (`crm.edit` through the guest's
+  hotels and at a hotel of the program, as a leave; retried on a deadlock) sets `rejoin_blocked` on a membership that
+  ended, its end (when, why) kept, audited `loyalty.member_block`; an active one is refused (ending it with the block
+  does both). The CRM offers "Block online rejoin" on such a membership. Before, staff joined the guest and ended the
+  membership again. Staff joining the guest still lift the block (the owner's option b).
+- *Member link races* (§6O, §6N2): an erasure counts its drops of an address's links (Redis, 30 minutes, by the
+  address's hash); a request that read the profile before and filed its link after sees the count change and drops its
+  own link, mailing nothing (a join link opened later made the erased profile again). No database lock: the read
+  stays plain (a locking read by e-mail from an anonymous endpoint was the alternative). A link taken by a request that
+  then fails before its commit is put back by `after_rollback` (a commit clears it; a COMMIT statement that fails
+  itself is not covered, rare).
+- *Membership reads* (§6N1): `loyalty.member_hotels` reads the profile's erasure mark once and each program once for a
+  set of hotels (the call centre's search, the booking site's member hotels); it was once per hotel.
+- *The "Member price" teaser* (§6N2): `promotions.may_apply_to_stay` (pure) rules out a members-only promotion that can
+  never apply to the search (its code, value, length, markets, channels or stay nights); the teaser prices a hotel a
+  second time only where one may. What the engine decides per room, day, sale date or basket stays the engine's: the
+  prices shown are unchanged.
+- *Sold-out names in the guest's language* (§6G3): a refusal carries what its params name (`refusal(..., names=)`,
+  `with_code(..., names=)`: param → doctype, hotel, record; never in its params) and `refusals.coded` tells the guest
+  the room type's or extra's name in their language where it is translated. The exception keeps the hotel's text for
+  staff and logs.
+- Owner questions found while re-verifying (not started; HANDOFF §2): Turkish-F letters other than ı/İ as shortcuts
+  (LO-49's review chose not to, pinned by `keys.test.ts`); a channel connection without a label named by a generic word
+  (pinned by `test_distribution`); the CRS keeping a space in a promotion code (pinned by `promo-code.test.ts`); a group
+  program's membership when a hotel gets its own program; the points of a matured stay moved to the future (pinned by
+  `test_loyalty_admin`, a points rule); a rate limit on the legacy MCP registration; contrast measured with axe (a new
+  dependency, G-63).
+- Money, for its own batch: a review recorded while a new charge starts (§6K1), a duplicate capture audited apart
+  (§6K1), LO-09's duplicate check of a profile created meanwhile (a locking read of profiles by e-mail and phone).

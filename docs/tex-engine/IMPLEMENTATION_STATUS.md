@@ -2376,3 +2376,79 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   - the §6* "Not done" lines 2P did not take (HANDOFF §2 item 10): among them a review recorded while a new charge
     starts (§6K1), the digest an editor without cost reads (§6L), a group program's membership when one hotel gets
     its own program (§6N1), the `member_blocked` mail's program list (§6O).
+
+## 6Q. Audit Part 2Q — the LOW leftovers that need no decision; a booking for someone else (2026-10-04)
+
+The owner chose (2026-10-04, "4 numarayı komple yap") every LOW leftover that needs no decision of theirs, and
+answered HANDOFF §2 item 11: a booking made for someone else follows the e-mail address entered in it (the
+confirmation and manage link, the profile, its points, the member price). That is today's behaviour: recorded, no
+code. ADR-081. Three independent read-only reviewers re-verified 27 cards first: 13 held (below), 8 need the owner,
+3 are money, the rest were done already, cannot occur or were dropped (listed at the end).
+
+- 2Q-1 (§6P) **COMPLETE**: a profile's e-mail is one plain address on every path that stores one (`Guest.validate`
+  for a changed address, a merge excepted; the legacy channel manager and migration import leave it out; the legacy
+  booking page and the pre-arrival check-in refuse it); the check-in keeps the address when its field is blank. Tests:
+  `test_public_booking.TestEverySaveKeepsOnePlainAddress` (4), `test_legacy_pricing.TestHotelsOutsideTex` (+2). Red:
+  `ValidationError not raised` (×4), `'Mia <mia.2q@example.com>' is not false`, `None != 'lena@example.com'`,
+  `'İNFO.2Q@HOTEL.COM' is not false`; the legacy page went on to book.
+- 2Q-2 (§6P) **COMPLETE**: `RATE_UNAVAILABLE` offers "See available rooms" at the basket and the booking
+  (`searchesAgain`); LO-14's answers unchanged. Test: node `checkout-fallback` (+1). Red: `searchesAgain is not a
+  function`.
+- 2Q-3 (§6K5) **COMPLETE**: a later room names its share of the booking's fixed deposit (`policy.depositShare`, six
+  languages). Test: node `booking-deposit` (+1). Red: `actual: 'policy.depositWithRoom {"n":1}'`.
+- 2Q-4 (§6K5) **COMPLETE**: a price change the notice already shows does not stop the booking again after 25 minutes
+  (`unseenChanges`). Test: node `price-change` (+1). Red: `unseenChanges is not a function`.
+- 2Q-5 (§6K6) **COMPLETE**: the occupancy ladder's sample parties skip what cannot fit; the same parties, in the same
+  order. Test: node `occupancy-parties` (new, 2). Red: `AssertionError: 14751 ms` (20 bands); 7 ms after.
+- 2Q-6 (§6ZF) **COMPLETE**: an expired password whose reset mail could not be sent (HTTP 501, `OutgoingEmailError`)
+  says so (`core.login.reset_mail_failed`, six languages). Test: e2e `entry-branding.spec` (new). Red: `Received:
+  "Wrong email, username or password."`.
+- 2Q-7 (§6G3) **COMPLETE**: an extra's capacity refusal carries `reason_code` and `reason_date` (ADR-061 parity kept);
+  the booking app tells it by code. Tests: unit `test_extras_inventory.TestEngineCapacity.test_2q_…` (3 subtests), node
+  `extras-refusal` (new). Red: `'ExtraOutcome' object has no attribute 'reason_code'`; node `actual:
+  'extras.reasonOther {}'`.
+- 2Q-8 (§6O) **COMPLETE**: the blocked-rejoin mail names only the programs blocked. Test:
+  `test_member_web.TestRejoinBlocked.test_2q_the_blocked_mail_names_only_the_programs_blocked`. Red: `'Sister Club 2Q'
+  unexpectedly found in 'About joining Resort Club, Sister Club 2Q at TEX Test Resort…'`.
+- 2Q-9 (§6O) **COMPLETE**: staff block an ended membership's rejoin online (`crm.loyalty_block_rejoin`, audited
+  `loyalty.member_block`, its end kept; CRM "Block online rejoin", six languages). Tests:
+  `test_member_web.TestRejoinBlocked.test_2q_staff_block_the_rejoin_of_a_membership_that_ended`, e2e
+  `crm-membership.spec` (a new step). Red: `module 'kamra.tex.api.crm' has no attribute 'loyalty_block_rejoin'`; e2e
+  `Timeout … getByRole('button', { name: 'Block online rejoin' })`.
+- 2Q-10 (§6O, §6N2) **COMPLETE**: a link filed after an erasure by a request that read before it is dropped (an
+  erasure counter); a link opened by a request that then fails is put back on rollback. Tests:
+  `test_member_web.TestPendingLinksAndErasure` (+2). Red: `ValidationError not raised` (the link opened);
+  `MEMBER_LINK_INVALID` on opening it again after the rollback.
+- 2Q-11 (§6N1) **COMPLETE**: the caller's membership is read once per program, the erasure mark once
+  (`loyalty.member_hotels`). Test: `test_loyalty_membership.TestMemberPrices.test_2q_…`. Red: `2 != 1`.
+- 2Q-12 (§6N2) **COMPLETE**: the "Member price" teaser prices a hotel again only where a members-only promotion may
+  apply to the stay (`promotions.may_apply_to_stay`). Tests: `test_member_web.TestMemberPricesOnTheWeb.test_2q_…` (3
+  subtests), unit `test_promotions_extras.TestMayApplyToStay` (2). Red: `2 != 1` (×3).
+- 2Q-13 (§6G3) **COMPLETE**: a sold-out room or extra is named in the guest's language in the refusal's params
+  (`names=`, `refusals.coded`). Tests: `test_public_booking.TestContentTranslation.test_2q_…`,
+  `test_extras_inventory.TestExtrasCapacity.test_2q_…`. Red: `{'room': 'Standard Room', …} != {'room':
+  'Standardzimmer', …}`; `{'extra': 'Spa', …} != {'extra': 'Wellness', …}`.
+- HANDOFF §2 item 11 **COMPLETE** (docs): a booking made for someone else follows the address entered (owner,
+  2026-10-04); ADR-081, HANDOFF §7.
+- Re-verified, nothing to do: the GO_LIVE_READINESS worker setup (§6K4) is documented since 2Z; staff
+  re-verification writes `last_reverified_at` (2O-9); a mandatory limited extra sold out "still showing a price" in the
+  sell-price row (§6UX) cannot occur: a mandatory extra cannot have a limited capacity (`TEX Extra.validate`), the
+  `grid.sell_prices` docstring corrected; "No Show gives no points back" (§6K2) is C-01's answer (2M).
+- Dropped: the nullable-date guard reading filters built from parameters or helpers (§6K6: a call-graph reader, little
+  value); a content component copying its props at mount (§6L: none found, every dialog content mounts per opening);
+  the GitHub actions' Node 20 warnings (§6Z: GitHub runs them on Node 24 already; the new majors' pins need their own
+  reviewed PR).
+- **Not done:**
+  - the owner's (HANDOFF §2): a basket refused as gone offers "Try again" (item 12, LO-14's assertion); Turkish-F
+    letters other than ı/İ as shortcuts (`keys.test.ts`, `callcenter-shortcuts.test.ts` assert none); a connection
+    without a label named by its id (`test_distribution` asserts it); the CRS strips a space the server keeps in a
+    promotion code (`promo-code.test.ts` asserts it); a group program's membership when one hotel gets its own
+    program; a matured stay's points staying Available when it moves to the future (`test_loyalty_admin` asserts the
+    balance; a points rule); a rate limit on the legacy MCP `/mcp/oauth/register`; contrast measured with axe (G-63);
+  - money, its own batch: a review recorded while a new charge starts (§6K1), a duplicate capture audited apart
+    (§6K1), LO-09's duplicate on a profile created after the read view began (§6K3);
+  - the pre-arrival check-in is a legacy public endpoint not fenced for TEX hotels: it still writes ID data and an
+    address (now one plain one) to a TEX guest's profile without an audit (LOW; whether TEX hotels use it is the
+    owner's, with D-15);
+  - an extra added after booking and a change's warnings still name a capacity refusal in text (their messages);
+  - a link taken by a request whose COMMIT statement itself fails is lost (rare).

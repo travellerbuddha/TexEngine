@@ -84,7 +84,10 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   finds one only for staff, only when exactly one profile has it. The e-mail is the exact address, in any case:
   an accented look-alike is another guest, though the database compares accents away (owner, 2P; ADR-080,
   `booking.profile_of_email`, also a member link's), and a typed address must be one plain ASCII address
-  (`booking.plain_email`; a channel's other address is left out). Duplicates are merged by
+  (`booking.plain_email`; a channel's other address is left out), on every path that stores a profile's (2Q,
+  ADR-081: `Guest.validate` for the Desk form, REST, imports and the legacy paths, a changed address only; the
+  legacy direct writes refuse it or leave it out). A booking made for someone else follows the address entered
+  (owner, 2Q). Duplicates are merged by
   `crm.merge_guests` (`crm.edit` at every hotel either profile has records at, one enterprise, consent
   the stricter of the two, audited); an erasure withdraws every consent and removes contact data from
   cases, funnel, bookings' booker fields and the change history. A merge locks both profiles and reads
@@ -206,6 +209,12 @@ the guest's manage token.
   the call centre's guest and booker checks) and NITs (Python's trim in the apps; a stored KELVIN SIGN address is
   never joined) (PR #36).
 
+- 2026-10-04 batch 2Q (ADR-081): one plain address on every path that stores a profile's (the Desk form, REST and
+  the legacy writers; the pre-arrival check-in no longer clears an address); staff block an ended membership's
+  online rejoin (`crm.loyalty_block_rejoin`, `crm.edit` through the guest and at a hotel of the program, audited);
+  a member link filed after an erasure by a request that read before it is dropped; sold-out names reach the guest
+  in their language, never in the exception's params. Review rounds: see PR #37.
+
 ## 7. Known gaps (tracked)
 
 The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). The security-relevant items
@@ -229,6 +238,10 @@ in the path until they expire. The notes below predate that audit.
   an owner decision). A legacy PMS write of a record a merge moved (a Folio, a Security Deposit …),
   read before the merge and saved after it, puts the duplicate back into that link (the merge does not
   change `modified`; a Reservation's save and the TEX writers lock the profile and are refused).
+- The legacy pre-arrival check-in (`public_api.precheckin_submit`, public, by the stay's 24-character token) is not
+  fenced for TEX hotels: its token holder writes ID data and an address to the stay's profile with direct writes and
+  no audit. Since 2Q it takes one plain address only and never clears one; whether TEX hotels use it (the legacy
+  outreach sends its link only where a hotel turned it on) is the owner's, with D-15.
 - iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
   production-verified**; enabling a Production account requires the provider's sandbox
   certification with real merchant credentials.

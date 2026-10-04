@@ -1,18 +1,19 @@
-# TEX Engine — Handover after audit Part 2, C-04 and batch 2P (2026-10-04)
+# TEX Engine — Handover after audit Part 2, C-04 and batch 2Q (2026-10-04)
 
 **Read this whole file before changing anything.** It replaces the 2026-10-01 handoff (that version is in git history).
 Audit Part 2 is finished: every planned batch is done, Part 2Z (PR #29) the last; the Frappe v16.36.1 upgrade followed
 as 2Z-F (PR #30), the LOW leftovers that need no decision as 2L (PR #31), four owner decisions as 2M (PR #32), members-only prices
 in the call centre as 2N-1 (C-04, first half, PR #33) and on the web as 2N-2 (C-04's second half, PR #34), then the
-LOW leftovers with two owner answers as 2O (PR #35), then a guest's e-mail identity and LOW leftovers as 2P (PR #36).
+LOW leftovers with two owner answers as 2O (PR #35), then a guest's e-mail identity and LOW leftovers as 2P (PR #36), then
+every LOW leftover that needs no decision as 2Q (PR #37).
 What is left waits for an owner decision, an external party, or is
 a LOW leftover listed below; the next batch is chosen with the owner (§2, §10). The session that takes over implements, verifies its own work and
 opens one pull request per batch; the owner, who writes in Turkish, reviews and merges. Never merge, never push to the
 base branch, never rebase or force-push a shared branch.
 
 Recover state in this order (CLAUDE.md): `CLAUDE.md` → this file → `IMPLEMENTATION_STATUS.md` (§6 sections, newest
-last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-080) → `PRODUCT_SPEC.md` → `git log` and
-the descriptions of PRs #3–#36 (each has its items, fail-first evidence, review rounds and "Kalanlar").
+last) → `TARGET_ARCHITECTURE.md` → `ARCHITECTURE_DECISIONS.md` (ADR-062 … ADR-081) → `PRODUCT_SPEC.md` → `git log` and
+the descriptions of PRs #3–#37 (each has its items, fail-first evidence, review rounds and "Kalanlar").
 
 ## 1. Where things stand
 
@@ -53,7 +54,8 @@ the descriptions of PRs #3–#36 (each has its items, fail-first evidence, revie
 | 2N-1 members-only prices (call centre) | #33 | C-04: `TEX Loyalty Member`, who a member is, staff join / leave, members-only promotions live, the Call Center prices the caller as a member, a member's price books for a member only (§6N1, ADR-077) |
 | 2N-2 members on the web | #34 (merged) | C-04: sign-in and join on the booking site by a one-time e-mail link, `TEX Member Session` (30 days on a hotel's own host, the tab on the shared host), member prices on the web, "Member price" for anyone else, `MEMBERS_ONLY`, the booking app in six languages (§6N2, ADR-078) |
 | 2O LOW leftovers and two answers | #35 (merged) | C-04h a web rejoin staff may block (6b, option b); CLP / ISK whole units (option a); an erasure drops pending member links; staff see and end a guest's web sessions; `MEMBER_EMAIL_UNUSABLE`; a malformed party refused by code; money kept on the booking no overpayment; staff re-verify recorded; a disabled room type's mapping never made enabled; no "Redeem" on a channel's booking; the palette's first frame; an e2e for "Not paid" (§6O, ADR-079) |
-| 2P a guest is their e-mail address; LOW leftovers | #36 | the owner's identity rule (the same address in any case, never an accented look-alike) for every booking and member link; one plain address or `GUEST_EMAIL_INVALID` (a channel leaves it out); a basket's `problem_code` and "already booked"; extras a hotel cannot price refused by code; a paid change's engine reasons kept for staff; a refused reprice's digests out of Desk / REST; the backfill logs once; the promotion editor's live key; a group program's redemption hint; the mailed expired-password notice (§6P, ADR-080) |
+| 2P a guest is their e-mail address; LOW leftovers | #36 (merged) | the owner's identity rule (the same address in any case, never an accented look-alike) for every booking and member link; one plain address or `GUEST_EMAIL_INVALID` (a channel leaves it out); a basket's `problem_code` and "already booked"; extras a hotel cannot price refused by code; a paid change's engine reasons kept for staff; a refused reprice's digests out of Desk / REST; the backfill logs once; the promotion editor's live key; a group program's redemption hint; the mailed expired-password notice (§6P, ADR-080) |
+| 2Q the LOW leftovers that need no decision | #37 | one plain address on every path that stores a profile's (Desk, REST, legacy, the pre-arrival check-in, which no longer clears it); a booking for someone else follows the address entered (§2 item 11, recorded); `RATE_UNAVAILABLE` offers a new search; a later room's deposit share; a price change shown once; the occupancy ladder's parties pruned; the mail-less expired password told; an extra's capacity refusal by code; the blocked-rejoin mail's programs; staff block an ended membership's rejoin; two member-link races; membership read once per program; the teaser prices only where a members' promotion may apply; sold-out names in the guest's language (§6Q, ADR-081) |
 
 - Last full CI before 2Z: CI #191 on 000d806 (PR #28), Linters #190, Supply chain #71, all green; 2Z's own final
   runs are in PR #29's description. Numbers to keep green (2Z's head, local runs): TEX unit 698; TEX integration 49
@@ -89,10 +91,17 @@ Nothing planned remains. In order of likely need:
 | 7 | ~~CLP and ISK~~ **answered and done** (2O, PR #35): whole units, as ISO 4217 says | none | §6O, ADR-079 |
 | 8 | ~~G-99: `get_contract` returns `payload_hash` to `price.view` callers~~ **done** (PR #31) | none | §6L, ADR-075 |
 | 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays keep their content hidden until a pass after they open | none | §6L, ADR-075 |
-| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" (2O took ten of them, 2P nine more; §6P lists what is left) | none (LOW) | §6 … §6P |
-| 11 | A booking made for someone else (a guest books for a friend, a colleague, a family member): today the booker's e-mail decides the profile, so the stay, its points and the member price are the booker's | **owner, when the batch starts**: who earns the points, whose member prices apply, who gets the confirmation and the manage link, whether the stayer gets a profile of their own | ADR-080, §7 2P |
+| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" (2O took ten of them, 2P nine, 2Q thirteen: every one that needs no decision; §6Q lists what is left, items 12–20 here) | none (LOW) | §6 … §6Q |
+| 11 | ~~A booking made for someone else~~ **answered** (owner, 2026-10-04, 2Q): everything follows the e-mail address entered in the booking (the confirmation and manage link, the profile, its points, the member price); today's behaviour, recorded | none | ADR-081, §7 2Q |
 | 12 | A basket refused as gone (`QUOTE_INVALID`, `SEARCH_AGAIN`) offers "Try again", which fails the same way; the refresh path instead was built in 2P and withdrawn: `booking.spec`'s LO-14 test asserts "Try again" on purpose | **owner**: may that e2e assertion change? | §6K5, §6P |
-| 13 | A duplicate capture of a settled charge audited apart (LO-04's optional part, §6K1): it asks the gateway on every replay | none (money, M: its own batch) | §6K1, ADR-080 |
+| 13 | Money, its own batch: a duplicate capture of a settled charge audited apart (LO-04's optional part: it asks the gateway on every replay); a review recorded while a new charge starts (pays twice, flagged OVERPAID: re-check the review after the checkout is made, lock order link → charges → booking); LO-09's duplicate on a profile created after the revival's read view began (a locking read of profiles by e-mail and phone) | none (money, M) | §6K1, §6K3, §6Q, ADR-081 |
+| 14 | Turkish-F letters other than ı/İ (ü ö ç ş ğ) as Alt / Ctrl shortcuts, mapped to u o c s g: LO-49's review chose not to | **owner**: `keys.test.ts` and `callcenter-shortcuts.test.ts` assert none | §6K5, §6Q |
+| 15 | A channel connection without a label (only a direct database write) is named by its id in a refusal; a generic word instead | **owner**: `test_distribution` asserts the id | §6G3, §6Q |
+| 16 | The CRS strips a space the server keeps in a promotion code (`YAZ 24` cannot be applied in the call centre); keep the space, or refuse spaces and signs on save | **owner**: `promo-code.test.ts` asserts the stripping | §6P, §6Q |
+| 17 | A group program's membership stays Active at the group's other hotels when one hotel gets its own program: carry it over, end it there, keep it, or refuse the new program while the group's has members | **owner** (members-only prices) | §6N1, §6Q |
+| 18 | A matured stay's points stay Available when the stay is moved into the future (spendable before the stay; given back if it is cancelled) | **owner** (a points rule; `test_loyalty_admin` asserts today's balance) | §6K2, §6Q |
+| 19 | A rate limit on the legacy MCP `/mcp/oauth/register` (anyone may register a client; redirects limited to claude.ai and loopback), or retiring the legacy MCP | **owner** | §6Z, §6Q |
+| 20 | Contrast measured on screen (R-51, G-63): axe in Playwright (a new dev dependency) or a static scan; light-theme `text-zinc-400` is about 2.6:1 | **owner** | §6Z, §6Q |
 
 Not in scope unless the owner asks: G-41r allotment × channel, G-54 surcharges by LOS/arrival, G-64 CRM campaigns.
 
@@ -193,9 +202,10 @@ Per batch:
 
 - Patches up to **p78** (p57 sits in `[pre_model_sync]`). p26, p30, p32, p41–p44 and **p67** were never used — do not
   use them. **Next free: p79.**
-- ADRs up to **ADR-080**. **Next free: ADR-081.**
+- ADRs up to **ADR-081**. **Next free: ADR-082.**
 - `IMPLEMENTATION_STATUS.md` sections: 6, 6B, 6C1, 6C2, 6G1, 6D1, 6E1, 6I, 6E2, 6H1, 6D2, 6F1, 6H2, 6F2, 6G2, 6K1, 6K2,
-  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF, 6L, 6M, 6N1, 6N2, 6O, 6P. A new batch adds its own section at the END of the file.
+  6UX, 6K3, 6G3, 6K4, 6K5, 6K6, 6Z, 6ZF, 6L, 6M, 6N1, 6N2, 6O, 6P, 6Q. A new batch adds its own section at the END of the
+  file (next: §6R).
 
 ## 7. Owner decisions
 
@@ -227,6 +237,12 @@ whole units; **C-08, C-09, C-11** keep their defaults; **C-13** is D-12's answer
 ilerleyelim"): **the same e-mail address is the same guest**, whatever its case; an accented look-alike is another
 guest. A booking made for someone else is a later batch of its own (§2 item 11), its questions asked when it starts
 (ADR-080).
+
+**2Q** (2026-10-04, "4 numarayı komple yap": every LOW leftover that needs no decision): a booking made for someone else
+**follows the e-mail address entered in the booking** ("hangi e-posta adresi girildiyse ona gider."; "Evet" to the
+points and the member price): the confirmation and the manage link go to it, its profile is the booking's guest and
+earns the points, and it is checked for the member price; in the call centre a separate booker gets the confirmation
+(`booker_email`). Today's behaviour, recorded (ADR-081). Item 12 (LO-14's "Try again") was not approved and stays open.
 
 Open (ask the owner when the work needs it; never guess): **D-15** (PMS per hotel; also who charges a no-show fee),
 and C-10, C-14, C-15, which wait for external parties (`HANDOFF_LEFTOVERS.md` §3).
@@ -295,22 +311,29 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
 - **e2e stay dates are random** (`stayDates`: an offset plus up to 119 days): a test comparing prices must keep away
   from dates where the demo data makes them equal (the DE and GLOBAL bed-and-breakfast prices meet in July–August,
   2P), and its window moves one day a day.
+- **A legacy public endpoint commits** (`public_api.precheckin_submit`, `public_api.book` and their kin end with
+  `frappe.db.commit()`): an integration test calling one stubs it (`mock.patch.object(frappe.db, "commit")`), or the
+  test's fixtures are committed and every later module that makes them fails ("Contract code PAY already exists").
+  2Q lost a cleanup this way; the rows were removed by their creation time, with the owner's approval.
+- The TEX unit tests need the bench's Python (three of them import frappe): `env/bin/python -m pip install pytest` once
+  per container, then `env/bin/python -m pytest kamra/tex/tests/unit -q` (DEV_ENVIRONMENT).
 - A Frappe tag move can change a contract TEX relies on: v16.36.1 stopped answering an expired password with the
   reset link (ADR-074). Run every suite on a Frappe move, and read the diff of `frappe/auth.py`, `frappe/oauth.py` and
   `frappe/integrations/oauth2.py` between the tags.
 
 ## 10. First steps for the session that takes over
 
-1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md` (§6O, §6P); skim the
-   descriptions of PRs #33–#36 (the latest complete batches).
-2. Check on GitHub that PR #36 (2P) is merged. If it is still open, ask the owner first; never start the next batch
+1. Read `CLAUDE.md`, this file and the newest §6* sections of `IMPLEMENTATION_STATUS.md` (§6P, §6Q); skim the
+   descriptions of PRs #34–#37 (the latest complete batches).
+2. Check on GitHub that PR #37 (2Q) is merged. If it is still open, ask the owner first; never start the next batch
    on an unmerged base, and never merge it yourself.
 3. Set up the bench (`docs/tex-engine/DEV_ENVIRONMENT.md`; after a container restart the services must be started
    again, its "Cloud containers can restart" section) and run the pure unit tests and one integration module.
 4. Agree the next batch with the owner, in Turkish, with the options of §2 and the consequence of each (plain
    questions worked best, D-14): D-15 (which PMS per hotel: the PMS adapters, SMS / WhatsApp, inbound events), the
-   external C-items (C-10, C-14, C-15) when their parties deliver, a booking made for someone else (§2 item 11: ask
-   its questions first), or another LOW batch (the "Not done" lines of §6*, §6P's among them). Never start an item that waits for an answer.
+   external C-items (C-10, C-14, C-15) when their parties deliver, the money batch (§2 item 13), or the owner's
+   questions of §2 items 12 and 14–20 (each changes an existing test assertion or a rule: ask first). Every LOW
+   leftover that needed no decision was done in 2Q. Never start an item that waits for an answer.
 5. Work as in §3; keep this file current: when a batch merges, mark it in §1 in your next batch's docs commit.
 
 The owner's opening message for a new session is kept in `NEXT_SESSION_PROMPT.md` (Turkish): the same steps and
