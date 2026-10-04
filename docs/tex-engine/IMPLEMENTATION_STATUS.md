@@ -2415,10 +2415,11 @@ code. ADR-081. Three independent read-only reviewers re-verified 27 cards first:
   `test_member_web.TestRejoinBlocked.test_2q_staff_block_the_rejoin_of_a_membership_that_ended`, e2e
   `crm-membership.spec` (a new step). Red: `module 'kamra.tex.api.crm' has no attribute 'loyalty_block_rejoin'`; e2e
   `Timeout … getByRole('button', { name: 'Block online rejoin' })`.
-- 2Q-10 (§6O, §6N2) **COMPLETE**: a link filed after an erasure by a request that read before it is dropped (an
-  erasure counter); a link opened by a request that then fails is put back on rollback. Tests:
-  `test_member_web.TestPendingLinksAndErasure` (+2). Red: `ValidationError not raised` (the link opened);
-  `MEMBER_LINK_INVALID` on opening it again after the rollback.
+- 2Q-10 (§6O, §6N2) **COMPLETE**: a link filed for a profile erased meanwhile is dropped (the profile read again as
+  committed after filing, review round 1; an erasure counter at first); a link opened by a request that then fails is
+  put back on rollback. Tests: `test_member_web.TestPendingLinksAndErasure` (+3). Red: `ValidationError not raised`
+  (the link opened); `MEMBER_LINK_INVALID` on opening it again after the rollback; review round 1: `Lists differ:
+  [('c04-mia-…', 'Confirm t…')] != []` (the counter missed a read view older than the erasure).
 - 2Q-11 (§6N1) **COMPLETE**: the caller's membership is read once per program, the erasure mark once
   (`loyalty.member_hotels`). Test: `test_loyalty_membership.TestMemberPrices.test_2q_…`. Red: `2 != 1`.
 - 2Q-12 (§6N2) **COMPLETE**: the "Member price" teaser prices a hotel again only where a members-only promotion may
@@ -2438,6 +2439,14 @@ code. ADR-081. Three independent read-only reviewers re-verified 27 cards first:
   value); a content component copying its props at mount (§6L: none found, every dialog content mounts per opening);
   the GitHub actions' Node 20 warnings (§6Z: GitHub runs them on Node 24 already; the new majors' pins need their own
   reviewed PR).
+- Review round 1 **COMPLETE** (an independent read-only reviewer; no HIGH or MEDIUM; 3 LOW, 5 NITs): L1, the legacy
+  banquet office's enquiry address left out, not refused (red: `ValidationError: Please enter one plain e-mail
+  address.`); L2, the profile read again as committed after a link is filed (above); N1, a failed put-back logged;
+  N3, no second audit for a block already made (red: `3 != 2`); N4, the price notice focuses only for a new change;
+  N5, a doc comment. Tests: `test_public_booking.TestEverySaveKeepsOnePlainAddress` (+1),
+  `test_member_web.TestPendingLinksAndErasure` (+1, and the first race test erases for real), `TestRejoinBlocked`
+  (+2 assertions). Accepted, L3: the legacy channel manager (hotels outside TEX) makes a profile per event for a
+  phone-less guest whose address it leaves out.
 - **Not done:**
   - the owner's (HANDOFF §2): a basket refused as gone offers "Try again" (item 12, LO-14's assertion); Turkish-F
     letters other than ı/İ as shortcuts (`keys.test.ts`, `callcenter-shortcuts.test.ts` assert none); a connection

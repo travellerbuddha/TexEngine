@@ -10212,12 +10212,13 @@ and is checked for the member price (ADR-077, ADR-080). In the call centre a sep
   ended, its end (when, why) kept, audited `loyalty.member_block`; an active one is refused (ending it with the block
   does both). The CRM offers "Block online rejoin" on such a membership. Before, staff joined the guest and ended the
   membership again. Staff joining the guest still lift the block (the owner's option b).
-- *Member link races* (§6O, §6N2): an erasure counts its drops of an address's links (Redis, 30 minutes, by the
-  address's hash); a request that read the profile before and filed its link after sees the count change and drops its
-  own link, mailing nothing (a join link opened later made the erased profile again). No database lock: the read
-  stays plain (a locking read by e-mail from an anonymous endpoint was the alternative). A link taken by a request that
-  then fails before its commit is put back by `after_rollback` (a commit clears it; a COMMIT statement that fails
-  itself is not covered, rare).
+- *Member link races* (§6O, §6N2): after filing its link, a request reads the profile it found again as committed (a
+  share-locked read of its row by name, `members._still_theirs`) and drops the link of a profile erased or merged
+  meanwhile, mailing nothing (a join link opened later made the erased profile again); an erasure committed after that
+  read drops the link itself, which is pending by then. The profile is still found with a plain read (a locking read by
+  e-mail from an anonymous endpoint was the alternative). A link taken by a request that then fails before its commit
+  is put back by `after_rollback` (a commit clears it; a COMMIT statement that fails itself is not covered, rare; a
+  failure to put it back is logged).
 - *Membership reads* (§6N1): `loyalty.member_hotels` reads the profile's erasure mark once and each program once for a
   set of hotels (the call centre's search, the booking site's member hotels); it was once per hotel.
 - *The "Member price" teaser* (§6N2): `promotions.may_apply_to_stay` (pure) rules out a members-only promotion that can
@@ -10236,3 +10237,12 @@ and is checked for the member price (ADR-077, ADR-080). In the call centre a sep
   dependency, G-63).
 - Money, for its own batch: a review recorded while a new charge starts (§6K1), a duplicate capture audited apart
   (§6K1), LO-09's duplicate check of a profile created meanwhile (a locking read of profiles by e-mail and phone).
+- *Review round 1* (an independent read-only reviewer; no HIGH or MEDIUM; 3 LOW, 5 NITs): L1, the legacy banquet
+  office's enquiry address (a list or a display name, which Frappe's field takes) was refused and the customer could
+  not be linked: left out, as on the other legacy paths nobody typed it on; L2, the erasure counter first used for
+  the link race missed a request whose read view predated the erasure (it found the profile as it was after the
+  counter moved): replaced by the locking re-read above (N2, a counter value repeating after its TTL, went with it);
+  N1, a failure to put a link back is logged, never the request's answer; N3, blocking a membership already blocked
+  writes no second audit; N4, the price notice takes the focus only for a change it did not show; N5, a doc comment
+  back on its component. Accepted (L3): the legacy channel manager (hotels outside TEX) makes a profile per event for a
+  phone-less guest whose address it now leaves out.
