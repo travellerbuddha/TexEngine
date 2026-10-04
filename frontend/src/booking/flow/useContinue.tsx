@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react"
 import { useI18n } from "../i18n"
 import { extraAnchor, refusalText } from "../lib/extras"
 import { searchesAgain } from "../lib/methods"
+import { unseenChanges } from "../lib/priceChange"
 import { refusalMessage } from "../lib/refusals"
 import { Button } from "../ui/controls"
 import { Alert } from "../ui/feedback"
@@ -211,8 +212,13 @@ export function PriceChangeNotice() {
   const ref = useRef<HTMLDivElement>(null)
   const changes = b.flow.priceChanges
   const shown = changes.length > 0
+  // the list it showed: a list with nothing new (one change gone, the same ones again) does not take the focus
+  // while the booking goes on (2Q review round 1)
+  const before = useRef<typeof changes>([])
   useEffect(() => {
-    if (changes.length) {
+    const fresh = unseenChanges(changes, before.current).length > 0
+    before.current = changes
+    if (fresh) {
       ref.current?.focus()
       ref.current?.scrollIntoView({ block: "center" })
     }

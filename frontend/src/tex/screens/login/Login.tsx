@@ -41,8 +41,6 @@ const DEMO_ACCOUNTS = [
   { label: "core.login.demo.housekeeping", usr: "hk@kamra.local", pwd: "KamraHK1!" },
 ]
 
-/** Sign-in (G-60): the brand from TEX Settings, the six TEX languages, the source offer. */
-
 /** Frappe raises OutgoingEmailError (HTTP 501) when an expired password's reset mail cannot be sent: no outgoing
  * e-mail account, or a failing one (§6ZF, batch 2Q). The sign-in was right, so the fields hold no fault. */
 function mailFailed(e: unknown): boolean {
@@ -50,6 +48,7 @@ function mailFailed(e: unknown): boolean {
   return status === 501 || (typeof body === "string" && body.includes("OutgoingEmailError"))
 }
 
+/** Sign-in (G-60): the brand from TEX Settings, the six TEX languages, the source offer. */
 export default function Login(props: { onSuccess: () => void }) {
   const ready = useTexI18nReady()
   if (!ready)
