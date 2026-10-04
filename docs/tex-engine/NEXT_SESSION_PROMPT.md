@@ -4,26 +4,29 @@ TEX Engine'de çalışmaya devam ediyorsun (repo: travellerbuddha/texengine, tem
 Gereksinimleri bana yeniden sorma. Durumu şu sırayla oku:
 1. `CLAUDE.md`
 2. `docs/tex-engine/HANDOFF.md` (hepsini; özellikle §1, §2, §3, §9 ve §10)
-3. `docs/tex-engine/IMPLEMENTATION_STATUS.md` (en son §6 bölümleri: §6N2, §6O)
+3. `docs/tex-engine/IMPLEMENTATION_STATUS.md` (en son §6 bölümleri: §6O, §6P)
 4. `TARGET_ARCHITECTURE.md`
-5. `ARCHITECTURE_DECISIONS.md` (ADR-078, ADR-079)
+5. `ARCHITECTURE_DECISIONS.md` (ADR-079, ADR-080)
 6. `PRODUCT_SPEC.md`
-7. `git log` ve PR #32–#35 açıklamaları
+7. `git log` ve PR #33–#36 açıklamaları
 
 Son durum:
 - Denetim Part 2 bitti; üye fiyatları (C-04) tamamlandı (2N-1 PR #33, 2N-2 PR #34; ikisi de birleşti).
-- 2O partisi, PR #35 (sahip birleştirecek): LOW kalanlar ve iki karar:
-  - 6b: personel üyeliği kapatırken web'den yeniden katılımı engelleyebilir (C-04h);
-  - CLP/ISK kuruşsuz (ISO 4217);
-  - C-08, C-09, C-11 varsayılanlarıyla kapandı; C-13 D-12 ile cevaplı.
+- 2O partisi (PR #35) birleşti: LOW kalanlar, C-04h ve CLP/ISK.
+- 2P partisi, PR #36 (sahip birleştirecek): misafir kimliği ve LOW kalanlar:
+  - aynı e-posta adresi aynı misafirdir (büyük/küçük harf fark etmez); aksanlı benzeri başka misafirdir;
+  - e-posta tek ve düz bir adres olmalı; değilse rezervasyon kodla reddedilir, kanal rezervasyonu adressiz girer;
+  - sepet sorun kodları, "zaten rezerve edildi" uyarısı ve diğer LOW maddeler (§6P).
+- Sonraya bırakılan karar: başkası adına rezervasyon (puanı kim kazanır, üye fiyatı kimin, onay e-postası kime gider). Bu parti başlarken bana sorulacak (HANDOFF §2 madde 11).
 
 ## İlk adımlar
-1. GitHub'da PR #35'in birleşip birleşmediğine bak. Birleşmediyse önce bana sor. Birleşmemiş bir tabanın üzerinde yeni partiye başlama, PR'ı kendin de birleştirme.
+1. GitHub'da PR #36'nın birleşip birleşmediğine bak. Birleşmediyse önce bana sor. Birleşmemiş bir tabanın üzerinde yeni partiye başlama, PR'ı kendin de birleştirme.
 2. Yerel bench'i `docs/tex-engine/DEV_ENVIRONMENT.md`'ye göre kur. Konteyner yeniden başladıysa servisleri o dosyadaki "Cloud containers can restart" bölümüne göre yeniden başlat. Saf birim testlerini ve bir entegrasyon modülünü çalıştırıp ortamın sağlam olduğunu göster.
 3. Sonraki partiyi benimle birlikte seç. Seçenekleri HANDOFF §2'den çıkar; her birinin sonucunu sade bir dille yazıp bana sor:
    - D-15: her otelde hangi PMS? (PMS adaptörleri, SMS/WhatsApp, PMS'ten gelen olaylar)
    - Dış taraf bekleyen C maddeleri: C-10, C-14, C-15 (belge veya hesap geldiyse)
-   - Karar gerektirmeyen düşük öncelikli işler (yeni bir LOW partisi: §6* ve §6O "Not done" satırları)
+   - Başkası adına rezervasyon (HANDOFF §2 madde 11; önce soruları bana sor)
+   - Karar gerektirmeyen düşük öncelikli işler (yeni bir LOW partisi: §6* ve §6P "Not done" satırları)
 
    Cevabımı almadan, karar bekleyen bir işe başlama.
 
@@ -36,8 +39,8 @@ Son durum:
   - her madde için bir commit at (Conventional Commits).
 - Ön yüz değişikliklerinde derlenmiş paketleri de commit et: `cd frontend && npm ci && npm run build`, ardından `git add -A kamra/public`.
 - Belgeleri aynı partide güncelle:
-  - ilgili ADR'ye ek yaz ya da yeni ADR aç (sıradaki ADR-080);
-  - `IMPLEMENTATION_STATUS.md` sonuna yeni bir §6 bölümü ekle (sıradaki §6P veya partinin adı);
+  - ilgili ADR'ye ek yaz ya da yeni ADR aç (sıradaki ADR-081);
+  - `IMPLEMENTATION_STATUS.md` sonuna yeni bir §6 bölümü ekle (sıradaki §6Q veya partinin adı);
   - HANDOFF, gerekiyorsa SECURITY_MODEL ve MIGRATION_PLAN'ı güncelle;
   - yeni yama gerekiyorsa p79'dan devam et.
 - Bağımsız, salt okunur bir inceleyiciyle en çok 2 tur inceleme yap. Bulguları düzelt.

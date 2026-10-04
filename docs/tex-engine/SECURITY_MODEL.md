@@ -54,7 +54,8 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   `Guest`) is read-scoped (ADR-022).
 - **Withheld fields** (ADR-056): pricing internals (`Reservation.tex_pricing_snapshot`,
   `tex_cost_amount`, `tex_margin_amount`, `tex_fx_rate`, `tex_payload_hash`, `TEX Quote.result_json`,
-  `payload_hash` (the frozen payload's digest confirms a guess of its cost, G-99, ADR-075),
+  `payload_hash` (the frozen payload's digest confirms a guess of its cost, G-99, ADR-075; a refused reprice's audit
+  event, which records two digests, is served in Desk / REST to platform administrators only, 2P),
   `TEX Reservation Revision.snapshot_before` / `snapshot_after`) and a guest's stored totals over
   every tenant (`Guest.tex_stays`, `tex_lifetime_value`, `tex_lifetime_currency`, `tex_last_stay`,
   `tex_loyalty_points`) are at Frappe permlevel 1, which only System Manager reads. Desk and REST
@@ -80,7 +81,10 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   is read at its own hotel only (`TEX Loyalty Ledger.property`: the stay's or booking's, or the hotel
   a manual adjustment was made for; ADR-056 second review).
 - **Guest identity and duplicates** (ADR-056 reviews): a booking joins a profile by its e-mail; a phone
-  finds one only for staff, only when exactly one profile has it. Duplicates are merged by
+  finds one only for staff, only when exactly one profile has it. The e-mail is the exact address, in any case:
+  an accented look-alike is another guest, though the database compares accents away (owner, 2P; ADR-080,
+  `booking.profile_of_email`, also a member link's), and a typed address must be one plain ASCII address
+  (`booking.plain_email`; a channel's other address is left out). Duplicates are merged by
   `crm.merge_guests` (`crm.edit` at every hotel either profile has records at, one enterprise, consent
   the stricter of the two, audited); an erasure withdraws every consent and removes contact data from
   cases, funnel, bookings' booker fields and the change history. A merge locks both profiles and reads
@@ -190,6 +194,12 @@ the guest's manage token.
   links of a profile of no enterprise, which matches every enterprise's site: the pending links are the address's
   now; a staff-approved credit ordered by its request's creation in the overpaid check) and Low items fixed with
   fail-first tests (PR #35).
+
+- 2026-10-04 batch 2P (ADR-080): a booking joins only the profile of its exact address (an accented look-alike
+  joined another person's stays, points and member price check); a typed address must be one plain address (an
+  invisible character made a look-alike profile); a refused reprice's audit event, which holds the payload digests,
+  is served in Desk and REST to platform administrators only (§6L); a paid change's engine reasons stay with staff,
+  never in the guest's error body. Review rounds: PR #36.
 
 ## 7. Known gaps (tracked)
 

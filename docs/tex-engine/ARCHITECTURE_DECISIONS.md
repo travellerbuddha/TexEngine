@@ -10093,3 +10093,56 @@ scope prioritised after go-live), and C-13 is D-12's answer (loyalty is live at 
   query (read as the 2Z payment drawer was, `payments-setup.spec`).
 - *Tests only:* an e2e of "Not paid (checked with the bank)" (LO-18) with this run's own sandbox Virtual POS account
   and a payment link fixed to it, so no other spec's card payments change.
+
+## ADR-080 Batch 2P: a guest is their e-mail address, in any case and only that address; one plain address; the LOW leftovers (audit Part 2P)
+The owner decided (2026-10-04): the same e-mail address is the same guest, whatever its case; an accented look-alike
+(`ana.muller@…` and `ana.müller@…`) is another guest. A booking made for someone else (a guest booking for a friend
+or a colleague) is a separate later batch, whose questions (who earns the points, whose member prices apply, who gets
+the confirmation) are asked when it starts; until then the booker's address decides the profile, as before.
+- *The same address.* `booking.profile_of_email(email, enterprise, lock=)` reads the profiles the database finds for
+  the address (utf8mb4_unicode_ci compares case and accents away) in the enterprise or in none, oldest first, and
+  takes the first whose stored e-mail, trimmed and lower-cased, is the address. `_find_profile` (every booking:
+  web, staff, channel through `find_or_create_guest`, and the member-price check before any lock) and
+  `members._profile` (2O review round 2, S-1) both use it, so a booking and a member link find the same profile. The
+  locking read locks every candidate (before: the first only), in the same order, so one address's profiles are
+  still locked oldest first. Not taken: a binary collation on `Guest.email` (a schema change under every Guest
+  query; the CRM's search and `possible_duplicates` rely on the folding, which keeps showing look-alikes to staff to
+  merge).
+- *One plain address.* `booking.plain_email(raw)`: trimmed, lower case, ASCII, Frappe's address pattern matched whole,
+  at most 140 characters, else None: the member sign-in's rule (ADR-078 review), now one function. A booking refuses
+  anything else with `GUEST_EMAIL_INVALID` before any lock (it checked only for an "@"; Frappe's Email field then
+  refused an accented address when the booking stored it, with no code; an invisible character passed Frappe's own
+  check, which splits on it, and made a look-alike profile). A channel's booking leaves such an address out (the
+  guest's profile and `booker_email`): the channel sold the stay, and its message no longer fails, retries and parks.
+  Not taken: the staff booker's own address in the CRS (`ui_crs._booker`): it is no identity, and Frappe's field
+  check still applies to it.
+- *A basket's problem has its code* (§5b): `quotes_summary` gives each room `problem_code` beside `problem`
+  (`quoting.quote_refusal`; `quote_is_usable` is gone). The booking app passes it on, a booked price first, and a
+  `QUOTE_USED` refusal (the basket's or the booking's) shows "This price is already booked" with "See available
+  rooms": a refresh of a price already booked (another tab, the browser's history) books the stay twice.
+- *A basket refused as gone* (an "expired" refusal: `QUOTE_INVALID`, `SEARCH_AGAIN`) takes the flow's refresh path,
+  its code with it, instead of "Try again", which failed the same way (§6K5). A connection failure or a rate limit
+  still asks to try again (LO-14).
+- *Extras a hotel cannot price* (two live revisions of one extra, two tax policies in force: `Unsellable`) refuse the
+  add-extras calls by code: a guest `CHANGE_NOT_ONLINE` (contact the hotel), staff `EXTRAS_REFUSED` naming the
+  problem (`reasons`: its code). It was an uncoded 500 (§6G3).
+- *A paid guest change the engine refuses when the payment applies it* keeps the engine's reasons on its request for
+  staff: `modification.guest_unsellable` puts them on the refusal (`staff_detail`, an attribute, never its params),
+  `guest_changes` stores them. The guest's error body still names none (§6G3).
+- *A refused reprice's digests in Desk and REST* (§6L): `perm.DIGEST_ACTIONS` (`reservation.reprice_refused`) are
+  served there to platform administrators only, as a contract's events (G-97); the TEX trail serves them, masked
+  without `price.view_cost` (G-99).
+- *The extras backfill* logs a stay whose old quantity is not whole once, not on each daily run: not again while a
+  log of it made since the stay was created is kept (§6K4).
+- *The promotion editor* shows a code's key while it is typed (`promoCodeKey`: the server's fold without its trim;
+  ŞEKER 24 is SEKER 24); the CRS's `normalisePromoCode` is that key with anything but letters, digits, "_" and "-"
+  left out, as before (§6M).
+- *The CRM's redemption hint* finds a stay's program as `loyalty.program_for` does (`programOf`: the hotel's own,
+  else its group's by the program's hotels); a group program's other hotels had none (§6N1).
+- *An expired password whose link Frappe mailed* (v16.36.1 answers without `redirect_to`) says the link was e-mailed
+  and only the latest one works; "Forgot password?" would replace its key (§6ZF). An off-site `redirect_to` keeps the
+  old text and is never followed.
+- Dropped after re-verification: "a settle call without a charge is audited each time" (§6K4): both production
+  callers pass the charge (`complete`, the refund); "a delivery a worker never finishes" (§6K4): the late-message
+  check shows it, and watching it apart needs a new column. Left for its own batch: a duplicate capture audited apart
+  (§6K1; money).

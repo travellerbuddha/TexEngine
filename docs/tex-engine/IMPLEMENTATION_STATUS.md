@@ -2276,3 +2276,52 @@ re-verified against the code first; all held (the erasure item was worse than li
     without cost reads, and a refused reprice's audit digests (§6L); a group program's membership when one hotel gets
     its own program (§6N1).
 
+
+## 6P. Audit Part 2P — a guest is their e-mail address, and the LOW leftovers (2026-10-04)
+
+The owner chose (2026-10-04) a new LOW batch and decided the booking identity it needed: the same e-mail address is
+the same guest, in any case, and an accented look-alike is another guest. A booking made for someone else is a later
+batch of its own (HANDOFF §2), asked about when it starts. ADR-080. Each card was re-verified against the code first:
+nine held, two were dropped (below) and one was left for its own batch (money).
+
+- 2P-1 the same address **COMPLETE**: `booking.profile_of_email` (the collation's candidates, the exact address
+  taken); `_find_profile` and `members._profile` use it. Tests: `test_public_booking.TestBookingIdentity` (2). Red:
+  the look-alike's booking joined the accented profile, `'G-00393' == 'G-00393'` (with nothing to fill in on that
+  profile; with something, the booking failed on saving its accented address).
+- 2P-2 one plain address **COMPLETE**: `booking.plain_email`; a booking refuses another with `GUEST_EMAIL_INVALID`
+  before any lock, a channel's booking leaves it out; `members._email` uses it. Tests:
+  `test_public_booking.TestBookingIdentity.test_2p_an_address_no_profile_can_keep_is_refused_by_its_code` (3 cases),
+  `test_distribution.TestInbound.test_2p_a_guest_address_no_profile_can_keep_is_left_out`. Red: `(None, None) !=
+  ('GUEST_EMAIL_INVALID', …)` for an accented and a doubled "@", `ValidationError not raised` for an invisible
+  character; the channel's message `'Failed' != 'Applied'` (`… is not a valid Email Address`).
+- 2P-3 (§5b, §6G3) **COMPLETE**: a basket's rooms carry `problem_code`; a `QUOTE_USED` refusal shows "This price is
+  already booked" and "See available rooms" (`errors.quoteUsedTitle`, six languages). Tests:
+  `test_public_booking.TestBasketProblems` (1), node `checkout-fallback` (+1). Red: `[(True, None)] != [(True,
+  'QUOTE_EXPIRED')]`; node `basketExpiry is not a function`.
+- 2P-4 (§6K5) **COMPLETE**: a basket refused as gone takes the refresh path, not "Try again". Test: node
+  `checkout-fallback` (+1). Red: `actual: null, expected: { code: 'QUOTE_INVALID', … }`.
+- 2P-5 (§6G3) **COMPLETE**: extras a hotel cannot price refuse by code (`CHANGE_NOT_ONLINE` / `EXTRAS_REFUSED`).
+  Tests: `test_post_booking_extras.TestMisconfiguredExtras` (2). Red: a bare `Unsellable` (errors=5).
+- 2P-6 (§6G3) **COMPLETE**: a paid guest change the engine refuses when applied keeps the engine's reasons for staff.
+  Test: `test_self_service_money.TestHigherPrice.test_2p_a_paid_change_the_engine_refuses_keeps_its_reasons_for_
+  staff`. Red: `"… past the contract's last stay day" not found in 'The modified stay cannot be sold. Please choose
+  other dates or contact the hotel.'`.
+- 2P-7 (§6L) **COMPLETE**: Desk and REST serve a refused reprice's event (its digests) to platform administrators
+  only. Test: `test_crm_privacy.TestPricingInternalsOutsideTex.test_2p_desk_and_rest_never_serve_a_refused_reprices_
+  digests`. Red: `['get_list', 'frappe.client.get'] != []`.
+- 2P-8 (§6K4) **COMPLETE**: the extras backfill logs a stay it leaves out once. Test:
+  `test_extras_inventory.TestExtrasAdministration.test_2p_a_stay_left_out_of_the_backfill_is_logged_once`. Red: `3 !=
+  1`.
+- 2P-9 (§6M) **COMPLETE**: the promotion editor shows a code's key while it is typed (`promoCodeKey`). Test: node
+  `promo-code` (+1). Red: `promoCodeKey is not a function`; the editor showed `"şeker 24".toUpperCase()` = ŞEKER 24.
+- 2P-10 (§6N1) **COMPLETE**: the CRM's redemption hint finds a group program at each of its hotels (`programOf`).
+  Test: node `crm-redeem` (+1). Red: `programOf is not a function`; the dialog's lookup gave `undefined` for a stay at
+  a group's second hotel.
+- 2P-11 (§6ZF) **COMPLETE**: an expired password whose link was mailed says so (`core.login.password_expired_mailed`,
+  six languages). Test: e2e `entry-branding.spec` (new). Red: `Received: "Your password has expired. Set a new one
+  with "Forgot password?"."`.
+- Dropped: a settle call without a charge (§6K4; both production callers pass the charge) and a delivery a worker
+  never finishes (§6K4; the late-message check shows it, a separate watch needs a new column). Left for its own
+  batch: a duplicate capture audited apart (§6K1, money).
+- Docs: ADR-080; HANDOFF (§1, §2, §6, §7, §9, §10); SECURITY_MODEL (the guest identity and the Desk audit rows, the
+  review log); NEXT_SESSION_PROMPT. No schema change, no patch.

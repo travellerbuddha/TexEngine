@@ -89,6 +89,8 @@ bench schedule &
 cd frontend && TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD='TexDemo#2026' \
   PW_CHROMIUM=/opt/pw-browsers/chromium npx playwright test -c e2e
 ```
+Stop the worker and the scheduler again (`pkill -f "bench worker"`, `pkill -f "bench schedule"`) before the next
+integration run: left running, they take the test site's jobs while the tests run (2P).
 Repeated runs book real inventory at the demo hotels; free it between series of runs with
 `bench --site test.localhost execute kamra.tex.devtools.demo_seed.release_test_bookings`
 (cancels future test-run stays, keeps demo-seed bookings; refuses on production sites).
