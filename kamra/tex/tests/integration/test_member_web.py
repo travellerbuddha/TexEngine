@@ -706,6 +706,39 @@ class TestPendingLinksAndErasure(WebMemberCase):
 		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=join_link), "MEMBER_LINK_INVALID")
 		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
 
+	def test_2q_a_link_filed_after_an_erasure_by_a_request_that_read_before_it_is_dropped(self):
+		"""Batch 2Q (§6O): a request that read the profile before an erasure committed, and filed its link after the
+		erasure dropped the address's links (in its transaction and after its commit), kept that link for its 30
+		minutes: a join link then made the erased profile again from the name typed before. The request sees that the
+		address was erased meanwhile and drops its own link; nothing is mailed."""
+		real, before = members._profile, len(self.mails)
+
+		def read_then_erased(*a, **kw):
+			found = real(*a, **kw)
+			members.drop_links([self.email])            # the erasure commits and drops the address's links meanwhile
+			return found
+
+		with mock.patch.object(members, "_profile", side_effect=read_then_erased):
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		sent = self.mails[before:]
+		for found in (re.search(r"#token=([A-Za-z0-9_\-]+)", html) for _to, _subject, html in sent):
+			if found:
+				self.assertEqual(self.refused(public.member_verify, site=SLUG, token=found.group(1)),
+				                 "MEMBER_LINK_INVALID")
+		self.assertEqual(sent, [])
+
+	def test_2q_a_link_opened_by_a_request_that_then_fails_can_be_opened_again(self):
+		"""Batch 2Q (§6N2): a link is taken when it is opened; a request that failed after opening it (its answer, its
+		commit) lost it, the session it made rolled back. The link is put back when the request's transaction is."""
+		self.join(self.guest)
+		self.ask(self.email)
+		token = self.token()
+		self.assertTrue(self.verify(token)["status"]["member"])
+		frappe.db.after_rollback.run()             # the request failed after the link was opened: rolled back
+		self.assertTrue(self.verify(token)["status"]["member"])                 # the link works again, once
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
+
 	def test_2o_another_address_keeps_its_link(self):
 		other = self.profile("keeps")
 		other_email = frappe.db.get_value("Guest", other, "email")
