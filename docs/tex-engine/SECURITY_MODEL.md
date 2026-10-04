@@ -199,7 +199,10 @@ the guest's manage token.
   joined another person's stays, points and member price check); a typed address must be one plain address (an
   invisible character made a look-alike profile); a refused reprice's audit event, which holds the payload digests,
   is served in Desk and REST to platform administrators only (§6L); a paid change's engine reasons stay with staff,
-  never in the guest's error body. Review rounds: PR #36.
+  never in the guest's error body. Independent review round 1: 1 High (CI's static guest-refusal check), 3 Low
+  (the apps' address checks, a channel's display-name address, the call centre's booker and the CRM's profile
+  address: one plain address, so `İNFO@…` typed with caps lock on a Turkish keyboard is refused, not a second
+  profile) and NITs fixed with fail-first tests (PR #36).
 
 ## 7. Known gaps (tracked)
 

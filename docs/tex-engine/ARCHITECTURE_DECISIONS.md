@@ -10146,3 +10146,15 @@ the confirmation) are asked when it starts; until then the booker's address deci
   callers pass the charge (`complete`, the refund); "a delivery a worker never finishes" (§6K4): the late-message
   check shows it, and watching it apart needs a new column. Left for its own batch: a duplicate capture audited apart
   (§6K1; money).
+- *Review round 1* (an independent read-only reviewer): one HIGH, CI's static check of guest refusals
+  (`test_guest_refusal_codes`) counted the refusal `guest_unsellable` built in a variable as uncoded: `refusal()` takes
+  `staff_detail` (keyword-only, on the exception, never in its params) and the call stays inline. Three LOW: the booking
+  app's and the CRM's address checks took what the server now refuses (`lib/email.plainEmail`, the server's rule, in
+  the details step and the profile drawer); a channel's `Name <address>` lost its address (one address in a display
+  name is that address, a list is still left out); the call centre's booker address and the CRM's profile address took
+  any address Frappe's field takes, a Turkish dotted İ among them (caps lock: İNFO@…, which no booking for info@… joins
+  now), so both take one plain address (the profile keeps it as typed). NITs: ASCII is checked before lower case (a
+  KELVIN SIGN lower-cases to k); no staff detail without reason text; "already booked" says where the confirmation is.
+  Not taken: the Desk Guest form and the legacy PMS paths that make a profile (banquet, the legacy public API) keep
+  Frappe's own check; a basket refusal a refresh does not clear asks for a refresh again (it asked to try again: as
+  stuck either way); `HANDOFF_STAGE3.md` keeps its mention of `quote_is_usable` (a record of its time).

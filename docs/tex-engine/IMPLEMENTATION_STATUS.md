@@ -2325,3 +2325,29 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   batch: a duplicate capture audited apart (§6K1, money).
 - Docs: ADR-080; HANDOFF (§1, §2, §6, §7, §9, §10); SECURITY_MODEL (the guest identity and the Desk audit rows, the
   review log); NEXT_SESSION_PROMPT. No schema change, no patch.
+- Review round 1 **COMPLETE** (an independent read-only reviewer; 1 HIGH, 3 LOW, 5 NITs): HIGH, CI's TEX unit check
+  `test_guest_refusal_codes` counted `guest_unsellable`'s refusal as uncoded (built in a variable): `refusal(...,
+  staff_detail=)` inline (red: `Lists differ: ["services/modification.py:77 guest_unsellable: …"] != []`, CI #241);
+  LOW, the booking app's and the CRM's address checks (`lib/email.plainEmail`; red: node `ERR_MODULE_NOT_FOUND`, and
+  today's checks accept `ana@müller.de`, `ana@example.com.`, `a..b@…`, an invisible character, `İNFO@HOTEL.COM`); LOW,
+  a channel's `Name <address>` keeps its address (red: `(None, None) != ('mia.berg.r1@example.com', …)`); LOW, the
+  call centre's booker and the CRM's profile take one plain address (red: `"Invalid booker email address" does not
+  match "bärbel.2p@example.de is not a valid Email Address"`; `ValidationError not raised` for `İNFO.2P@HOTEL.COM`,
+  `ınfo…`, `Ana <…>`, a trailing dot); NITs: ASCII before lower case (red: `'kate.2p@example.com' is not None` for a
+  KELVIN SIGN), no empty staff detail (red: `'The modified stay cannot be sold: ' is not None`), "already booked" says
+  where the confirmation is (`errors.quoteUsedBody`, six languages). Tests: `test_public_booking.TestBookingIdentity`
+  (+2), `test_distribution` (+1), `test_commercial_flows.TestPaymentMethodRules` (+1), `test_self_service_money` (+1),
+  node `plain-email` (new, 2).
+- **Not done:**
+  - the Desk Guest form and the legacy PMS paths that make a profile (banquet, the legacy public API) keep Frappe's
+    own address check (it takes a display name, a Turkish dotted İ or a trailing dot); a profile stored that way is
+    joined by no booking (ADR-080) and shows in the CRM's possible duplicates (LOW; the TEX CRM refuses it);
+  - a booking made for someone else (HANDOFF §2 item 11, owner questions first);
+  - a duplicate capture audited apart (§6K1, money: its own batch);
+  - a basket refusal a refresh does not clear (`RATE_UNAVAILABLE` of a fixed amount) asks for a refresh again, each
+    making new quotes (it asked to try again before: as stuck either way; LOW);
+  - the CRS's `normalisePromoCode` leaves out a space the server keeps in a code (`YAZ 24` is typed `YAZ24` in the
+    call centre, so a code saved with a space cannot be applied there; LOW, found with 2P-9);
+  - the §6* "Not done" lines 2P did not take (HANDOFF §2 item 10): among them a review recorded while a new charge
+    starts (§6K1), the digest an editor without cost reads (§6L), a group program's membership when one hotel gets
+    its own program (§6N1), the `member_blocked` mail's program list (§6O).
