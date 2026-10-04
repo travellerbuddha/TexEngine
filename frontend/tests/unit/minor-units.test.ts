@@ -39,3 +39,13 @@ for (const [app, path] of [
     }
   })
 }
+
+// The owner's answer (2026-10-04, option a): CLP and ISK have no minor unit (ISO 4217), on the server and the screens
+test("CLP and ISK are whole units on the server and both apps' screens", () => {
+  for (const ccy of ["CLP", "ISK"]) {
+    assert.equal(units(server, ccy), 0, `server ${ccy}`)
+    for (const path of ["../../src/tex/lib/format.ts", "../../src/booking/lib/format.ts"]) {
+      assert.equal(units(screenUnits(path), ccy), 0, `${path} ${ccy}`)
+    }
+  }
+})

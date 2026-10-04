@@ -13,12 +13,13 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 
 # ISO 4217 minor units for currencies TEX sells in or is likely to meet. Anything
-# missing defaults to 2, which is right for the vast majority of currencies.
+# missing defaults to 2, which is right for the vast majority of currencies. CLP and ISK are
+# whole units (the owner, 2026-10-04: they were 2 here, as missing; the screens follow this table).
 MINOR_UNITS: dict[str, int] = {
 	"TRY": 2, "EUR": 2, "GBP": 2, "USD": 2, "CHF": 2, "RUB": 2, "RON": 2, "PLN": 2,
 	"SEK": 2, "NOK": 2, "DKK": 2, "CZK": 2, "HUF": 2, "AED": 2, "SAR": 2, "INR": 2,
-	"THB": 2, "MYR": 2, "IDR": 2, "VND": 0, "JPY": 0, "KRW": 0, "KWD": 3, "BHD": 3,
-	"OMR": 3, "JOD": 3, "TND": 3,
+	"THB": 2, "MYR": 2, "IDR": 2, "VND": 0, "JPY": 0, "KRW": 0, "CLP": 0, "ISK": 0, "KWD": 3,
+	"BHD": 3, "OMR": 3, "JOD": 3, "TND": 3,
 }
 
 ZERO = Decimal("0")
