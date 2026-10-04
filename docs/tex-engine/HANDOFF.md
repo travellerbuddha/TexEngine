@@ -68,7 +68,9 @@ the descriptions of PRs #3–#36 (each has its items, fail-first evidence, revie
   `test_scheduler_smoke` differs only locally); node unit 448; DOM 45; Playwright 217 tests in 56 spec files (8
   skipped by design; a worker must run for `manage-money.spec`, DEV_ENVIRONMENT); eval 76/76; banquet 101; front-desk
   journey 13/13. PR #35's description has its CI runs. After 2P (PR #36, local runs): TEX unit 703; integration 51
-  modules; node unit 452; DOM 45; the full counts and the CI runs are in PR #36's description.
+  modules, 1,419 tests (`test_scheduler_smoke` differs only locally); node unit 455; DOM 45; Playwright 218 tests in 56
+  spec files (9 skipped by design); eval 76/76; banquet 101; front-desk journey 13/13. PR #36's description has its CI
+  runs.
 
 ## 2. What is left
 

@@ -2349,6 +2349,14 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   expected: null` for a BOM); NIT, a stored address's ASCII before lower case (red: `'G-00592' == 'G-00592'`, a booking
   for `kate@…` joined the KELVIN SIGN profile); NITs, ADR-080's booker line and HANDOFF's node count. Tests:
   `test_public_booking.TestBookingIdentity` (+1), node `plain-email` (+2).
+- CI **COMPLETE**: the demo seed booked Emre Yılmaz as `emre.yılmaz@example.com` (a dotless ı, which Frappe's field
+  takes), refused by 2P-2: `demo_seed.DEMO_GUESTS` carries ASCII addresses (red: CI run 37207554039,
+  `Refusal: Invalid email address.` while seeding). Test: `test_public_booking.TestBookingIdentity.test_2p_the_demo_
+  guests_have_plain_addresses`.
+- Local runs on the final head: TEX unit 703; integration 51 modules, 1,419 tests (`test_scheduler_smoke` differs only
+  locally); node unit 455; DOM 45; Playwright 218 tests (208 passed, 9 skipped by design; `booking.spec`'s mobile
+  campaign-link test failed once on "DE prices differ" and passed on its rerun, both projects: not reproduced, outside
+  the batch's code); eval 76/76; banquet 101; front-desk journey 13/13; i18n complete; ruff clean.
 - **Not done:**
   - 2P-4, a basket refused as gone still offers "Try again" (§6K5): `booking.spec`'s LO-14 assertion would change
     (owner);
