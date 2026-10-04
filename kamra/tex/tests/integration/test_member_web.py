@@ -622,6 +622,11 @@ class TestRejoinBlocked(WebMemberCase):
 			self.block()
 		frappe.clear_messages()
 		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Active", 0))
+		self.leave(block=False)
+		self.block()
+		self.assertEqual(self.block(), {"name": name, "status": "Left", "rejoin_blocked": 1})   # again: nothing new
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "loyalty.member_block", "reference_name": name}),
+		                 2, "review round 1 (N3): a block already made is not audited again")
 		fn = crm_api.loyalty_block_rejoin                                   # it locks the profile, then its membership
 		while fn is not None and fn.__code__.co_qualname != "retry_on_deadlock.<locals>.wrapper":
 			fn = getattr(fn, "__wrapped__", None)
@@ -738,13 +743,20 @@ class TestPendingLinksAndErasure(WebMemberCase):
 	def test_2q_a_link_filed_after_an_erasure_by_a_request_that_read_before_it_is_dropped(self):
 		"""Batch 2Q (§6O): a request that read the profile before an erasure committed, and filed its link after the
 		erasure dropped the address's links (in its transaction and after its commit), kept that link for its 30
-		minutes: a join link then made the erased profile again from the name typed before. The request sees that the
-		address was erased meanwhile and drops its own link; nothing is mailed."""
+		minutes: a join link then made the erased profile again from the name typed before. The request reads the
+		profile again as committed after filing its link and drops it; nothing is mailed."""
+		from kamra.api import anonymize_guest
+
 		real, before = members._profile, len(self.mails)
 
 		def read_then_erased(*a, **kw):
 			found = real(*a, **kw)
-			members.drop_links([self.email])            # the erasure commits and drops the address's links meanwhile
+			visitor = frappe.session.user
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff erase the profile meanwhile
+			try:
+				anonymize_guest(self.guest)             # the erasure and its drops, before the link is filed
+			finally:
+				frappe.set_user(visitor)  # nosemgrep: frappe-setuser -- back to the visitor
 			return found
 
 		with mock.patch.object(members, "_profile", side_effect=read_then_erased):
@@ -756,6 +768,20 @@ class TestPendingLinksAndErasure(WebMemberCase):
 				self.assertEqual(self.refused(public.member_verify, site=SLUG, token=found.group(1)),
 				                 "MEMBER_LINK_INVALID")
 		self.assertEqual(sent, [])
+
+	def test_2q_r1_a_link_filed_for_a_profile_erased_after_the_requests_read_view_is_dropped(self):
+		"""Review round 1 (L2): the request's read view can be older than the erasure (its first read came first), so
+		it finds the profile as it was, and the erasure's drops ran before it filed its link. After filing, the profile
+		is read again as committed (a locking read): an erased one drops the link, and nothing is mailed."""
+		from kamra.api import anonymize_guest
+
+		before = len(self.mails)
+		anonymize_guest(self.guest)                     # committed before the request read anything but its view
+		with mock.patch.object(members, "_profile", return_value=self.guest):   # its read view: the profile as it was
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		self.assertEqual(self.mails[before:], [])
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
 
 	def test_2q_a_link_opened_by_a_request_that_then_fails_can_be_opened_again(self):
 		"""Batch 2Q (§6N2): a link is taken when it is opened; a request that failed after opening it (its answer, its

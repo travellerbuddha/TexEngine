@@ -45,7 +45,6 @@ LINK_KEY = "tex:member_link:"                # + the token's hash
 COUNT_KEY = "tex:member_links:"              # + site and the address's hash
 REQUEST_KEY = "tex:member_request:"          # + site and the idempotency key's hash
 PENDING_KEY = "tex:member_pending:"          # + the address's hash: its links' hashes not yet opened
-ERASED_KEY = "tex:member_erasures:"          # + the address's hash: how often its links were dropped (batch 2Q)
 REQUEST_SECONDS = 600
 # a refusal that settles a link: anything else (a deadlock answered BUSY, a database error) leaves it to be used
 FINAL = frozenset({"NOT_A_MEMBER", "MEMBER_LINK_INVALID"})
@@ -152,7 +151,6 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 		return                                         # the same answer: nobody learns the limit was reached
 	from kamra.tex.services import notify
 
-	erasures = _erasures(email)                    # before the profile is read: an erasure meanwhile is seen below
 	profile = _profile(email, site_enterprise(site))
 	if purpose == "sign_in" and not profile:
 		notify.member_mail(site, email, "member_none", language=language)
@@ -176,9 +174,10 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	pipe.sadd(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 	pipe.expire(pending, LINK_MINUTES * 60)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 	pipe.execute()
-	if _erasures(email) != erasures:
-		# the address was erased while this request read its profile (as it was before) and filed the link, after the
-		# erasure dropped the address's links: its own link goes, and nothing is mailed (batch 2Q, §6O)
+	if profile and not _still_theirs(profile, email):
+		# erased (or merged away) while this request read it as it was: the erasure's drops may have run before the link
+		# was filed, so its own link goes, and nothing is mailed (batch 2Q, §6O). An erasure committed after this read
+		# drops the link itself (it is pending by then)
 		pipe = _cache().pipeline(transaction=True)
 		pipe.delete(_link_key(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 		pipe.srem(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
@@ -215,31 +214,24 @@ def drop_links(emails) -> int:
 	dropped = 0
 	for email in sorted({str(e).strip().lower() for e in emails or () if e}):
 		pending = _pending_key(email)
-		erased = _erased_key(email)
 		pipe = _cache().pipeline(transaction=True)
 		pipe.smembers(pending)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 		pipe.delete(pending)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
-		# counted, so a request that read the profile before and files its link after sees it (batch 2Q)
-		pipe.incr(erased)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
-		pipe.expire(erased, LINK_MINUTES * 60)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 		hashes = [h.decode() if isinstance(h, bytes) else h for h in pipe.execute()[0] or ()]
 		if hashes:
 			dropped += _cache().delete(*(frappe.cache.make_key(f"{LINK_KEY}{h}") for h in hashes))  # nosemgrep: frappe-cache-breaks-multitenancy -- keys are site-scoped by make_key
 	return dropped
 
 
-def _erased_key(email: str) -> str:
-	"""How often the address's links were dropped by an erasure, for ``LINK_MINUTES`` (batch 2Q). Site-scoped by
-	``make_key``; the address only as its hash, as ``_pending_key``."""
-	return frappe.cache.make_key(f"{ERASED_KEY}{digest(email)}")
+# the profile's row as committed now (a locking read: a plain one sees the request's read view)
+PROFILE_NOW = """SELECT email, tex_erased_at FROM `tabGuest` WHERE name=%s LOCK IN SHARE MODE"""
 
 
-def _erasures(email: str) -> int:
-	raw = _cache().get(_erased_key(email))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
-	try:
-		return int(raw or 0)
-	except (TypeError, ValueError):
-		return 0
+def _still_theirs(profile: str, email: str) -> bool:
+	"""The profile a request found, as committed now: not erased, not merged away, still this address's (batch 2Q review
+	round 1: the request's read view can be older than an erasure; the share lock holds it until the request ends)."""
+	row = frappe.db.sql(PROFILE_NOW, profile, as_dict=True)
+	return bool(row) and not row[0].tex_erased_at and (row[0].email or "").strip().lower() == email
 
 
 def _take_link(site, token: str) -> dict:
@@ -292,8 +284,18 @@ def verify(site, token: str) -> dict:
 		raise
 	# a request that fails after this (its answer, before its commit) rolls its session back: the link with it (batch
 	# 2Q). A commit clears the callback; a COMMIT statement that fails itself is not covered
-	frappe.db.after_rollback.add(lambda: _put_back(token, data))
+	frappe.db.after_rollback.add(lambda: _put_back_quietly(token, data))
 	return opened
+
+
+def _put_back_quietly(token: str, data: dict) -> None:
+	"""``_put_back`` from a rollback: a failure (Redis) is logged, never the request's answer (review round 1)."""
+	try:
+		_put_back(token, data)
+	except Exception:
+		from kamra.tex.security.audit import log_exception
+
+		log_exception("TEX member link put back")
 
 
 @retry_on_deadlock

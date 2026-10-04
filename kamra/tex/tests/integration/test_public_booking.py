@@ -1203,6 +1203,18 @@ class TestEverySaveKeepsOnePlainAddress(TexTestCase):
 		plain = channel_manager._find_or_create_guest("Mia Berg", "", "mia.2q@example.com")
 		self.assertEqual(frappe.db.get_value("Guest", plain, "email"), "mia.2q@example.com")
 
+	def test_2q_r1_a_banquet_customer_with_an_odd_address_is_linked_without_it(self):
+		"""Review round 1 (L1): the legacy banquet office links an enquiry's customer to a profile it makes from the
+		enquiry's e-mail, which Frappe's field takes as a list or a display name; the profile refused it, and the
+		customer could not be linked. As the other legacy paths a person did not type the profile on, it is left out."""
+		from kamra import banquet
+
+		enquiry = frappe._dict(customer_name="Ana Plain", customer_phone="", customer_email="a.2q@x.de, b.2q@x.de")
+		odd = banquet._find_or_create_guest(enquiry)
+		self.assertFalse(frappe.db.get_value("Guest", odd, "email"))
+		plain = banquet._find_or_create_guest(frappe._dict(enquiry, customer_email="ana.2q@x.de"))
+		self.assertEqual(frappe.db.get_value("Guest", plain, "email"), "ana.2q@x.de")
+
 	def test_2q_a_pre_check_in_keeps_the_address_and_takes_only_a_plain_one(self):
 		"""The pre-arrival check-in page (legacy, public, by the stay's token) wrote its e-mail field over the profile
 		with a direct write: a blank field took the address away (no audit, no `forget_contact`), and any text was

@@ -655,8 +655,9 @@ def block_rejoin(guest: str, program: str, *, reason: str, property: str | None 
 	m = membership(guest, program, lock=True)
 	if not m or m.status != "Left":
 		frappe.throw(_("Only a membership that ended can be kept from a rejoin online: end it, with the block."))
-	if not m.rejoin_blocked:
-		frappe.db.set_value("TEX Loyalty Member", m.name, "rejoin_blocked", 1)
+	if m.rejoin_blocked:
+		return {"name": m.name, "status": "Left", "rejoin_blocked": 1}     # nothing new: no second audit (review round 1)
+	frappe.db.set_value("TEX Loyalty Member", m.name, "rejoin_blocked", 1)
 	audit("loyalty.member_block", reference_doctype="TEX Loyalty Member", reference_name=m.name, property=property,
 	      new={"guest": guest, "program": program, "rejoin_blocked": True}, reason=reason)
 	return {"name": m.name, "status": "Left", "rejoin_blocked": 1}
