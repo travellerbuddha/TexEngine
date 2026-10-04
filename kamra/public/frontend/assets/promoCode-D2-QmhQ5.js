@@ -1,0 +1,1 @@
+const p={Ş:"S",Ğ:"G",Ü:"U",Ö:"O",Ç:"C"};function t(r){let e=r.normalize("NFC");for(let o=0;o<e.length+2;o++){const n=e.replace(/[İı]/g,"I").toUpperCase().replace(/I\u0307/g,"I").normalize("NFC").replace(/[ŞĞÜÖÇ]/g,a=>p[a]);if(n===e)break;e=n}return e}function l(r){return t(r).replace(/[^\p{Lu}0-9_-]/gu,"")}export{l as n,t as p};
