@@ -359,7 +359,10 @@ def _bookings_overpaid(props, now) -> dict:
 	counted apart; aged from the oldest one's last change. Money a lower price left above the total that
 	was kept as credit on the booking on purpose (a guest change settled "Credit on booking") is not counted
 	(LO-17); money above that credit is. Each such change stores the whole excess kept at its time, so the
-	latest one's amount is the credit, never their sum."""
+	latest one's amount is the credit, never their sum. Money staff kept on the booking when closing a change's
+	money ("Kept on the booking", G-93) is such a decision too, at the time it was made (batch 2O): the later of
+	the two says what is kept. ``staff_kept_at`` is NULL until staff keep money: only rows with one are read
+	(ADR-064, the explicit IS NOT NULL)."""
 	params: dict = {}
 	cond = _scope("b.property", props, params)
 	rows = frappe.db.sql(f"""SELECT b.property, COUNT(*) n, SUM(b.status = 'Cancelled') cancelled, MIN(b.modified) since
@@ -369,7 +372,13 @@ def _bookings_overpaid(props, now) -> dict:
 	                           WHERE g.booking = b.name AND g.settlement = 'Credit on booking'
 	                             AND g.status IN ('Applied', 'Approved')
 	                           ORDER BY g.creation DESC, g.name DESC LIMIT 1)
-	                         WHERE b.paid_amount > b.total_amount + COALESCE(k.settlement_amount, 0)
+	                         LEFT JOIN `tabTEX Guest Change Request` s ON s.name = (
+	                           SELECT g.name FROM `tabTEX Guest Change Request` g
+	                           WHERE g.booking = b.name AND g.staff_kept_at IS NOT NULL
+	                           ORDER BY g.staff_kept_at DESC, g.name DESC LIMIT 1)
+	                         WHERE b.paid_amount > b.total_amount + CASE
+	                             WHEN s.name IS NOT NULL AND (k.name IS NULL OR s.staff_kept_at >= k.creation)
+	                             THEN s.staff_kept_excess ELSE COALESCE(k.settlement_amount, 0) END
 	                           AND b.status != 'Draft'{cond}
 	                         GROUP BY b.property""", params, as_dict=True)
 	n, oldest, hotels = _sum(rows)

@@ -1603,6 +1603,13 @@ def _close(req, refund_outcome: str | None, reason: str, staff_money: str | None
 	recorded = _record_outside(req, due, reason) if staff_money == REFUNDED_OUTSIDE and due > 0 else ZERO
 	req.staff_settled = from_db(req.staff_settled, ccy) + due
 	req.staff_open = 0
+	if staff_money == KEPT_ON_BOOKING:
+		# the whole excess the booking holds on purpose now (batch 2O): the overpaid check reads the latest decision,
+		# as a "Credit on booking" (LO-17). The booking is locked by the close (``_lock``), its money read as it is now
+		b = frappe.db.get_value("TEX Booking", req.booking, ["paid_amount", "total_amount"], as_dict=True,
+		                        for_update=True)
+		req.staff_kept_excess = max(ZERO, from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy))
+		req.staff_kept_at = now_datetime()
 	audit("guest_change.staff_money", reference_doctype=DT, reference_name=req.name, property=req.property,
 	      new={"how": staff_money, "amount": to_str(quantize(due, ccy)), "recorded": to_str(quantize(recorded, ccy)),
 	           "currency": ccy}, reason=reason)
