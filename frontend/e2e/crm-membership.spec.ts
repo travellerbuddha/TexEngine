@@ -273,6 +273,38 @@ test("a member joined in CRM gets the member price in the Call Center; the membe
       await again.getByRole("button", { name: "Cancel" }).click()
       await expect(again).toBeHidden()
     })
+
+    await test.step("CRM: a membership that ended without the block is blocked afterwards, its end kept (batch 2Q)", async () => {
+      await row.getByRole("button", { name: "Join program" }).click()
+      const join = agent.getByRole("dialog")
+      await Promise.all([
+        agent.waitForResponse((r) => r.url().includes("kamra.tex.api.crm.loyalty_join") && r.ok()),
+        join.getByRole("button", { name: "Join program" }).click(),
+      ])
+      await expect(join).toBeHidden()
+      await row.getByRole("button", { name: "End membership" }).click()
+      const end = agent.getByRole("dialog")
+      await byLabel(end, "Reason").fill("Guest asked to leave (E2E)")
+      await Promise.all([
+        agent.waitForResponse((r) => r.url().includes("kamra.tex.api.crm.loyalty_leave") && r.ok()),
+        end.getByRole("button", { name: "End membership" }).click(),
+      ])
+      await expect(end).toBeHidden()
+      await expect(row).not.toContainText("may not rejoin online")
+      await row.getByRole("button", { name: "Block online rejoin" }).click()
+      const block = agent.getByRole("dialog")
+      const confirm = block.getByRole("button", { name: "Block online rejoin" })
+      await expect(confirm).toBeDisabled()                               // a reason first
+      await byLabel(block, "Reason").fill("Abused member prices (E2E)")
+      await Promise.all([
+        agent.waitForResponse((r) => r.url().includes("kamra.tex.api.crm.loyalty_block_rejoin") && r.ok()),
+        confirm.click(),
+      ])
+      await expect(block).toBeHidden()
+      await expect(row).toContainText("may not rejoin online")
+      await expect(row).toContainText("Left")
+      await expect(row.getByRole("button", { name: "Block online rejoin" })).toHaveCount(0)
+    })
     noErrors()
   } finally {
     await pageApi(agent, "kamra.tex.api.crs.cancel", { reservation, reason: "E2E clean-up (membership)" })

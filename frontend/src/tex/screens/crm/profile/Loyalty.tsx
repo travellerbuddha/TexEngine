@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { Award, Gift, SlidersHorizontal, UserMinus, UserPlus } from "lucide-react"
+import { Award, Ban, Gift, SlidersHorizontal, UserMinus, UserPlus } from "lucide-react"
 import { tex, useTexMutation, useTexQuery, type TexModule } from "../../../lib/api"
 import { useProperty, useSession } from "../../../lib/session"
 import { date, month, num, pct } from "../../../lib/format"
@@ -37,7 +37,7 @@ export function LoyaltyPanel({
   const current = useProperty()
   const [adjust, setAdjust] = useState<string | null>(null)
   const [redeem, setRedeem] = useState(false)
-  const [membership, setMembership] = useState<{ program: string; mode: "join" | "leave" } | null>(null)
+  const [membership, setMembership] = useState<{ program: string; mode: MembershipMode } | null>(null)
   // programs this guest can collect in (also when the ledger is still empty)
   const programs = useTexQuery<LoyaltyProgramInfo[]>(UI_MODULE, "loyalty_programs", { guest: guest.name }, [guest.name])
   const programOptions = useMemo(() => {
@@ -219,8 +219,12 @@ function hotelChoices(programHotels: ProgramHotels, program: string, editable: s
   return p.own ? [p.own] : p.hotels.filter((h) => editable.includes(h))
 }
 
+/** What staff do to a membership: join the guest, end it, or keep one that ended from a rejoin online (batch 2Q). */
+type MembershipMode = "join" | "leave" | "block"
+
 /** The guest's membership of each program (C-04, ADR-077): a member gets its members-only prices. Staff who may
- * edit the guest join them (with the guest's word, audited) or end the membership with a reason. */
+ * edit the guest join them (with the guest's word, audited) or end the membership with a reason; one that ended
+ * without the block may be kept from a rejoin online afterwards (C-04h; batch 2Q). */
 function Memberships({
   programs,
   accounts,
@@ -230,7 +234,7 @@ function Memberships({
   programs: { value: string; label: string }[]
   accounts: LoyaltyAccount[]
   canEdit: boolean
-  onAct: (program: string, mode: "join" | "leave") => void
+  onAct: (program: string, mode: MembershipMode) => void
 }) {
   const { t } = useTexT()
   return (
@@ -238,6 +242,7 @@ function Memberships({
       {programs.map((p) => {
         const acc = accounts.find((a) => a.program === p.value)
         const member = Boolean(acc?.member)
+        const blockable = !member && acc?.membership?.status === "Left" && !acc.membership.rejoin_blocked
         return (
           <li key={p.value} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
@@ -250,9 +255,16 @@ function Memberships({
                   {t("crm.loyalty.member.leave")}
                 </Button>
               ) : (
-                <Button variant="secondary" size="sm" icon={<UserPlus className="size-4" aria-hidden />} onClick={() => onAct(p.value, "join")}>
-                  {t("crm.loyalty.member.join")}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {blockable && (
+                    <Button variant="secondary" size="sm" icon={<Ban className="size-4" aria-hidden />} onClick={() => onAct(p.value, "block")}>
+                      {t("crm.loyalty.member.block")}
+                    </Button>
+                  )}
+                  <Button variant="secondary" size="sm" icon={<UserPlus className="size-4" aria-hidden />} onClick={() => onAct(p.value, "join")}>
+                    {t("crm.loyalty.member.join")}
+                  </Button>
+                </div>
               ))}
           </li>
         )
@@ -299,7 +311,7 @@ function MembershipDialog({
   onDone,
 }: {
   open: boolean
-  mode: "join" | "leave"
+  mode: MembershipMode
   program: string
   programName: string
   /** staff blocked a rejoin on the web (C-04h): joining the guest here lifts it */
@@ -322,8 +334,13 @@ function MembershipDialog({
   const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
   const m = useTexMutation<{ guest: string; program: string; reason?: string; block_rejoin?: 0 | 1; property?: string }, { name: string; status: string }>(
     "crm",
-    mode === "join" ? "loyalty_join" : "loyalty_leave",
+    mode === "join" ? "loyalty_join" : mode === "leave" ? "loyalty_leave" : "loyalty_block_rejoin",
   )
+  const keys = {
+    join: { title: "crm.loyalty.member.join_title", desc: "crm.loyalty.member.join_desc", act: "crm.loyalty.member.join", done: "crm.loyalty.member.joined" },
+    leave: { title: "crm.loyalty.member.leave_title", desc: "crm.loyalty.member.leave_desc", act: "crm.loyalty.member.leave", done: "crm.loyalty.member.ended" },
+    block: { title: "crm.loyalty.member.block_title", desc: "crm.loyalty.member.block_rejoin_hint", act: "crm.loyalty.member.block", done: "crm.loyalty.member.block_done" },
+  }[mode]
   const close = useEvent(() => {
     if (!m.pending) onClose()
   })
@@ -343,10 +360,10 @@ function MembershipDialog({
       await m.run({
         guest,
         program,
-        ...(mode === "leave" ? { reason: reason.trim(), block_rejoin: block ? 1 : 0 } : {}),
+        ...(mode === "leave" ? { reason: reason.trim(), block_rejoin: block ? 1 : 0 } : mode === "block" ? { reason: reason.trim() } : {}),
         ...(chosenHotel ? { property: chosenHotel } : {}),
       })
-      toast.success(t(mode === "join" ? "crm.loyalty.member.joined" : "crm.loyalty.member.ended", { program: programName }))
+      toast.success(t(keys.done, { program: programName }))
       onDone()
       onClose()
     } catch {
@@ -357,15 +374,15 @@ function MembershipDialog({
     <Dialog
       open={open}
       onClose={close}
-      title={t(mode === "join" ? "crm.loyalty.member.join_title" : "crm.loyalty.member.leave_title", { program: programName })}
-      description={t(mode === "join" ? "crm.loyalty.member.join_desc" : "crm.loyalty.member.leave_desc")}
+      title={t(keys.title, { program: programName })}
+      description={t(keys.desc)}
       footer={
         <>
           <Button variant="secondary" onClick={close} disabled={m.pending}>
             {t("core.action.cancel")}
           </Button>
-          <Button loading={m.pending} disabled={!valid} onClick={submit} variant={mode === "leave" ? "danger" : undefined}>
-            {t(mode === "join" ? "crm.loyalty.member.join" : "crm.loyalty.member.leave")}
+          <Button loading={m.pending} disabled={!valid} onClick={submit} variant={mode === "join" ? undefined : "danger"}>
+            {t(keys.act)}
           </Button>
         </>
       }
@@ -382,7 +399,7 @@ function MembershipDialog({
           </Field>
         )}
         {mode === "join" && blocked && <Notice tone="warning">{t("crm.loyalty.member.join_lifts_block")}</Notice>}
-        {mode === "leave" && (
+        {mode !== "join" && (
           <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} autoComplete="off" data-autofocus />
           </Field>

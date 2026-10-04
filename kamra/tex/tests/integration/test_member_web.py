@@ -557,6 +557,47 @@ class TestRejoinBlocked(WebMemberCase):
 		self.assertIn("contact the hotel", self.mails[-1][2])
 		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
 
+	def block(self, user: str | None = None) -> dict:
+		from kamra.tex.api import crm as crm_api
+
+		frappe.set_user(user or self.desk)  # nosemgrep: frappe-setuser -- staff block an ended membership's rejoin
+		try:
+			return crm_api.loyalty_block_rejoin(guest=self.guest, program=self.club, reason="Abused member prices")
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+	def test_2q_staff_block_the_rejoin_of_a_membership_that_ended(self):
+		"""Batch 2Q (§6O, 2O review round 1 NIT 2): staff could block a rejoin only while ending a membership; for a
+		guest who had left without one, they joined the guest and ended it again (a join on the record, a new end). They
+		block an ended membership's rejoin as it is: its end kept, the block audited, a web join then answered as for a
+		block made when it ended."""
+		from kamra.tex.api import crm as crm_api
+
+		self.join(self.guest)
+		name = self.leave(block=False)["name"]
+		ended = frappe.db.get_value("TEX Loyalty Member", name, ["left_at", "left_reason"])
+		self.assertEqual(self.block(), {"name": name, "status": "Left", "rejoin_blocked": 1})
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Left", 1))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["left_at", "left_reason"]), ended)
+		self.assertTrue(self.audited("loyalty.member_block", name).get("rejoin_blocked"))
+		self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1), {"ok": True})
+		self.assertIsNone(self.token())
+		self.assertIn("contact the hotel", self.mails[-1][2])
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, "status"), "Left")
+		# a viewer may not; an active membership is ended instead (with the block ticked)
+		with self.assertRaises(frappe.PermissionError):
+			self.block(user=self.viewer)
+		frappe.clear_messages()
+		self.join(self.guest)
+		with self.assertRaisesRegex(frappe.ValidationError, "ended"):
+			self.block()
+		frappe.clear_messages()
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Active", 0))
+		fn = crm_api.loyalty_block_rejoin                                   # it locks the profile, then its membership
+		while fn is not None and fn.__code__.co_qualname != "retry_on_deadlock.<locals>.wrapper":
+			fn = getattr(fn, "__wrapped__", None)
+		self.assertIsNotNone(fn, "loyalty_block_rejoin runs again on a deadlock")
+
 	def test_2q_the_blocked_mail_names_only_the_programs_blocked(self):
 		"""Batch 2Q (§6O, 2O review round 1 NIT 6): the mail named every program of a multi-program site, also one the
 		guest is still a member of: "you cannot rejoin Sister Club" for a club they are in. It names the programs the

@@ -624,6 +624,28 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None,
 	return {"name": name, "status": "Left"}
 
 
+def block_rejoin(guest: str, program: str, *, reason: str, property: str | None = None) -> dict:
+	"""Staff keep a membership that ended from being joined again on the web (C-04h), with a reason: as the block made
+	while ending it (``leave(block_rejoin=True)``), its end (when, why) kept. Batch 2Q (§6O): the block could only be
+	made while ending a membership, so a guest who had left was joined and ended again. A membership still active is
+	ended instead, with the block; staff joining the guest lift it."""
+	from kamra.tex.crm.service import require_live_guest
+
+	prog = frappe.get_doc("TEX Loyalty Program", program)
+	property = _staff_hotel(prog, property, _("Choose the hotel the block is made at."))
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required."))
+	require_live_guest(guest)
+	m = membership(guest, program, lock=True)
+	if not m or m.status != "Left":
+		frappe.throw(_("Only a membership that ended can be kept from a rejoin online: end it, with the block."))
+	if not m.rejoin_blocked:
+		frappe.db.set_value("TEX Loyalty Member", m.name, "rejoin_blocked", 1)
+	audit("loyalty.member_block", reference_doctype="TEX Loyalty Member", reference_name=m.name, property=property,
+	      new={"guest": guest, "program": program, "rejoin_blocked": True}, reason=reason)
+	return {"name": m.name, "status": "Left", "rejoin_blocked": 1}
+
+
 # a profile's memberships, read with a lock (what is committed now: a join committed after this request began
 # included), by the (guest, program) index (p77)
 MEMBERSHIPS_OF = """SELECT name, program, modified FROM `tabTEX Loyalty Member` WHERE guest=%(g)s FOR UPDATE"""
