@@ -42,6 +42,14 @@ const DEMO_ACCOUNTS = [
 ]
 
 /** Sign-in (G-60): the brand from TEX Settings, the six TEX languages, the source offer. */
+
+/** Frappe raises OutgoingEmailError (HTTP 501) when an expired password's reset mail cannot be sent: no outgoing
+ * e-mail account, or a failing one (§6ZF, batch 2Q). The sign-in was right, so the fields hold no fault. */
+function mailFailed(e: unknown): boolean {
+  const { status, body } = (e ?? {}) as { status?: number; body?: unknown }
+  return status === 501 || (typeof body === "string" && body.includes("OutgoingEmailError"))
+}
+
 export default function Login(props: { onSuccess: () => void }) {
   const ready = useTexI18nReady()
   if (!ready)
@@ -130,8 +138,8 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     setError(null)
     try {
       settle(await login(u, p))
-    } catch {
-      setError({ text: t("core.login.failed"), fields: true })
+    } catch (e) {
+      setError(mailFailed(e) ? { text: t("core.login.reset_mail_failed"), fields: false } : { text: t("core.login.failed"), fields: true })
     } finally {
       setBusy(false)
     }
@@ -143,7 +151,9 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     setError(null)
     try {
       settle(await loginOtp(code.trim(), otp.tmp_id))
-    } catch {
+    } catch (e) {
+      // Frappe v16.36.1 mails an expired password's link after a two-factor account's code
+      if (mailFailed(e)) return setError({ text: t("core.login.reset_mail_failed"), fields: false })
       setError({ text: t("core.login.otp_failed"), fields: true })
       setCode("")
       codeRef.current?.focus()

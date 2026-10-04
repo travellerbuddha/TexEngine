@@ -234,6 +234,26 @@ test("sign-in: an expired password whose link Frappe mailed says so (§6ZF, batc
   noErrors()
 })
 
+test("sign-in: an expired password whose reset mail could not be sent says so (§6ZF, batch 2Q)", async ({ page }) => {
+  // a forced reset with no outgoing e-mail account (or a failing one): Frappe raises OutgoingEmailError, HTTP 501.
+  // The page said "Wrong email, username or password." and marked the fields, which hold no fault
+  const noErrors = trackErrors(page)
+  await english(page)
+  await page.route("**/api/method/login", (route) =>
+    route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ exc_type: "OutgoingEmailError" }) }),
+  )
+  await page.goto(texPath("/login"))
+  await page.getByLabel("Email or username").fill("someone@example.com")
+  await page.getByLabel("Password").fill("whatever")
+  await page.getByRole("button", { name: "Sign in" }).click()
+  await expect(page.getByRole("alert")).toHaveText(
+    "Your password has expired, and the e-mail to set a new one could not be sent. Ask an administrator.",
+  )
+  await expect(page.getByLabel("Password")).not.toHaveAttribute("aria-invalid", "true")
+  await expect(page).toHaveURL(/\/login$/)
+  noErrors()
+})
+
 test("site root: a visitor goes to sign-in, a desk user to the TEX admin app", async () => {
   const visitor = await request.newContext({ baseURL: BENCH })
   let r = await visitor.get("/", { maxRedirects: 0 })

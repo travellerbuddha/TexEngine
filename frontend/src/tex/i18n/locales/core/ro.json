@@ -132,6 +132,7 @@
  "core.login.back": "Înapoi",
  "core.login.password_expired": "Parola a expirat. Setați una nouă din „Ați uitat parola?”.",
  "core.login.password_expired_mailed": "Parola a expirat. Un link pentru a seta una nouă a fost trimis la adresa dvs. de e-mail; doar cel mai recent link este valabil.",
+ "core.login.reset_mail_failed": "Parola a expirat, iar e-mailul pentru a seta una nouă nu a putut fi trimis. Contactați un administrator.",
  "core.login.incomplete": "Autentificarea nu s-a încheiat. Încercați celelalte opțiuni de autentificare.",
  "core.login.session_ended": "Sesiunea s-a încheiat. Autentificați-vă pentru a continua de unde ați rămas.",
  "core.login.demo.title": "Conturi demo: încercați fiecare rol cu un clic",
