@@ -260,6 +260,19 @@ class TestInbound(DistributionCase):
 		self.assertNotEqual(b.booker_guest, plain)
 		self.assertEqual((b.booker_email, frappe.db.get_value("Guest", b.booker_guest, "email")), (None, None))
 
+	def test_2p_r1_a_channels_address_with_a_display_name_keeps_the_address(self):
+		"""2P review round 1 (LOW 3): a channel's "Name <address>" passed Frappe's field before 2P and was kept; the
+		plain-address rule dropped it, and the hotel lost the guest's address. One address in a display name is the
+		address; a list is still left out."""
+		for ref, raw, kept in (("OTA-2P-R1", "Mia Berg <Mia.Berg.R1@example.com>", "mia.berg.r1@example.com"),
+		                       ("OTA-2P-R1L", "a.r1@example.com, b.r1@example.com", None)):
+			msg = message(ref=ref)
+			msg["guest"]["email"] = raw
+			self.send(msg)
+			dist.process_inbound()
+			b = frappe.get_doc("TEX Booking", {"external_ref": ref})
+			self.assertEqual((b.booker_email, frappe.db.get_value("Guest", b.booker_guest, "email")), (kept, kept), raw)
+
 	def test_an_unmapped_room_waits_for_its_mapping(self):
 		self.send(message(ref="OTA-200", room="SUITE"))
 		dist.process_inbound()

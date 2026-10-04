@@ -20,6 +20,7 @@ a room, and a guest change still waiting for a room the channel changed or cance
 from __future__ import annotations
 
 import json
+from email.utils import getaddresses
 
 import frappe
 from frappe import _
@@ -42,6 +43,14 @@ def _mapping(connection: str, room_code: str, rate_code: str):
 	return frappe.get_cached_doc("TEX Channel Mapping", name)
 
 
+def _email(raw) -> str | None:
+	"""A channel guest's address as one plain address (``booking.plain_email``), or None: one address in a display
+	name ("Mia Berg <mia@…>") is that address, as Frappe's field read it before batch 2P; a list is left out (2P review
+	round 1)."""
+	found = getaddresses([str(raw or "")])
+	return booking_svc.plain_email(found[0][1]) if len(found) == 1 else None
+
+
 def _guest(g: dict | None, *, property: str, market: str, ref: str) -> str:
 	g = g or {}
 	first = (g.get("first_name") or "").strip() or _("Channel guest")
@@ -49,7 +58,7 @@ def _guest(g: dict | None, *, property: str, market: str, ref: str) -> str:
 	# an address that is not one plain address is left out (the guest is booked without it), never refused: the
 	# channel sold the stay (batch 2P)
 	return booking_svc.find_or_create_guest({"first_name": first[:80], "last_name": last[:80],
-	                                         "email": booking_svc.plain_email(g.get("email")),
+	                                         "email": _email(g.get("email")),
 	                                         "phone": (g.get("phone") or None), "country": g.get("country")},
 	                                        property=property, market=market, language=None)
 
@@ -180,7 +189,7 @@ def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, 
 		"market": first.market, "created_via": "Channel", "sale_at": now, "channel_connection": conn,
 		"external_ref": ref, "booker_guest": guest,
 		"booker_name": " ".join(x for x in (g.get("first_name"), g.get("last_name")) if x) or ref,
-		"booker_email": booking_svc.plain_email(g.get("email")), "booker_phone": (g.get("phone") or None), "currency": ccy,
+		"booker_email": _email(g.get("email")), "booker_phone": (g.get("phone") or None), "currency": ccy,
 		"total_amount": total, "paid_amount": 0, "balance_amount": total, "amount_due_now": 0,
 		"payment_status": "Pay at Hotel", "payment_method": "Channel",
 		"notes": f"{data.get('channel_name') or ''} {data.get('notes') or ''}".strip()[:2000],

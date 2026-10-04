@@ -1080,3 +1080,25 @@ class TestBookingIdentity(TexTestCase):
 				self.assertEqual((refusals.code_of(cm.exception), frappe.local.response.get("tex_code")),
 				                 ("GUEST_EMAIL_INVALID", "GUEST_EMAIL_INVALID"))
 				frappe.clear_messages()
+
+	def test_2p_r1_a_letter_that_lowers_to_ascii_is_no_plain_address(self):
+		"""2P review round 1 (NIT 6): the address was lower-cased before its ASCII check, so a KELVIN SIGN (U+212A)
+		became an ASCII k and "\u212aate@…" was taken for kate@…."""
+		from kamra.tex.services import booking
+
+		self.assertIsNone(booking.plain_email("\u212aate.2p@example.com"))
+		self.assertEqual(booking.plain_email(" Kate.2P@Example.com "), "kate.2p@example.com")
+
+	def test_2p_r1_staff_store_one_plain_address_on_a_profile(self):
+		"""2P review round 1 (LOW 4): the CRM stored any address Frappe's field takes, a Turkish dotted İ among them
+		(caps lock on a Turkish keyboard: İNFO@…), which no booking for info@… joins now (ADR-080): a second profile.
+		The CRM takes one plain address, as a booking does, and keeps it as typed."""
+		from kamra.tex.crm import service as crm
+
+		for raw in ("İNFO.2P@HOTEL.COM", "ınfo.2p@hotel.com", "Ana <ana.2p@example.de>", "ana.2p@example.de."):
+			with self.subTest(raw=raw), self.assertRaises(frappe.ValidationError):
+				crm.update_profile(self.accented, {"email": raw})
+			frappe.clear_messages()
+		crm.update_profile(self.accented, {"email": " Ana.2P@Example.de "})
+		self.assertEqual(frappe.db.get_value("Guest", self.accented, "email"), "Ana.2P@Example.de")
+		self.assertEqual(self.booker("ana.2p@example.de", "2p-r1-crm"), self.accented)

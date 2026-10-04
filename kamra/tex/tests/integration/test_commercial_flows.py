@@ -2210,6 +2210,16 @@ class TestPaymentMethodRules(TexTestCase):
 		self.assertOpen(qid)
 		self.assertFalse(frappe.db.exists("TEX Booking", {"payment_method": "X"}))
 
+	def test_2p_r1_a_booker_address_that_is_not_one_plain_address_is_refused_before_any_lock(self):
+		"""2P review round 1 (LOW 4): the call centre's booker address was checked for an "@" only; an accented one
+		failed when the booking stored it (``TEX Booking.booker_email`` is an Email field), after the quotes were
+		locked, with Frappe's message."""
+		qid = self.quote()
+		with self.assertRaisesRegex(frappe.ValidationError, "Invalid booker email address"):
+			ui_crs.book(quote_ids=[qid], guest=GUEST, booker={"name": "Bärbel Kraus", "email": "bärbel.2p@example.de"},
+			            payment_method="Pay at Hotel")
+		self.assertOpen(qid)
+
 	def test_a_rule_for_another_channel_does_not_offer_pay_at_hotel_at_the_call_centre(self):
 		frappe.db.set_value("TEX Payment Method Rule", self.rule("Pay at Hotel"), "sales_channel", "DIRECT_WEB")
 		web, desk = self.quote("DIRECT_WEB"), self.quote("CALL_CENTER")

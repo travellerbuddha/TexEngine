@@ -203,6 +203,16 @@ class TestHigherPrice(GuestMoneyCase):
 		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- back from the gateway
 		self.assertNotIn("contract", json.dumps(public.booking_status(token=b["manage_token"]), default=str))
 
+	def test_2p_r1_a_refusal_with_no_reason_text_keeps_the_guests_wording(self):
+		"""2P review round 1 (NIT 5): with no reason text the staff detail was "The modified stay cannot be sold: " and
+		nothing after it, and it replaced the guest's wording on the request."""
+		from kamra.tex.services import refusals
+
+		with self.assertRaises(refusals.Refusal) as cm:
+			modification.guest_unsellable({"warnings": [], "proposed": {"reasons": [{"code": "STAY_WINDOW"}]}})
+		self.assertIsNone(getattr(cm.exception, "staff_detail", None))
+		frappe.clear_messages()
+
 	def test_a_waiting_change_is_paid_again_from_the_manage_page(self):
 		b = self.deposit_paid("gcm-again")
 		res = b["rooms"][0]["reservation"]

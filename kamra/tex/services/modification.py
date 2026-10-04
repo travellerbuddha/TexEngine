@@ -70,12 +70,12 @@ def guest_unsellable(result: dict) -> None:
 	rows = [*warnings, *((result.get("proposed") or {}).get("reasons") or [])]
 	why = guest_reason("; ".join(w["message"] for w in warnings if w.get("message")))
 	# the reasons themselves go to staff only (``staff_detail``, never the refusal's params): a change paid for online
-	# that fails when it is applied keeps them on its request (§6G3; batch 2P)
+	# that fails when it is applied keeps them on its request (§6G3; batch 2P); none without their text (review round 1)
+	told = "; ".join(r["message"] for r in rows if isinstance(r, dict) and r.get("message"))
 	frappe.throw(_("The modified stay cannot be sold: {0}").format(why) if why else
 	             _("The modified stay cannot be sold. Please choose other dates or contact the hotel."),
 	             refusal("CHANGE_NOT_SELLABLE", reasons=[r["code"] for r in rows if isinstance(r, dict) and r.get("code")],
-	                     staff_detail=_("The modified stay cannot be sold: {0}").format(
-		                     "; ".join(r["message"] for r in rows if isinstance(r, dict) and r.get("message")))))
+	                     staff_detail=_("The modified stay cannot be sold: {0}").format(told) if told else None))
 
 
 def _snapshot(res) -> dict:

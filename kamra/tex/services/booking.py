@@ -72,9 +72,13 @@ def plain_email(raw) -> str | None:
 	by (the same address is the same guest, ADR-080). Frappe's own address pattern, matched whole (its field check
 	takes a display name, a list or an invisible character, each of which would be another identity), in ASCII (the
 	database compares accents away, and Frappe's field refuses an accented address only when it is stored), at most
-	140 characters."""
-	email = str(raw or "").strip().lower()
-	return email if len(email) <= 140 and email.isascii() and EMAIL_MATCH_PATTERN.fullmatch(email) else None
+	140 characters. ASCII is checked before lower case: a KELVIN SIGN (U+212A) lower-cases to an ASCII k (2P review
+	round 1)."""
+	email = str(raw or "").strip()
+	if not email.isascii():
+		return None
+	email = email.lower()
+	return email if len(email) <= 140 and EMAIL_MATCH_PATTERN.fullmatch(email) else None
 
 
 def _clean_guest(g: dict) -> dict:

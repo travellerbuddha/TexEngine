@@ -568,6 +568,7 @@
   "errors.reviewExtras": "Review extras",
   "errors.expiredTitle": "Prices need a quick refresh",
   "errors.quoteUsedTitle": "This price is already booked",
+  "errors.quoteUsedBody": "If you booked it in another window, the confirmation is on its way to your e-mail. To book another stay, see the available rooms.",
   "errors.expiredBody": "Offers are held for a limited time. We'll check the latest price for the same rooms — your details are kept.",
   "errors.refreshPrices": "Refresh prices",
   "errors.priceChangedTitle": "The price has changed",

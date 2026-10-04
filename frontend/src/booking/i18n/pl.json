@@ -568,6 +568,7 @@
   "errors.reviewExtras": "Sprawdź dodatki",
   "errors.expiredTitle": "Ceny wymagają odświeżenia",
   "errors.quoteUsedTitle": "Ta cena została już zarezerwowana",
+  "errors.quoteUsedBody": "Jeśli zarezerwowano w innym oknie, potwierdzenie jest wysyłane na Twój e-mail. Aby zarezerwować inny pobyt, zobacz dostępne pokoje.",
   "errors.expiredBody": "Oferty są ważne przez ograniczony czas. Sprawdzimy aktualną cenę tych samych pokoi — Twoje dane zostaną zachowane.",
   "errors.refreshPrices": "Odśwież ceny",
   "errors.priceChangedTitle": "Cena się zmieniła",

@@ -134,6 +134,7 @@ export function FlowErrorAlert() {
     // this price was booked already (another tab, the browser's history): a refresh would book the stay again, so a
     // new search (§5b; batch 2P)
     title = t("errors.quoteUsedTitle")
+    body = t("errors.quoteUsedBody")
     action = (
       <Button size="sm" onClick={research} busy={b.pending}>
         {t("errors.seeAvailable")}

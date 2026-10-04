@@ -568,6 +568,7 @@
   "errors.reviewExtras": "Extras prüfen",
   "errors.expiredTitle": "Die Preise müssen kurz aktualisiert werden",
   "errors.quoteUsedTitle": "Dieser Preis ist bereits gebucht",
+  "errors.quoteUsedBody": "Wenn Sie in einem anderen Fenster gebucht haben, ist die Bestätigung per E-Mail unterwegs. Für einen weiteren Aufenthalt sehen Sie sich die verfügbaren Zimmer an.",
   "errors.expiredBody": "Angebote werden nur begrenzte Zeit gehalten. Wir prüfen den aktuellen Preis für dieselben Zimmer – Ihre Angaben bleiben erhalten.",
   "errors.refreshPrices": "Preise aktualisieren",
   "errors.priceChangedTitle": "Der Preis hat sich geändert",

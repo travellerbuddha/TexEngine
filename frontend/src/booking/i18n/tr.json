@@ -568,6 +568,7 @@
   "errors.reviewExtras": "Ekstraları gözden geçir",
   "errors.expiredTitle": "Fiyatların yenilenmesi gerekiyor",
   "errors.quoteUsedTitle": "Bu fiyatla rezervasyon zaten yapıldı",
+  "errors.quoteUsedBody": "Rezervasyonu başka bir pencerede yaptıysanız onay e-postanıza gönderiliyor. Başka bir konaklama için uygun odalara bakın.",
   "errors.expiredBody": "Teklifler sınırlı bir süre için tutulur. Aynı odalar için en güncel fiyatı kontrol edeceğiz — bilgileriniz korunur.",
   "errors.refreshPrices": "Fiyatları yenile",
   "errors.priceChangedTitle": "Fiyat değişti",

@@ -568,6 +568,7 @@
   "errors.reviewExtras": "Verifică serviciile extra",
   "errors.expiredTitle": "Prețurile trebuie actualizate",
   "errors.quoteUsedTitle": "Acest preț a fost deja rezervat",
+  "errors.quoteUsedBody": "Dacă ați rezervat într-o altă fereastră, confirmarea este trimisă pe e-mail. Pentru un alt sejur, vedeți camerele disponibile.",
   "errors.expiredBody": "Ofertele sunt păstrate un timp limitat. Verificăm cel mai recent preț pentru aceleași camere — datele dumneavoastră se păstrează.",
   "errors.refreshPrices": "Actualizează prețurile",
   "errors.priceChangedTitle": "Prețul s-a schimbat",

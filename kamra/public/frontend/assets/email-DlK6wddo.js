@@ -1,0 +1,1 @@
+const o=/^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;function l(n){const t=(n??"").trim();if([...t].some(e=>(e.codePointAt(0)??0)>127))return null;const a=t.toLowerCase();return a.length<=140&&o.test(a)?a:null}export{l as p};
