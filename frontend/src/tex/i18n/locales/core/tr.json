@@ -129,6 +129,7 @@
  "core.login.otp_submit": "Doğrula",
  "core.login.back": "Geri",
  "core.login.password_expired": "Şifrenizin süresi doldu. \"Şifrenizi mi unuttunuz?\" ile yeni bir şifre belirleyin.",
+ "core.login.password_expired_mailed": "Şifrenizin süresi doldu. Yeni şifre belirleme bağlantısı e-posta adresinize gönderildi; yalnızca en son gönderilen bağlantı geçerlidir.",
  "core.login.incomplete": "Giriş tamamlanamadı. Diğer giriş seçeneklerini deneyin.",
  "core.login.session_ended": "Oturumunuz sona erdi. Kaldığınız yerden devam etmek için giriş yapın.",
  "core.login.demo.title": "Demo hesapları: her rolü tek tıkla deneyin",

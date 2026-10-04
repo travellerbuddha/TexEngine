@@ -460,6 +460,8 @@ export interface Basket {
     pay_at_hotel_allowed: boolean
     expires_at: string
     problem: string | null
+    /** the problem's refusal code (QUOTE_USED, QUOTE_EXPIRED, NOT_ON_SALE), when the server sent one */
+    problem_code?: string | null
   }[]
   methods: BasketMethod[]
   /** the booked quotes' market is for residents of these countries (O-8) */

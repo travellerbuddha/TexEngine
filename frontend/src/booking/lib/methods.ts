@@ -61,3 +61,14 @@ export function basketFailureText(i18n: RefusalI18n, error: (Refused & { kind?: 
   if (error?.code) return { title: t("payment.optionsFailedTitle"), body: refusalMessage(i18n, error) }
   return { title: t("payment.optionsFailedTitle"), body: t("payment.optionsFailedBody") }
 }
+
+/**
+ * The refresh a basket asks for (§5b, §6G3; batch 2P): read, but its quotes used or expired since they were made. The
+ * code of its rooms' problem goes with it, a price already booked first: refreshing that one would book the stay a
+ * second time. Null when nothing is to refresh.
+ */
+export function basketExpiry(basket: { status: string; data: Basket | null }): { code: string | null; message: string } | null {
+  if (!basket.data || basket.data.usable) return null
+  const codes = basket.data.rooms.map((r) => r.problem_code).filter((c): c is string => Boolean(c))
+  return { code: codes.includes("QUOTE_USED") ? "QUOTE_USED" : (codes[0] ?? null), message: "" }
+}

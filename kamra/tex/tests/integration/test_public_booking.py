@@ -257,6 +257,30 @@ class TestPublicBooking(TexTestCase):
 		self.assertNotIn("manage_token", out)
 
 
+class TestBasketProblems(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		self.std = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+
+	def test_2p_a_baskets_problem_carries_its_code(self):
+		"""§5b, §6G3 "Not done" (batch 2P): a basket whose quote was used or has expired said so in English only
+		(``rooms[].problem``), so the app offered "Refresh prices" for both, and refreshing a quote already booked
+		leads to a second booking. Each room's problem carries its refusal code too."""
+		from frappe.utils import add_to_date, now_datetime
+
+		prop = _search([{"adults": 2, "children": [8]}], session="sess-2p-b")
+		offer = next(o for o in prop["offers"] if o["room_type"] == self.std and o["board"] == "AI")
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id="sess-2p-b")
+		problem = lambda: [(r["problem"] is not None, r.get("problem_code")) for r in public.basket(  # noqa: E731
+			site=SLUG, quote_ids=[q["quote_id"]], session_id="sess-2p-b")["rooms"]]
+		self.assertEqual(problem(), [(False, None)])
+		frappe.db.set_value("TEX Quote", q["quote_id"], "expires_at", add_to_date(now_datetime(), minutes=-1))
+		self.assertEqual(problem(), [(True, "QUOTE_EXPIRED")])
+		frappe.db.set_value("TEX Quote", q["quote_id"], "status", "Used")
+		self.assertEqual(problem(), [(True, "QUOTE_USED")])
+
+
 class TestStaffBookingControls(TexTestCase):
 	def setUp(self):
 		super().setUp()
@@ -1008,3 +1032,88 @@ class TestMandatoryExtrasInSearch(TexTestCase):
 		self.assertTrue(q["ok"], q)
 		self.assertEqual(D(q["quote"]["totals"]["total"]), D(room["quote"]["totals"]["total"]))
 		self.assertFalse(q["price_changed"])
+
+
+class TestBookingIdentity(TexTestCase):
+	"""Owner, 2026-10-04 (batch 2P): the same e-mail address is the same guest, in any case, and only the same address.
+	The database compares accents away (utf8mb4_unicode_ci), so a booking for ana.muller@… joined the profile of
+	ana.müller@… (staff typed it): its stays, points and the hotel's history of another person."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		ent = frappe.db.get_value("Property", fx.PROPERTY, "tex_enterprise")
+		self.accented = frappe.get_doc({"doctype": "Guest", "first_name": "Ana", "last_name": "Muller",
+		                                "tex_enterprise": ent}).insert(ignore_permissions=True).name
+		# as staff may have typed it, on a returning guest's profile (nothing for a booking to fill in on it)
+		frappe.db.set_value("Guest", self.accented, {"email": "ana.müller.2p@example.de", "tex_language": "en",
+		                                             "tex_country": "Germany",
+		                                             "tex_market": frappe.db.get_value("TEX Market", {}, "name")})
+
+	def booker(self, email: str, session: str) -> str:
+		b = guest_books(session=session, guest={**GUEST, "first_name": "Ana", "last_name": "Other", "email": email})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read back
+		return frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+
+	def test_2p_a_look_alike_address_is_another_guest(self):
+		other = self.booker("ana.muller.2p@example.de", "2p-id-1")
+		self.assertNotEqual(other, self.accented)
+		self.assertEqual(frappe.db.get_value("Guest", other, "email"), "ana.muller.2p@example.de")
+		self.assertFalse(frappe.db.exists("Reservation", {"guest": self.accented}))
+
+	def test_2p_the_same_address_in_another_case_is_the_same_guest(self):
+		frappe.db.set_value("Guest", self.accented, "email", "Ana.Muller.2P@Example.DE")    # staff typed it so
+		self.assertEqual(self.booker("ana.muller.2p@EXAMPLE.de", "2p-id-2"), self.accented)
+
+	def test_2p_an_address_no_profile_can_keep_is_refused_by_its_code(self):
+		"""Batch 2P: an address Frappe's e-mail field refuses (an accented one, a stray or invisible character) passed
+		the booking's own check (an "@", at most 140 characters) and failed only when the booking stored it, with no
+		code: the guest read "something went wrong". Until the exact address (ADR-080) it joined its plain look-alike's
+		profile instead."""
+		from kamra.tex.services import refusals
+
+		for i, raw in enumerate(("ana.müller.2p.new@example.de", "ana@@example.de", "ana\u200b.2p@example.de")):
+			with self.subTest(raw=raw):
+				with self.assertRaises(frappe.ValidationError) as cm:
+					self.booker(raw, f"2p-id-bad-{i}")
+				self.assertEqual((refusals.code_of(cm.exception), frappe.local.response.get("tex_code")),
+				                 ("GUEST_EMAIL_INVALID", "GUEST_EMAIL_INVALID"))
+				frappe.clear_messages()
+
+	def test_2p_r1_a_letter_that_lowers_to_ascii_is_no_plain_address(self):
+		"""2P review round 1 (NIT 6): the address was lower-cased before its ASCII check, so a KELVIN SIGN (U+212A)
+		became an ASCII k and "\u212aate@…" was taken for kate@…."""
+		from kamra.tex.services import booking
+
+		self.assertIsNone(booking.plain_email("\u212aate.2p@example.com"))
+		self.assertEqual(booking.plain_email(" Kate.2P@Example.com "), "kate.2p@example.com")
+
+	def test_2p_r1_staff_store_one_plain_address_on_a_profile(self):
+		"""2P review round 1 (LOW 4): the CRM stored any address Frappe's field takes, a Turkish dotted İ among them
+		(caps lock on a Turkish keyboard: İNFO@…), which no booking for info@… joins now (ADR-080): a second profile.
+		The CRM takes one plain address, as a booking does, and keeps it as typed."""
+		from kamra.tex.crm import service as crm
+
+		for raw in ("İNFO.2P@HOTEL.COM", "ınfo.2p@hotel.com", "Ana <ana.2p@example.de>", "ana.2p@example.de."):
+			with self.subTest(raw=raw), self.assertRaises(frappe.ValidationError):
+				crm.update_profile(self.accented, {"email": raw})
+			frappe.clear_messages()
+		crm.update_profile(self.accented, {"email": " Ana.2P@Example.de "})
+		self.assertEqual(frappe.db.get_value("Guest", self.accented, "email"), "Ana.2P@Example.de")
+		self.assertEqual(self.booker("ana.2p@example.de", "2p-r1-crm"), self.accented)
+
+	def test_2p_r2_a_stored_letter_that_lowers_to_ascii_is_another_address(self):
+		"""2P review round 2 (NIT 4): a profile stored with a KELVIN SIGN (the Desk form or a legacy path: Frappe's field
+		takes it) is a candidate the database finds for kate@…, and it lowered to kate@…: a booking for that address
+		joined it."""
+		frappe.db.set_value("Guest", self.accented, "email", "\u212aate.2p@example.com")
+		self.assertNotEqual(self.booker("kate.2p@example.com", "2p-r2-kelvin"), self.accented)
+
+	def test_2p_the_demo_guests_have_plain_addresses(self):
+		"""CI (batch 2P): the demo seed booked Emre Yılmaz as emre.yılmaz@example.com (a dotless ı, which Frappe's
+		field takes), and a booking now refuses an address that is not one plain address: the seed failed."""
+		from kamra.tex.devtools import demo_seed
+		from kamra.tex.services import booking
+
+		self.assertEqual([g[3] for g in demo_seed.DEMO_GUESTS if booking.plain_email(g[3]) != g[3]], [])

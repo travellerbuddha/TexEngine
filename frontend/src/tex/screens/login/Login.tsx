@@ -117,7 +117,9 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         window.location.assign(to)
         return
       }
-      setError({ text: t("core.login.password_expired"), fields: false })
+      // Frappe v16.36.1 mails the link and answers without it: "Forgot password?" would replace its key and the
+      // mailed link would stop working (§6ZF; batch 2P). A reset page on another site is still never followed
+      setError({ text: t(r.redirect_to ? "core.login.password_expired" : "core.login.password_expired_mailed"), fields: false })
       return
     }
     setError({ text: t("core.login.incomplete"), fields: false })

@@ -486,13 +486,27 @@ test("a declined card keeps the booking awaiting payment until the retry succeed
   noErrors()
 })
 
+// The demo's DE and GLOBAL contracts give the same bed-and-breakfast price in their high season, July and August:
+// (70 + 55) × 1.08 = 80 + 55 at the beach resort (demo_seed). A stay with a night then is moved two months back, so the
+// campaign link's prices are compared where they differ (batch 2P: the random window reached July 2027 and CI failed
+// "DE prices differ"). Setup only: the assertions are unchanged.
+function outsideHighSeason(d: { checkIn: string; checkOut: string }) {
+  const nights = (iso: string, n: number) => {
+    const t = new Date(`${iso}T12:00:00Z`)
+    t.setUTCDate(t.getUTCDate() + n)
+    return t.toISOString().slice(0, 10)
+  }
+  const high = (iso: string) => ["07", "08"].includes(iso.slice(5, 7))
+  return high(d.checkIn) || high(nights(d.checkOut, -1)) ? { checkIn: nights(d.checkIn, -62), checkOut: nights(d.checkOut, -62) } : d
+}
+
 test("a campaign link's market prices the stay; an unknown market falls back with a notice", async ({ page }, testInfo) => {
   const noErrors = trackErrors(page)
   const warnings: string[] = []
   page.on("console", (m) => {
     if (m.type() === "warning") warnings.push(m.text())
   })
-  const { checkIn, checkOut } = stay(130, 2, testInfo.project.name)
+  const { checkIn, checkOut } = outsideHighSeason(stay(130, 2, testInfo.project.name))
   const search = { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL }
   const same = (a: { room: string; ratePlan: string; board: string }, b: typeof a) => a.room === b.room && a.ratePlan === b.ratePlan && a.board === b.board
 

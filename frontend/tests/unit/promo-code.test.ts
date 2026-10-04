@@ -33,3 +33,15 @@ test("the Turkish letters are their Latin base, as the server keys them (C-12)",
     assert.equal(normalisePromoCode(key), key, `${typed} idempotent`)
   }
 })
+
+test("the promotion editor shows the key as typed, its spaces and signs kept: the server keeps them (§6M, batch 2P)", async () => {
+  const { promoCodeKey } = await import("../../src/tex/screens/crs/lib/promoCode.ts")
+  const cases: [string, string][] = [["şeker 24", "SEKER 24"], ["wİnter!", "WINTER!"], ["dağ_üçgöz", "DAG_UCGOZ"], ["año-été", "AÑO-ÉTÉ"],
+    ["yaz ", "YAZ "]]
+  for (const [typed, key] of cases) {
+    assert.equal(promoCodeKey(typed), key, typed)
+    assert.equal(promoCodeKey(key), key, `${typed} idempotent`)
+    // the CRS input is that key with anything but letters, digits, "_" and "-" left out
+    assert.equal(normalisePromoCode(typed), key.replace(/[^\p{Lu}0-9_-]/gu, ""), `${typed} CRS`)
+  }
+})

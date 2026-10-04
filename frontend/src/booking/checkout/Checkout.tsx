@@ -19,9 +19,10 @@ import type { MemberStatus, PaymentMethod, PaymentStart, QuoteResponse, SiteExtr
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
-import { basketFailureText, checkoutChoices } from "../lib/methods"
+import { basketExpiry, basketFailureText, checkoutChoices } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
+import { plainEmail } from "../../lib/email"
 import { countryNames, isoCountry, regionDisplay, residencyProblem } from "../../lib/residency"
 
 /** special_requests limit the server accepts */
@@ -346,7 +347,6 @@ function ExtrasStep() {
 
 // ─── guest details ───────────────────────────────────────────────────────
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const PHONE = /^\+?[\d\s().-]{6,20}$/
 
 function DetailsStep() {
@@ -408,7 +408,8 @@ function DetailsStep() {
   const errors: FieldError[] = []
   if (!g.first_name.trim()) errors.push({ id: ids.first, message: t("details.errFirst") })
   if (!g.last_name.trim()) errors.push({ id: ids.last, message: t("details.errLast") })
-  if (!EMAIL.test(g.email.trim())) errors.push({ id: ids.email, message: g.email.trim() ? t("details.errEmailFormat") : t("details.errEmail") })
+  // one plain address, as the server takes it (batch 2P, ADR-080)
+  if (!plainEmail(g.email)) errors.push({ id: ids.email, message: g.email.trim() ? t("details.errEmailFormat") : t("details.errEmail") })
   if (!g.phone.trim()) errors.push({ id: ids.phone, message: t("details.errPhone") })
   else if (!PHONE.test(g.phone.trim())) errors.push({ id: ids.phone, message: t("details.errPhoneFormat") })
   if (residence === "required") errors.push({ id: ids.country, message: t("details.errResidence") })
@@ -598,10 +599,11 @@ function PaymentStep() {
       setMethod(current.method, current.account)
   }, [current, flow.method, flow.providerAccount, setMethod])
 
-  // quotes used or expired since they were made: offer the refresh path
+  // quotes used or expired since they were made: offer the refresh path, or a new search for a price already booked
+  const expiry = useMemo(() => basketExpiry({ status: b.basket.status, data: basket }), [b.basket.status, basket])
   useEffect(() => {
-    if (basket && !basket.usable) setFlowError({ kind: "expired", message: "" })
-  }, [basket, setFlowError])
+    if (expiry) setFlowError({ kind: "expired", ...expiry })
+  }, [expiry, setFlowError])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()

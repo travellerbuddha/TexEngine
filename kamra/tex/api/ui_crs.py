@@ -88,8 +88,10 @@ def _booker(raw) -> dict | None:
 	if not any(out.values()):
 		return None
 	if out["email"]:
-		out["email"] = out["email"].lower()
-		if "@" not in out["email"]:
+		# one plain address, as the guest's (``booking.plain_email``): ``booker_email`` is an Email field, which refused
+		# another only once the booking stored it, its quotes locked (2P review round 1)
+		out["email"] = booking_svc.plain_email(out["email"])
+		if not out["email"]:
 			frappe.throw(_("Invalid booker email address."))
 	return out
 

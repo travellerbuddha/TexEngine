@@ -369,10 +369,18 @@ def update_profile(guest: str, data: dict, *, consent_source: str = "staff",
 	require_guest(guest, "crm.edit")
 	g = frappe.get_doc("Guest", guest)
 	before = {f: g.get(f) for f in (*EDITABLE, *CONSENT)}
+	from kamra.tex.services.booking import consent_given, plain_email
+
+	raw = data.get("email")
+	if isinstance(raw, str) and raw.strip():
+		# one plain address, as a booking takes it, kept as typed: a booking joins only the profile of its exact
+		# address (ADR-080), so İNFO@… (caps lock on a Turkish keyboard) would never be joined (2P review round 1)
+		if not plain_email(raw):
+			frappe.throw(_("Please enter one plain e-mail address."))
+		data = {**data, "email": raw.strip()}
 	for f in EDITABLE:
 		if f in data:
 			g.set(f, data[f] if data[f] not in ("",) else None)
-	from kamra.tex.services.booking import consent_given
 
 	consent_changed = {}
 	for f in CONSENT:

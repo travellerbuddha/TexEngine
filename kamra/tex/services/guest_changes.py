@@ -973,7 +973,8 @@ def _paid(name: str, transaction: str) -> bool:
 	except frappe.ValidationError as e:
 		frappe.db.rollback(save_point="tex_gcr_apply")
 		frappe.clear_last_message()
-		_fail(req, txn.name, str(e))
+		# staff read the engine's reasons on the request, never the guest's wording only (§6G3; batch 2P)
+		_fail(req, txn.name, getattr(e, "staff_detail", None) or str(e))
 		return True
 	req.status = "Applied"
 	req.payment_transaction = txn.name

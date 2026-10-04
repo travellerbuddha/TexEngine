@@ -351,3 +351,33 @@ class TestExtrasAdministration(ExtrasCase):
 		self.assertIn(f"TEX job extras backfill {odd}", logged)
 		self.assertTrue(frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "MASSAGE",
 		                                                  "tex_status": "Active"}, "inventory_tracked"))
+
+	def test_2p_a_stay_left_out_of_the_backfill_is_logged_once(self):
+		"""§6K4 "Not done" (batch 2P): the daily job (``reconcile_all`` → ``backfill``) logged a stay whose quantity is
+		not a whole number again on every run, until the stay was over: one Error Log a day for one stay."""
+		import json
+
+		from kamra.tex.commercial import revisions
+
+		fx.ensure_live("TEX Extra", {"property": fx.PROPERTY, "extra_code": "MASSAGE"}, {
+			"property": fx.PROPERTY, "extra_code": "MASSAGE", "extra_name": "Massage", "category": "Service",
+			"pricing_mode": "UNIT", "currency": "EUR", "amount": 50, "bookable_online": 1})
+		odd = self.book("2p-odd", self.quotes("2p-odd", [{"code": "MASSAGE"}]))["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager limits it
+		snap = json.loads(frappe.db.get_value("Reservation", odd, "tex_pricing_snapshot"))
+		for e in snap["extras"]:
+			if e["code"] == "MASSAGE":
+				e.pop("usage", None)
+				e["quantity"] = "2.5"                                         # as stored before G-19
+		frappe.db.set_value("Reservation", odd, "tex_pricing_snapshot", json.dumps(snap), update_modified=False)
+		before = set(frappe.get_all("Error Log", pluck="name"))
+		live = frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "MASSAGE",
+		                                         "tex_status": "Active"})
+		draft = frappe.get_doc("TEX Extra", revisions.revise("TEX Extra", live))
+		draft.inventory_tracked, draft.daily_capacity = 1, 5
+		draft.save(ignore_permissions=True)
+		revisions.activate("TEX Extra", draft.name)                          # the first backfill logs it
+		for _day in range(2):
+			self.assertEqual(xinv.backfill(fx.PROPERTY), 0)                   # the daily job's next runs
+		logged = frappe.get_all("Error Log", filters={"name": ("not in", list(before) or ["-"])}, pluck="method")
+		self.assertEqual(logged.count(f"TEX job extras backfill {odd}"), 1)

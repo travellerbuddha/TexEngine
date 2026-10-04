@@ -8,6 +8,7 @@ at hotel and bookings already covered apply at once and say what is due later. A
 follows the hotel's policy: staff approval, an automatic refund of the true overpayment from
 the charges holding it, or a credit kept on the booking."""
 
+import json
 from unittest import mock
 
 import frappe
@@ -178,6 +179,39 @@ class TestHigherPrice(GuestMoneyCase):
 		# back from the gateway, the guest is told the change was not made and the payment refunded
 		last = public.booking_status(token=b["manage_token"])["rooms"][0]["last_change"]
 		self.assertEqual((last["status"], last["amount"], last["refunded"]), ("failed", "80.25", "80.25"))
+
+	def test_2p_a_paid_change_the_engine_refuses_keeps_its_reasons_for_staff(self):
+		"""§6G3 "Not done" (batch 2P): a change paid for online that the engine refuses when it is applied kept the
+		guest's text on its request ("cannot be sold. Please choose other dates…"): staff saw why only by proposing it
+		again. The request keeps the engine's reasons; the guest is still told none of them."""
+		b = self.deposit_paid("gcm-2p-why")
+		out = self.accept(b, self.propose(b, (6, 14)))
+		real = modification.propose
+		why = f"{fx.d(6, 13)} is past the contract's last stay day"
+
+		def refused(*args, **kwargs):                     # the engine refuses the change when it is applied
+			r = real(*args, **kwargs)
+			return {**r, "sellable": False, "sellable_ignoring_restrictions": False, "warnings": [],
+			        "proposed": {**r["proposed"], "reasons": [{"code": "STAY_WINDOW", "message": why}]}}
+
+		with mock.patch.object(modification, "propose", side_effect=refused):
+			paid(out["payment"])
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual(req.status, "Failed")
+		self.assertIn(why, req.error)
+		self.assertEqual(refunds(b["booking"]), [(out["payment"]["transaction"], D("80.25"), "Succeeded")])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- back from the gateway
+		self.assertNotIn("contract", json.dumps(public.booking_status(token=b["manage_token"]), default=str))
+
+	def test_2p_r1_a_refusal_with_no_reason_text_keeps_the_guests_wording(self):
+		"""2P review round 1 (NIT 5): with no reason text the staff detail was "The modified stay cannot be sold: " and
+		nothing after it, and it replaced the guest's wording on the request."""
+		from kamra.tex.services import refusals
+
+		with self.assertRaises(refusals.Refusal) as cm:
+			modification.guest_unsellable({"warnings": [], "proposed": {"reasons": [{"code": "STAY_WINDOW"}]}})
+		self.assertIsNone(getattr(cm.exception, "staff_detail", None))
+		frappe.clear_messages()
 
 	def test_a_waiting_change_is_paid_again_from_the_manage_page(self):
 		b = self.deposit_paid("gcm-again")

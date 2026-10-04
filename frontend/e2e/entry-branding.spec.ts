@@ -217,6 +217,23 @@ test("sign-in: an answer without a session is never taken for one", async ({ pag
   noErrors()
 })
 
+test("sign-in: an expired password whose link Frappe mailed says so (§6ZF, batch 2P)", async ({ page }) => {
+  // Frappe v16.36.1 mails the reset link and answers without it: "Forgot password?" would mint a new key and
+  // the mailed link would stop working
+  const noErrors = trackErrors(page)
+  await english(page)
+  await page.route("**/api/method/login", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ message: "Password Reset" }) }))
+  await page.goto(texPath("/login"))
+  await page.getByLabel("Email or username").fill("someone@example.com")
+  await page.getByLabel("Password").fill("whatever")
+  await page.getByRole("button", { name: "Sign in" }).click()
+  await expect(page.getByRole("alert")).toHaveText(
+    "Your password has expired. A link to set a new one was sent to your e-mail address; only the latest link works.",
+  )
+  await expect(page).toHaveURL(/\/login$/)
+  noErrors()
+})
+
 test("site root: a visitor goes to sign-in, a desk user to the TEX admin app", async () => {
   const visitor = await request.newContext({ baseURL: BENCH })
   let r = await visitor.get("/", { maxRedirects: 0 })

@@ -16,7 +16,7 @@ from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
+from frappe.utils import EMAIL_MATCH_PATTERN, add_days, add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.reservation_state import EXPIRY_NOTE
 from kamra.tex.availability import extras_repository as xinv
@@ -67,6 +67,20 @@ def new_manage_token() -> tuple[str, str]:
 	return token, token_hash(token)
 
 
+def plain_email(raw) -> str | None:
+	"""One plain address in ASCII, trimmed and in lower case, or None: what a guest's profile and a booking are keyed
+	by (the same address is the same guest, ADR-080). Frappe's own address pattern, matched whole (its field check
+	takes a display name, a list or an invisible character, each of which would be another identity), in ASCII (the
+	database compares accents away, and Frappe's field refuses an accented address only when it is stored), at most
+	140 characters. ASCII is checked before lower case: a KELVIN SIGN (U+212A) lower-cases to an ASCII k (2P review
+	round 1)."""
+	email = str(raw or "").strip()
+	if not email.isascii():
+		return None
+	email = email.lower()
+	return email if len(email) <= 140 and EMAIL_MATCH_PATTERN.fullmatch(email) else None
+
+
 def _clean_guest(g: dict) -> dict:
 	g = {k: (v.strip() if isinstance(v, str) else v) for k, v in (g or {}).items()}
 	if not g.get("first_name"):
@@ -76,8 +90,8 @@ def _clean_guest(g: dict) -> dict:
 	if not (g.get("email") or g.get("phone")):
 		frappe.throw(_("An email or phone number is required."), refusal("GUEST_CONTACT_REQUIRED"))
 	if g.get("email"):
-		g["email"] = g["email"].lower()
-		if "@" not in g["email"] or len(g["email"]) > 140:
+		g["email"] = plain_email(g["email"])
+		if not g["email"]:
 			frappe.throw(_("Invalid email address."), refusal("GUEST_EMAIL_INVALID"))
 	for f in ("first_name", "last_name"):
 		if len(g[f]) > 80:
@@ -123,24 +137,42 @@ def consent_given(value) -> bool:
 	return isinstance(value, str) and value.strip().lower() in ("1", "true")
 
 
+TENANT = "(IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)"
+
+
+def profile_of_email(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
+	"""The oldest profile of the enterprise (or of none) whose stored e-mail is this address, in any case, and only
+	this address (owner, batch 2P: the same address is the same guest; ADR-080). The database compares accents and
+	case away (utf8mb4_unicode_ci), so it gives the candidates and the exact address is chosen among them here: a
+	booking for ana.muller@… never joins the profile of ana.müller@…. ``lock``: a locking read (of every candidate)."""
+	email = (email or "").strip().lower()
+	if not email:
+		return None
+	rows = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
+		f"""SELECT g.name, g.email FROM `tabGuest` g WHERE g.email = %(email)s AND {TENANT}
+		ORDER BY g.creation ASC, g.name ASC{" FOR UPDATE" if lock else ""}""", {"email": email, "ent": enterprise or ""},
+		as_dict=True)
+	# the stored address's ASCII is checked before lower case too: one stored with a KELVIN SIGN (the Desk form, a legacy
+	# path) lowers to an ASCII k (2P review round 2)
+	return next((r.name for r in rows if (stored := (r.email or "").strip()).isascii() and stored.lower() == email),
+	            None)
+
+
 def _find_profile(g: dict, enterprise: str | None, staff: bool, *, lock: bool = False) -> str | None:
-	"""The profile a booking joins (``resolve_guest``): the e-mail's, when one is given; the phone's only
-	for staff, for a booking without an e-mail or a profile without one, and only when exactly one
+	"""The profile a booking joins (``resolve_guest``): the e-mail's (``profile_of_email``), when one is given; the
+	phone's only for staff, for a booking without an e-mail or a profile without one, and only when exactly one
 	profile of the enterprise (or of none) has it. The e-mail is the identity when given: another e-mail
 	on a shared phone (a family, a colleague, a travel agent's number) is another person, never their
 	stays or history (ADR-056 review). ``lock``: a locking read (the profile found is locked)."""
 	tail = " FOR UPDATE" if lock else ""
-	tenant = "(IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)"
 	if g.get("email"):
-		found = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
-			f"""SELECT g.name FROM `tabGuest` g WHERE g.email = %(email)s AND {tenant}
-			ORDER BY g.creation ASC, g.name ASC LIMIT 1{tail}""", {"email": g["email"], "ent": enterprise or ""}, pluck=True)
+		found = profile_of_email(g["email"], enterprise, lock=lock)
 		if found:
-			return found[0]
+			return found
 	if g.get("phone") and staff:
 		no_email = "AND IFNULL(g.email, '') = ''" if g.get("email") else ""
 		found = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
-			f"""SELECT g.name FROM `tabGuest` g WHERE g.phone = %(phone)s AND {tenant} {no_email}
+			f"""SELECT g.name FROM `tabGuest` g WHERE g.phone = %(phone)s AND {TENANT} {no_email}
 			ORDER BY g.creation ASC, g.name ASC LIMIT 2{tail}""", {"phone": g["phone"], "ent": enterprise or ""},
 			pluck=True)
 		return found[0] if len(found) == 1 else None
@@ -405,11 +437,15 @@ def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
 			due_known = False
 		else:
 			due += room_due
+		# why the quote cannot be booked, with its code: the app tells a quote already booked from an expired one
+		# (§5b; batch 2P)
+		why = quoting.quote_refusal(row)
 		rooms.append({
 			"quote_id": row.name, "room_type": req.get("room_type"), "total": to_str(room_total),
 			"due_now": to_str(room_due) if room_due is not None else None, "deposit_type": kind,
 			"payment_policy": policy.get("name"), "pay_at_hotel_allowed": allowed,
-			"expires_at": str(row.expires_at), "problem": quoting.quote_is_usable(row),
+			"expires_at": str(row.expires_at), "problem": str(why) if why else None,
+			"problem_code": why.code if why else None,
 		})
 	return {
 		"property": row.property, "currency": ccy, "market": market, "channel": channel,

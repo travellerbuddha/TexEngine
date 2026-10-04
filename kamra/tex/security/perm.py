@@ -79,6 +79,10 @@ CONTRACT_COST_DOCTYPES = frozenset({"TEX Contract", "TEX Contract Version",
                                     "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan",
                                     "TEX Contract Offer", "TEX Contract Channel"})
 COST_DOCTYPES = CONTRACT_COST_DOCTYPES | {"TEX Markup Rule", "TEX Pricing Policy"}
+# events of a hotel's record that hold a contract payload's digests (a refused reprice: ``sold_terms.REFUSED``): a
+# digest confirms a guess of the payload's rates offline, so Desk / REST serve them to platform administrators only,
+# as a contract's events (G-97); the TEX trail serves them, masked without price.view_cost (G-99; §6L, batch 2P)
+DIGEST_ACTIONS = ("reservation.reprice_refused",)
 SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, *LOYALTY_DOCTYPES, "Guest",
                    *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES, *LEGACY_PROPERTY_DOCTYPES)
 
@@ -119,7 +123,8 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	if doctype == "TEX Audit Event":
 		return (f"({t}.`property` in ({_sql_list(props)}) or {t}.`name` in (select s.`event` from "
 		        f"`tabTEX Audit Scope` s where s.`property` in ({_sql_list(props)})))"
-		        f" and ifnull({t}.`reference_doctype`, '') not in ({_sql_list(COST_DOCTYPES)})")
+		        f" and ifnull({t}.`reference_doctype`, '') not in ({_sql_list(COST_DOCTYPES)})"
+		        f" and ifnull({t}.`action`, '') not in ({_sql_list(DIGEST_ACTIONS)})")
 	if doctype in STRICT_DOCTYPES:
 		return f"{t}.`property` in ({_sql_list(props)})"
 	if doctype in GROUP_DOCTYPES:
@@ -237,8 +242,9 @@ def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
 		                                        and doc.enterprise in _enterprises(scope.permitted_properties(user)))
 	if doc.doctype in TENANT_DOCTYPES:
 		return _tenant_doc_permitted(doc, user)
-	if doc.doctype == "TEX Audit Event" and doc.get("reference_doctype") in COST_DOCTYPES:
-		return False                              # cost: the TEX audit log serves it by price.view_cost (G-97)
+	if doc.doctype == "TEX Audit Event" and (doc.get("reference_doctype") in COST_DOCTYPES
+	                                         or doc.get("action") in DIGEST_ACTIONS):
+		return False                              # cost: the TEX audit log serves it by price.view_cost (G-97, G-99)
 	props, platform_level = _doc_properties(doc)
 	if platform_level:
 		return False

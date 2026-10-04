@@ -44,6 +44,7 @@ import { decStr, fromRow, intVal, invalidateLookups, strVal, toRow, UI_RATES, us
 import { fieldKinds, isRequired, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
 import { PromotionCheck, PromotionSummary } from "./PromotionPanels"
 import { backToFront, copyOf } from "./promotions"
+import { promoCodeKey } from "../../crs/lib/promoCode"
 
 type T = (k: string, p?: Record<string, string | number>) => string
 
@@ -544,6 +545,13 @@ export default function PolicyEditor() {
   )
 }
 
+// a code shown as the server keeps it while it is typed: a promotion's folded key (ŞEKER is SEKER, C-12; §6M, batch 2P),
+// any other code upper-cased
+function typedCode(kind: PolicyKind, key: string, value: string): string {
+  if (key === "code" && kind.doctype === "TEX Promotion") return promoCodeKey(value)
+  return key === "code" || key === "extra_code" ? value.toUpperCase() : value
+}
+
 function FieldControl({
   f,
   kind,
@@ -643,7 +651,7 @@ function FieldControl({
     default:
       return (
         <Field {...common}>
-          <Input disabled={readOnly} value={String(v || "")} onChange={(e) => onChange(f.key === "code" || f.key === "extra_code" ? e.target.value.toUpperCase() : e.target.value)} />
+          <Input disabled={readOnly} value={String(v || "")} onChange={(e) => onChange(typedCode(kind, f.key, e.target.value))} />
         </Field>
       )
   }

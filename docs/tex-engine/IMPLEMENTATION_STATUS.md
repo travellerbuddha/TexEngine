@@ -2276,3 +2276,103 @@ re-verified against the code first; all held (the erasure item was worse than li
     without cost reads, and a refused reprice's audit digests (§6L); a group program's membership when one hotel gets
     its own program (§6N1).
 
+
+## 6P. Audit Part 2P — a guest is their e-mail address, and the LOW leftovers (2026-10-04)
+
+The owner chose (2026-10-04) a new LOW batch and decided the booking identity it needed: the same e-mail address is
+the same guest, in any case, and an accented look-alike is another guest. A booking made for someone else is a later
+batch of its own (HANDOFF §2), asked about when it starts. ADR-080. Each card was re-verified against the code first:
+nine held, two were dropped (below) and one was left for its own batch (money).
+
+- 2P-1 the same address **COMPLETE**: `booking.profile_of_email` (the collation's candidates, the exact address
+  taken); `_find_profile` and `members._profile` use it. Tests: `test_public_booking.TestBookingIdentity` (2). Red:
+  the look-alike's booking joined the accented profile, `'G-00393' == 'G-00393'` (with nothing to fill in on that
+  profile; with something, the booking failed on saving its accented address).
+- 2P-2 one plain address **COMPLETE**: `booking.plain_email`; a booking refuses another with `GUEST_EMAIL_INVALID`
+  before any lock, a channel's booking leaves it out; `members._email` uses it. Tests:
+  `test_public_booking.TestBookingIdentity.test_2p_an_address_no_profile_can_keep_is_refused_by_its_code` (3 cases),
+  `test_distribution.TestInbound.test_2p_a_guest_address_no_profile_can_keep_is_left_out`. Red: `(None, None) !=
+  ('GUEST_EMAIL_INVALID', …)` for an accented and a doubled "@", `ValidationError not raised` for an invisible
+  character; the channel's message `'Failed' != 'Applied'` (`… is not a valid Email Address`).
+- 2P-3 (§5b, §6G3) **COMPLETE**: a basket's rooms carry `problem_code`; a `QUOTE_USED` refusal shows "This price is
+  already booked" and "See available rooms" (`errors.quoteUsedTitle`, six languages). Tests:
+  `test_public_booking.TestBasketProblems` (1), node `checkout-fallback` (+1). Red: `[(True, None)] != [(True,
+  'QUOTE_EXPIRED')]`; node `basketExpiry is not a function`.
+- 2P-4 (§6K5) **NOT STARTED** (withdrawn): a basket refused as gone was sent to the refresh path (ab446f3; red: node
+  `actual: null, expected: { code: 'QUOTE_INVALID', … }`), but `booking.spec`'s LO-14 test asserts "Try again" for that
+  refusal on purpose (2K-5 review), and the batch's full Playwright run failed it: reverted (b7333b6); changing that
+  assertion needs the owner.
+- 2P-5 (§6G3) **COMPLETE**: extras a hotel cannot price refuse by code (`CHANGE_NOT_ONLINE` / `EXTRAS_REFUSED`).
+  Tests: `test_post_booking_extras.TestMisconfiguredExtras` (2). Red: a bare `Unsellable` (errors=5).
+- 2P-6 (§6G3) **COMPLETE**: a paid guest change the engine refuses when applied keeps the engine's reasons for staff.
+  Test: `test_self_service_money.TestHigherPrice.test_2p_a_paid_change_the_engine_refuses_keeps_its_reasons_for_
+  staff`. Red: `"… past the contract's last stay day" not found in 'The modified stay cannot be sold. Please choose
+  other dates or contact the hotel.'`.
+- 2P-7 (§6L) **COMPLETE**: Desk and REST serve a refused reprice's event (its digests) to platform administrators
+  only. Test: `test_crm_privacy.TestPricingInternalsOutsideTex.test_2p_desk_and_rest_never_serve_a_refused_reprices_
+  digests`. Red: `['get_list', 'frappe.client.get'] != []`.
+- 2P-8 (§6K4) **COMPLETE**: the extras backfill logs a stay it leaves out once. Test:
+  `test_extras_inventory.TestExtrasAdministration.test_2p_a_stay_left_out_of_the_backfill_is_logged_once`. Red: `3 !=
+  1`.
+- 2P-9 (§6M) **COMPLETE**: the promotion editor shows a code's key while it is typed (`promoCodeKey`). Test: node
+  `promo-code` (+1). Red: `promoCodeKey is not a function`; the editor showed `"şeker 24".toUpperCase()` = ŞEKER 24.
+- 2P-10 (§6N1) **COMPLETE**: the CRM's redemption hint finds a group program at each of its hotels (`programOf`).
+  Test: node `crm-redeem` (+1). Red: `programOf is not a function`; the dialog's lookup gave `undefined` for a stay at
+  a group's second hotel.
+- 2P-11 (§6ZF) **COMPLETE**: an expired password whose link was mailed says so (`core.login.password_expired_mailed`,
+  six languages). Test: e2e `entry-branding.spec` (new). Red: `Received: "Your password has expired. Set a new one
+  with "Forgot password?"."`.
+- Dropped: a settle call without a charge (§6K4; both production callers pass the charge) and a delivery a worker
+  never finishes (§6K4; the late-message check shows it, a separate watch needs a new column). Left for its own
+  batch: a duplicate capture audited apart (§6K1, money).
+- Docs: ADR-080; HANDOFF (§1, §2, §6, §7, §9, §10); SECURITY_MODEL (the guest identity and the Desk audit rows, the
+  review log); DEV_ENVIRONMENT (stop the worker before integration runs); NEXT_SESSION_PROMPT. No schema change, no
+  patch.
+- Review round 1 **COMPLETE** (an independent read-only reviewer; 1 HIGH, 3 LOW, 5 NITs): HIGH, CI's TEX unit check
+  `test_guest_refusal_codes` counted `guest_unsellable`'s refusal as uncoded (built in a variable): `refusal(...,
+  staff_detail=)` inline (red: `Lists differ: ["services/modification.py:77 guest_unsellable: …"] != []`, CI #241);
+  LOW, the booking app's and the CRM's address checks (`lib/email.plainEmail`; red: node `ERR_MODULE_NOT_FOUND`, and
+  today's checks accept `ana@müller.de`, `ana@example.com.`, `a..b@…`, an invisible character, `İNFO@HOTEL.COM`); LOW,
+  a channel's `Name <address>` keeps its address (red: `(None, None) != ('mia.berg.r1@example.com', …)`); LOW, the
+  call centre's booker and the CRM's profile take one plain address (red: `"Invalid booker email address" does not
+  match "bärbel.2p@example.de is not a valid Email Address"`; `ValidationError not raised` for `İNFO.2P@HOTEL.COM`,
+  `ınfo…`, `Ana <…>`, a trailing dot); NITs: ASCII before lower case (red: `'kate.2p@example.com' is not None` for a
+  KELVIN SIGN), no empty staff detail (red: `'The modified stay cannot be sold: ' is not None`), "already booked" says
+  where the confirmation is (`errors.quoteUsedBody`, six languages). Tests: `test_public_booking.TestBookingIdentity`
+  (+2), `test_distribution` (+1), `test_commercial_flows.TestPaymentMethodRules` (+1), `test_self_service_money` (+1),
+  node `plain-email` (new, 2).
+- Review round 2 **COMPLETE** (no HIGH or MEDIUM; every round-1 finding verified fixed; 2 LOW, 4 NITs): LOW, the CRM
+  drawer refused any edit of a profile whose stored address is not plain (`editedEmailInvalid`: only an address typed
+  now; red: node `editedEmailInvalid is not a function`, today's drawer blocks the phone edit of `info@hotel.com.`);
+  LOW, the call centre's guest and booker checks (`plainEmail`; today's check accepts `bärbel@example.de`,
+  `ana@example.com.`, `İNFO@HOTEL.COM`); NIT, the apps trim as Python's `strip()` (red: `actual: 'ana@example.com',
+  expected: null` for a BOM); NIT, a stored address's ASCII before lower case (red: `'G-00592' == 'G-00592'`, a booking
+  for `kate@…` joined the KELVIN SIGN profile); NITs, ADR-080's booker line and HANDOFF's node count. Tests:
+  `test_public_booking.TestBookingIdentity` (+1), node `plain-email` (+2).
+- CI **COMPLETE**: the demo seed booked Emre Yılmaz as `emre.yılmaz@example.com` (a dotless ı, which Frappe's field
+  takes), refused by 2P-2: `demo_seed.DEMO_GUESTS` carries ASCII addresses (red: CI run 37207554039,
+  `Refusal: Invalid email address.` while seeding). Test: `test_public_booking.TestBookingIdentity.test_2p_the_demo_
+  guests_have_plain_addresses`.
+- Local runs on the final head: TEX unit 703; integration 51 modules, 1,419 tests (`test_scheduler_smoke` differs only
+  locally); node unit 455; DOM 45; Playwright 218 tests (209 passed, 9 skipped by design); eval 76/76; banquet 101;
+  front-desk journey 13/13; i18n complete; ruff clean.
+- CI (e2e) **COMPLETE**: `booking.spec`'s campaign-link test failed on "DE prices differ" (CI run 37210508985, mobile;
+  once locally): its random stay window (today + 160…279 days on the phone) reached July 2027, where the demo's DE
+  and GLOBAL contracts give the same bed-and-breakfast price ((70 + 55) × 1.08 = 80 + 55, July–August) — a stay of 4–6
+  July 2027 shows €475.20 and €540.00 in both. Not this batch's code: it would fail on the base too, more often each
+  day. Setup only, assertions unchanged: the test moves a stay with a night in July or August two months back.
+- **Not done:**
+  - 2P-4, a basket refused as gone still offers "Try again" (§6K5): `booking.spec`'s LO-14 assertion would change
+    (owner);
+  - the Desk Guest form and the legacy PMS paths that make a profile (banquet, the legacy public API) keep Frappe's
+    own address check (it takes a display name, a Turkish dotted İ or a trailing dot); a profile stored that way is
+    joined by no booking (ADR-080) and shows in the CRM's possible duplicates (LOW; the TEX CRM refuses it);
+  - a booking made for someone else (HANDOFF §2 item 11, owner questions first);
+  - a duplicate capture audited apart (§6K1, money: its own batch);
+  - a basket refusal a refresh does not clear (`RATE_UNAVAILABLE` of a fixed amount) asks for a refresh again, each
+    making new quotes (it asked to try again before: as stuck either way; LOW);
+  - the CRS's `normalisePromoCode` leaves out a space the server keeps in a code (`YAZ 24` is typed `YAZ24` in the
+    call centre, so a code saved with a space cannot be applied there; LOW, found with 2P-9);
+  - the §6* "Not done" lines 2P did not take (HANDOFF §2 item 10): among them a review recorded while a new charge
+    starts (§6K1), the digest an editor without cost reads (§6L), a group program's membership when one hotel gets
+    its own program (§6N1), the `member_blocked` mail's program list (§6O).

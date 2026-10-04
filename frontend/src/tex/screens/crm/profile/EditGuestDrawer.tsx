@@ -6,6 +6,7 @@ import { Badge, Button, Drawer, Field, FormGrid, InlineError, Input, Select, Swi
 import { splitTags, useEvent } from "../lib"
 import type { Guest } from "../types"
 import { GENDER_KEYS } from "./ContactCard"
+import { editedEmailInvalid } from "../../../../lib/email"
 
 type Editable = Pick<
   Guest,
@@ -76,7 +77,9 @@ export function EditGuestDrawer({ guest, open, onClose, onSaved }: { guest: Gues
   }, [form, initial])
 
   const set = <K extends keyof Editable>(k: K, v: Editable[K]) => setForm((f) => ({ ...f, [k]: v }))
-  const emailBad = Boolean(form.email) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email ?? "")
+  // one plain address, as the server keeps it (2P review round 1): İNFO@… would never be joined by a booking (ADR-080);
+  // only an address typed now, as the server checks only one that is sent (review round 2)
+  const emailBad = editedEmailInvalid(form.email, initial.email)
   const nameMissing = !(form.first_name ?? "").trim()
   const reasonMissing = form.blacklisted && !(form.blacklist_reason ?? "").trim()
   const invalid = emailBad || nameMissing || reasonMissing

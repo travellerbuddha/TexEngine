@@ -278,7 +278,7 @@ def backfill(property: str, codes=None) -> int:
 	                                                "status": ("in", ["Confirmed", "Checked In", "Held",
 	                                                                  "Pending Payment"]),
 	                                                "check_out_date": (">=", today)},
-	                        fields=["name", "status", "tex_booking", "tex_pricing_snapshot"]):
+	                        fields=["name", "status", "tex_booking", "tex_pricing_snapshot", "creation"]):
 		have = set(frappe.get_all("TEX Extra Allocation", filters={"reservation": r.name}, pluck="extra_code"))
 		todo = codes - have
 		snap = json.loads(r.tex_pricing_snapshot or "{}")
@@ -286,10 +286,13 @@ def backfill(property: str, codes=None) -> int:
 			need = {k: u for k, u in demand([snap], codes=todo).items() if k[1] >= today} if todo else {}
 		except ValueError:
 			# a quantity that is not a whole number of units (LO-48): this stay is left to staff, never cut to a
-			# whole number; the others still hold their units (the limit is saved, the daily job goes on)
+			# whole number; the others still hold their units (the limit is saved, the daily job goes on). Logged
+			# once (while its log is kept), not on every daily run until the stay is over (§6K4; batch 2P)
 			from kamra.tex.security.audit import log_exception
 
-			log_exception(f"TEX job extras backfill {r.name}")
+			title = f"TEX job extras backfill {r.name}"
+			if not frappe.db.exists("Error Log", {"method": title, "creation": (">=", r.creation)}):
+				log_exception(title)
 			continue
 		if not need:
 			continue
