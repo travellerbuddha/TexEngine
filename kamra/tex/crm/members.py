@@ -155,10 +155,12 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	if purpose == "sign_in" and not profile:
 		notify.member_mail(site, email, "member_none", language=language)
 		return
-	if purpose == "join" and profile and _rejoin_blocked(site, profile):
+	blocked = _rejoin_blocked(site, profile) if purpose == "join" and profile else []
+	if blocked:
 		# staff blocked a rejoin wherever the guest could join here (C-04h): no link; the mail, which only the
-		# address's owner reads, says to ask the hotel. The site's answer is the same as ever
-		notify.member_mail(site, email, "member_blocked", guest=profile, language=language)
+		# address's owner reads, says to ask the hotel, naming the programs blocked (never one the guest is still a
+		# member of; batch 2Q). The site's answer is the same as ever
+		notify.member_mail(site, email, "member_blocked", guest=profile, language=language, programs=blocked)
 		return
 	token = secrets.token_urlsafe(32)
 	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once); its
@@ -177,11 +179,12 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	                   guest=profile, language=language)
 
 
-def _rejoin_blocked(site, guest: str) -> bool:
-	"""Every program of the site the guest is no member of is one staff blocked a rejoin of (C-04h): a join link
-	would join nothing. Opening a link checks again, under the profile's lock (``loyalty.join_web``)."""
+def _rejoin_blocked(site, guest: str) -> list[str]:
+	"""The site's programs the guest is no member of, when staff blocked a rejoin of every one of them (C-04h): a join
+	link would join nothing. Empty otherwise. Opening a link checks again, under the profile's lock
+	(``loyalty.join_web``)."""
 	open_ = [p for p in site_programs(site) if not loyalty.member_of(guest, p)]
-	return bool(open_) and all(loyalty.rejoin_blocked(guest, p) for p in open_)
+	return open_ if open_ and all(loyalty.rejoin_blocked(guest, p) for p in open_) else []
 
 
 def _link_key(token: str) -> str:

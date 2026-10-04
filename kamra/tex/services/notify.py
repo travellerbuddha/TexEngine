@@ -117,10 +117,11 @@ def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], gu
 
 
 def member_mail(site, email: str, key: str, *, token: str | None = None, guest: str | None = None,
-                language: str = "en") -> dict:
+                language: str = "en", programs: list[str] | None = None) -> dict:
 	"""A web member's link (C-04, ADR-078): ``member_sign_in`` / ``member_join`` with the one-time token in the URL
 	fragment, or ``member_none`` (no membership with this e-mail: a link to joining, no token), or ``member_blocked``
-	(staff blocked a rejoin, C-04h: ask the hotel, no link at all). Sent in the site's
+	(staff blocked a rejoin, C-04h: ask the hotel, no link at all; ``programs``: the ones blocked, batch 2Q, else
+	the site's). Sent in the site's
 	hotel's name (a group site: its first hotel's). The token is in no log and no record of ours: only the outgoing
 	mail itself carries it (Frappe's Email Queue, System Manager only, until the mail is sent and purged), and it works
 	once, within ``members.LINK_MINUTES``. A profile's mail is recorded as its communication, without the link."""
@@ -133,12 +134,12 @@ def member_mail(site, email: str, key: str, *, token: str | None = None, guest: 
 		lang = (language or "en")[:2]
 		lang = lang if lang in LANGS else "en"
 		hotel = (frappe.db.get_value("Property", property, "property_name") if property else None) or site.site_name
-		programs = [frappe.db.get_value("TEX Loyalty Program", p, "program_name") or "" for p in
-		            members.site_programs(site)]
+		names = [frappe.db.get_value("TEX Loyalty Program", p, "program_name") or "" for p in
+		         (programs if programs is not None else members.site_programs(site))]
 		link = (sites.guest_url(site, f"member#token={token}") if token else
 		        "" if key in NO_LINK else sites.guest_url(site, "?join=1"))
 		# greeted by no name: a visitor types the names for an address they may not own (review round 1)
-		subject, body = render(key, lang, link=link, hotel=escape_html(hotel), program=escape_html(", ".join(programs)),
+		subject, body = render(key, lang, link=link, hotel=escape_html(hotel), program=escape_html(", ".join(names)),
 		                       minutes=str(members.LINK_MINUTES))
 	except Exception as e:
 		if transaction_lost(e):

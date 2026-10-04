@@ -557,6 +557,24 @@ class TestRejoinBlocked(WebMemberCase):
 		self.assertIn("contact the hotel", self.mails[-1][2])
 		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
 
+	def test_2q_the_blocked_mail_names_only_the_programs_blocked(self):
+		"""Batch 2Q (§6O, 2O review round 1 NIT 6): the mail named every program of a multi-program site, also one the
+		guest is still a member of: "you cannot rejoin Sister Club" for a club they are in. It names the programs the
+		block keeps them out of."""
+		other = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "Sister Club 2Q", "enabled": 1,
+		                        "currency": "EUR", "property": OTHER}).insert(ignore_permissions=True).name
+		frappe.get_doc({"doctype": "TEX Loyalty Member", "guest": self.guest, "program": other,
+		                "status": "Active"}).insert(ignore_permissions=True)
+		self.join(self.guest)
+		self.leave(block=True)
+		with mock.patch.object(members, "site_programs", return_value=[self.club, other]):
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		_to, subject, html = self.mails[-1]
+		self.assertIn("contact the hotel", html)
+		self.assertIn("Resort Club", subject + html)
+		self.assertNotIn("Sister Club 2Q", subject + html)
+
 	def test_c04h_a_join_link_asked_before_the_block_rejoins_nobody(self):
 		self.join(self.guest)
 		self.leave(block=False)                                                # the guest asked to leave
