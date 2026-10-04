@@ -6,6 +6,7 @@ import { safeImage } from "../lib/branding"
 import { isEmbedded } from "../lib/storage"
 import { Button } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
+import { MemberButton } from "./Member"
 import { siteText, useSite } from "./SiteContext"
 import { SourceLine } from "./SourceLine"
 
@@ -115,6 +116,7 @@ export function Header({ home }: { home?: string }) {
           {phone}
         </a>
       )}
+      <MemberButton />
       <LanguageSelect />
       <CurrencySelect />
     </div>

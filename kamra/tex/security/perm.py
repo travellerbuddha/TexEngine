@@ -24,7 +24,7 @@ PROPERTY_DOCTYPES = (
 	"TEX Tax Policy", "TEX Extra Inventory Day", "TEX Extra Allocation",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event",
 	"TEX Content Translation", "TEX Channel Mapping", "TEX Channel ARI Day", "TEX Channel Inbound",
-	"TEX Guest Change Request",
+	"TEX Guest Change Request", "TEX Member Session",
 )
 # belongs to a hotel or to a whole hotel group
 GROUP_DOCTYPES = ("TEX Promotion", "TEX Loyalty Program", "TEX Booking Site")
@@ -49,7 +49,7 @@ LOYALTY_DOCTYPES = (LEDGER_DOCTYPE, "TEX Loyalty Member")
 ENTERPRISE_DOCTYPES = ("TEX Guest Segment",)
 # guest activity of a booking site: a group site's rows have no hotel yet and belong to the
 # site's hotels (G-26); a row with neither is platform-level
-SITE_DOCTYPES = ("TEX Funnel Event", "TEX Abandoned Booking")
+SITE_DOCTYPES = ("TEX Funnel Event", "TEX Abandoned Booking", "TEX Member Session")
 # the tenant structure itself: grants, enterprises and hotel groups are seen only inside the
 # tenant (G-26); a platform-scope grant only by platform administrators
 TENANT_DOCTYPES = ("TEX Access Grant", "TEX Enterprise", "TEX Hotel Group")

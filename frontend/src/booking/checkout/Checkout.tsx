@@ -11,9 +11,11 @@ import { continuePayment } from "../flow/payment"
 import { sitePath, siteRoute } from "../lib/mount"
 import { Summary } from "../flow/Summary"
 import { FlowErrorAlert, PriceChangeNotice, RejectedExtrasNotice, useBackToExtras, useContinue } from "../flow/useContinue"
+import { memberPriced } from "../lib/member"
 import { rememberReturn, sessionId } from "../lib/storage"
+import { useMember } from "../site/Member"
 import { useSite } from "../site/SiteContext"
-import type { PaymentMethod, PaymentStart, QuoteResponse, SiteExtra } from "../types"
+import type { MemberStatus, PaymentMethod, PaymentStart, QuoteResponse, SiteExtra } from "../types"
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
@@ -383,6 +385,25 @@ function DetailsStep() {
   }, [residency, g.country, criteria.country, setGuest])
   const residents = residency ? countryNames(residency.countries, regionDisplay(locale)) : ""
   const residence = residencyProblem(residency, countryCode, nationalityCode)
+  // a signed-in member (C-04): their name and e-mail are filled in; a member's price is booked under their e-mail
+  const member = useMember()
+  const signedIn = member?.session ? member.status : null
+  const memberEmail = signedIn?.email ?? null
+  const lockEmail = !!memberEmail && memberPriced(flow.selections.map((s) => s?.quote))
+  const filledFor = useRef<MemberStatus | null>(null)
+  useEffect(() => {
+    // once for a member's status: the empty fields; the guest may change them after
+    if (!signedIn || filledFor.current === signedIn) return
+    filledFor.current = signedIn
+    const fill: Partial<typeof g> = {}
+    if (!g.first_name.trim() && signedIn.first_name) fill.first_name = signedIn.first_name
+    if (!g.last_name.trim() && signedIn.last_name) fill.last_name = signedIn.last_name
+    if (!g.email.trim() && signedIn.email) fill.email = signedIn.email
+    if (Object.keys(fill).length) setGuest(fill)
+  }, [signedIn, g.first_name, g.last_name, g.email, setGuest])
+  useEffect(() => {
+    if (lockEmail && memberEmail && g.email !== memberEmail) setGuest({ email: memberEmail })
+  }, [lockEmail, memberEmail, g.email, setGuest])
 
   const errors: FieldError[] = []
   if (!g.first_name.trim()) errors.push({ id: ids.first, message: t("details.errFirst") })
@@ -436,8 +457,17 @@ function DetailsStep() {
             <Field label={t("details.lastName")} error={errFor(ids.last)} id={ids.last}>
               <Input value={g.last_name} onChange={(e) => setGuest({ last_name: e.target.value.slice(0, 140) })} autoComplete="family-name" required />
             </Field>
-            <Field label={t("details.email")} hint={t("details.emailHint")} error={errFor(ids.email)} id={ids.email}>
-              <Input type="email" inputMode="email" value={g.email} onChange={(e) => setGuest({ email: e.target.value.slice(0, 140) })} autoComplete="email" required spellCheck={false} />
+            <Field label={t("details.email")} hint={lockEmail ? t("member.emailLocked") : t("details.emailHint")} error={errFor(ids.email)} id={ids.email}>
+              <Input
+                type="email"
+                inputMode="email"
+                value={g.email}
+                onChange={(e) => setGuest({ email: e.target.value.slice(0, 140) })}
+                autoComplete="email"
+                required
+                spellCheck={false}
+                readOnly={lockEmail}
+              />
             </Field>
             <Field label={t("details.phone")} hint={t("details.phoneHint")} error={errFor(ids.phone)} id={ids.phone}>
               <Input type="tel" inputMode="tel" value={g.phone} onChange={(e) => setGuest({ phone: e.target.value.slice(0, 40) })} autoComplete="tel" required />

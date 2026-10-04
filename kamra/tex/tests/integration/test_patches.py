@@ -129,6 +129,7 @@ BEHAVIOUR = {
 	"p75_payment_last_reverified": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p76_oauth_registration_off": "test_patches.TestSmallPatches.test_p76_switches_frappe_oauth_registration_off_once",
 	"p77_loyalty_member_index": "test_patches.TestP03Indexes.test_p77_creates_the_loyalty_member_index",
+	"p78_member_session_index": "test_patches.TestP03Indexes.test_p78_creates_the_member_session_index",
 }
 
 
@@ -942,6 +943,23 @@ class TestP03Indexes(PatchCase):
 			seen = migrate("p77_loyalty_member_index")
 		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
 		self.assertRerunChangesNothing("p77_loyalty_member_index")
+
+	def test_p78_creates_the_member_session_index(self):
+		"""C-04 on the web (2N-2): a merge reads and moves a profile's web sessions with locking reads, and an erasure
+		deletes them, through this index. DDL only, stubbed in the sandbox (M3)."""
+		from kamra.tex import setup
+
+		new = {"tex_member_session_guest": ("TEX Member Session", ("guest", "site"))}
+		have = {name: (dt, tuple(fields)) for dt, fields, name in setup.TEX_INDEXES}
+		self.assertEqual({k: have.get(k) for k in new}, new)
+		self.assertTrue(frappe.db.has_index("tabTEX Member Session", "tex_member_session_guest"))  # the migration made it
+		self.assertEqual(self.first_run("p78_member_session_index")["add_index"], [])      # nothing missing: no DDL
+		real = frappe.local.db.has_index
+		with mock.patch.object(frappe.local.db, "has_index",
+		                       side_effect=lambda table, index: index not in new and real(table, index)):
+			seen = migrate("p78_member_session_index")
+		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
+		self.assertRerunChangesNothing("p78_member_session_index")
 
 class TestP04LegacyPriceLock(PatchCase):
 	def test_standing_legacy_stays_are_locked_at_their_amount(self):

@@ -224,7 +224,7 @@ def require_member(profile: str | None, property: str, *, lock: bool = False) ->
 
 def refuse_members_price() -> None:
 	frappe.throw(_("This price is for members of the hotel's loyalty program, and this guest is not a member. "
-		               "Search again for this guest, or join them to the program first."), refusal("SEARCH_AGAIN"))
+	               "Search again for this guest, or join them to the program first."), refusal("MEMBERS_ONLY"))
 
 
 def _record_consent(guest: str, booking: str, property: str, granted: list[str], requested: list[str],
