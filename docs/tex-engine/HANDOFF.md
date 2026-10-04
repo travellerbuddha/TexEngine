@@ -62,7 +62,10 @@ the descriptions of PRs #3–#35 (each has its items, fail-first evidence, revie
   has its CI runs. After 2N-2 (PR #34, local runs on its head): TEX unit 702; integration 51 modules, 1,380 tests
   (`test_member_web` 35; `test_scheduler_smoke` differs only locally); node unit 446; DOM 45; Playwright 215 tests in
   54 spec files (9 skipped by design); eval 76/76; banquet 101; front-desk journey 13/13. PR #34's description has its
-  CI runs.
+  CI runs. After 2O (PR #35, local runs): TEX unit 703; integration 51 modules, 1,402 tests (`test_member_web` 51;
+  `test_scheduler_smoke` differs only locally); node unit 448; DOM 45; Playwright 217 tests in 56 spec files (8
+  skipped by design; a worker must run for `manage-money.spec`, DEV_ENVIRONMENT); eval 76/76; banquet 101; front-desk
+  journey 13/13. PR #35's description has its CI runs.
 
 ## 2. What is left
 
