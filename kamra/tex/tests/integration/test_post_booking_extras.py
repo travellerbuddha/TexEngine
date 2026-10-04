@@ -349,3 +349,48 @@ class TestPostBookingExtras(AddonCase):
 		spa = next(e for e in q["quote"]["extras"] if e["code"] == "SPA")
 		self.assertEqual((spa["ok"], spa["reason"]), (False, f"not enough left on {fx.d(6, 10)}"))
 		self.assertNotRegex(json.dumps(q), r"\d+ left")
+
+
+class TestMisconfiguredExtras(AddonCase):
+	"""§6G3 "Not done" (batch 2P): a hotel whose extras cannot be priced (two live revisions of one extra, two tax
+	policies in force) answered the add-extras dialog with a bare ``Unsellable``: a 500 with no code, on the manage page
+	and in the CRS alike."""
+
+	def misconfigured(self, target: str, code: str):
+		from kamra.tex.commercial import context
+		from kamra.tex.pricing.model import Unsellable
+
+		return mock.patch.object(context, target, side_effect=Unsellable(code, f"{fx.PROPERTY} is misconfigured."))
+
+	def test_2p_a_guest_is_told_to_contact_the_hotel_by_its_code(self):
+		from kamra.tex.services import refusals
+
+		b = self.book("2p-x-guest")
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		calls = {"options": lambda: public.manage_extras(token=b["manage_token"], reservation=res),
+		         "propose": lambda: public.manage_extras_propose(token=b["manage_token"], reservation=res,
+		                                                         extras=[{"code": "MASSAGE"}])}
+		for target, code, call in (("live_extras", "EXTRA_AMBIGUOUS", "options"),
+		                           ("live_extras", "EXTRA_AMBIGUOUS", "propose"),
+		                           ("tax_rules", "TAX_POLICY", "propose")):
+			with self.subTest(target=target, call=call), self.misconfigured(target, code):
+				with self.assertRaises(frappe.ValidationError) as cm:
+					calls[call]()
+				self.assertEqual((refusals.code_of(cm.exception), frappe.local.response.get("tex_code")),
+				                 ("CHANGE_NOT_ONLINE", "CHANGE_NOT_ONLINE"))
+				self.assertNotIn("misconfigured", str(cm.exception))          # the hotel's set-up is staff's
+				frappe.clear_messages()
+
+	def test_2p_staff_are_told_what_is_wrong_by_its_code(self):
+		from kamra.tex.services import refusals
+
+		res = self.book("2p-x-staff")["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- an agent of this hotel
+		for target, code in (("live_extras", "EXTRA_AMBIGUOUS"), ("tax_rules", "TAX_POLICY")):
+			with self.subTest(target=target), self.misconfigured(target, code):
+				with self.assertRaises(frappe.ValidationError) as cm:
+					crs_api.addon_propose(res, [{"code": "MASSAGE"}])
+				self.assertEqual((refusals.code_of(cm.exception), cm.exception.params), ("EXTRAS_REFUSED", {"reasons": [code]}))
+				self.assertIn("misconfigured", str(cm.exception))
+				frappe.clear_messages()

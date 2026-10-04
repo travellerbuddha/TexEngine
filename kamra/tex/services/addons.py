@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 
 import frappe
 from frappe import _
@@ -20,7 +21,7 @@ from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.commercial import context
 from kamra.tex.money import D, from_db, quantize, to_str
 from kamra.tex.pricing import addons, extras, serialize
-from kamra.tex.pricing.model import ExtraRequest
+from kamra.tex.pricing.model import ExtraRequest, Unsellable
 from kamra.tex.security.audit import audit
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import quoting, sold_terms
@@ -68,9 +69,25 @@ def _requests(raw) -> tuple[ExtraRequest, ...]:
 	return tuple(out)
 
 
+@contextmanager
+def _set_up(res, guest: bool):
+	"""A hotel whose extras cannot be priced now (two live revisions of one extra, two tax policies in force:
+	``Unsellable``) refuses by code, never with a bare error (§6G3; batch 2P). A guest is told to contact the hotel,
+	as for any stay that cannot be changed online; staff are told what is wrong."""
+	try:
+		yield
+	except Unsellable as u:
+		if guest:
+			frappe.throw(_("This booking cannot be changed online right now. Please contact the hotel."),
+			             refusal("CHANGE_NOT_ONLINE"))
+		frappe.throw(_("Extras cannot be added to reservation {0} now: {1} Ask an administrator to check the hotel's "
+		               "extras and tax policy.").format(res.name, str(u)), refusal("EXTRAS_REFUSED", reasons=[u.code]))
+
+
 def _catalog(res, guest: bool, at):
 	# a guest adds what the hotel sells online after booking; staff anything on sale now
-	return context.extras_catalog(res.property, online_only=guest, after_booking=guest, at=at)
+	with _set_up(res, guest):
+		return context.extras_catalog(res.property, online_only=guest, after_booking=guest, at=at)
 
 
 def _fx(currencies, sell: str, property: str, at) -> dict:
@@ -93,7 +110,8 @@ def price(res, raw_requests, *, guest: bool):
 	requests = _requests(raw_requests)
 	catalog = _catalog(res, guest, now)
 	sell = req.sell_currency.upper()
-	taxes = context.tax_rules(res.property, req.room_type, at=now)
+	with _set_up(res, guest):
+		taxes = context.tax_rules(res.property, req.room_type, at=now)
 	q = addons.price_addons(
 		terms=terms, request=req, requests=requests, catalog=catalog, today=now.date(), now=now,
 		extra_fx=_fx((d.currency for d in catalog.values()), sell, res.property, now),
