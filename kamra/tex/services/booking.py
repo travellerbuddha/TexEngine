@@ -152,7 +152,10 @@ def profile_of_email(email: str, enterprise: str | None, *, lock: bool = False) 
 		f"""SELECT g.name, g.email FROM `tabGuest` g WHERE g.email = %(email)s AND {TENANT}
 		ORDER BY g.creation ASC, g.name ASC{" FOR UPDATE" if lock else ""}""", {"email": email, "ent": enterprise or ""},
 		as_dict=True)
-	return next((r.name for r in rows if (r.email or "").strip().lower() == email), None)
+	# the stored address's ASCII is checked before lower case too: one stored with a KELVIN SIGN (the Desk form, a legacy
+	# path) lowers to an ASCII k (2P review round 2)
+	return next((r.name for r in rows if (stored := (r.email or "").strip()).isascii() and stored.lower() == email),
+	            None)
 
 
 def _find_profile(g: dict, enterprise: str | None, staff: bool, *, lock: bool = False) -> str | None:

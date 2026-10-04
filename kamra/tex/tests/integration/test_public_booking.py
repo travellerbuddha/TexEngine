@@ -1102,3 +1102,10 @@ class TestBookingIdentity(TexTestCase):
 		crm.update_profile(self.accented, {"email": " Ana.2P@Example.de "})
 		self.assertEqual(frappe.db.get_value("Guest", self.accented, "email"), "Ana.2P@Example.de")
 		self.assertEqual(self.booker("ana.2p@example.de", "2p-r1-crm"), self.accented)
+
+	def test_2p_r2_a_stored_letter_that_lowers_to_ascii_is_another_address(self):
+		"""2P review round 2 (NIT 4): a profile stored with a KELVIN SIGN (the Desk form or a legacy path: Frappe's field
+		takes it) is a candidate the database finds for kate@…, and it lowered to kate@…: a booking for that address
+		joined it."""
+		frappe.db.set_value("Guest", self.accented, "email", "\u212aate.2p@example.com")
+		self.assertNotEqual(self.booker("kate.2p@example.com", "2p-r2-kelvin"), self.accented)

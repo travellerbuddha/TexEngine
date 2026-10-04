@@ -21,6 +21,7 @@ import {
 } from "./api"
 import { fitChoice, type ExtraChoice, type ExtrasAvailability, type StayDates } from "./extrasStock"
 import { DOB_ERRORS, dobProblem, isDob, offerId, partyComplete, partyToApi, type PartyForm } from "./party"
+import { plainEmail } from "../../../../lib/email"
 import type {
   BookingSummary,
   GuestRow,
@@ -177,8 +178,9 @@ function sameCodes(a: string[], b: string[]) {
 /** ISO code → country name (Frappe's English names: "Türkiye", "Germany"). */
 export const COUNTRY_NAMES = COUNTRIES as Record<string, string>
 
+// one plain address, as the server takes the guest's and the booker's (batch 2P, ADR-080; review round 2)
 function emailOk(s: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
+  return plainEmail(s) !== null
 }
 
 export function useBookingFlow(opts: { channel?: string } = {}) {
