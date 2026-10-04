@@ -21,7 +21,7 @@ from kamra.tex.crm import loyalty
 from kamra.tex.crm import segments as seg
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, log_exception
 
 EDITABLE = ("first_name", "last_name", "phone", "email", "nationality", "date_of_birth", "gender", "vip",
             "guest_notes", "address_line", "city", "tex_language", "tex_country", "tex_market", "tex_tags",
@@ -249,7 +249,13 @@ def profile(guest: str) -> dict:
 	                               "tex_booking", "tex_sales_channel", "tex_market", "cancellation_fee",
 	                               "tex_hold_expired"],
 	                       order_by="check_in_date desc", limit=200)
+	# a channel's booking: its price and payment are the channel's, points never pay it (LO-02); the CRM leaves it out
+	# of "Redeem" (batch 2O)
+	booked = sorted({s.tex_booking for s in stays if s.tex_booking})
+	channels = set(frappe.get_all("TEX Booking", filters={"name": ("in", booked), "channel_connection": ("is", "set")},
+	                              pluck="name")) if booked else set()
 	for s in stays:
+		s["channel_booking"] = s.tex_booking in channels
 		s["check_in_date"], s["check_out_date"] = str(s["check_in_date"]), str(s["check_out_date"])
 		# a hold that ran out of time is no cancellation and was never a sale (O-24, LO-24)
 		s["hold_expired"] = bool(s.pop("tex_hold_expired"))
@@ -892,6 +898,17 @@ def guest_on_update(doc, method=None) -> None:
 		forget_phone(doc.name)                      # no SMS or WhatsApp consent left: no phone on the cases (O-26)
 
 
+def _drop_links_after_commit(emails) -> None:
+	"""The erasure is on record: a failure here (Redis) is logged, never the request's or the job's answer (review round 2
+	of 2O: the after-commit callbacks run outside Frappe's error handling)."""
+	from kamra.tex.crm import members
+
+	try:
+		members.drop_links(emails)
+	except Exception:
+		log_exception("TEX erasure: member links")
+
+
 def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True) -> dict:
 	"""Right to erasure (``kamra.api.anonymize_guest``), after the profile itself was blanked and its
 	consent withdrawn: its cases and funnel data are forgotten; its bookings and their payment links keep
@@ -934,10 +951,14 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	from kamra.tex.crm import members
 
 	sessions = members.end_sessions(guest)              # signed out on every booking site (ADR-078)
+	# the sign-in and join links mailed to its address and not opened yet (batch 2O); again once this is committed, for
+	# a link a request filed meanwhile from the profile as it was before (review round 1, NIT 4)
+	pending = members.drop_links(emails)
+	frappe.db.after_commit.add(lambda: _drop_links_after_commit(emails))
 	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
 	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended,
-	       "sessions_ended": sessions}
-	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended + sessions
+	       "sessions_ended": sessions, "member_links_dropped": pending}
+	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended + sessions + pending
 	if audit_event:
 		audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
 	return out

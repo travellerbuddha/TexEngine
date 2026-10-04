@@ -1717,6 +1717,32 @@ class TestRefundedOutsideTex(GuestMoneyCase):
 		self.assertEqual(money(b["booking"])[1], D("842.50"))
 		self.assertEqual(public.booking_status(token=b["manage_token"])["credit"], "267.50")
 
+	def test_2o_money_kept_on_the_booking_is_no_overpayment(self):
+		"""§6K1 "Not done" (batch 2O): money staff kept on the booking when closing a guest change's money ("Kept on the
+		booking", G-93) is the booking's credit on purpose, as a guest's "Credit on booking" (LO-17): the status counted
+		it as overpaid. The latest decision says what is kept; money that comes above it later is counted again."""
+		from kamra.tex.tests.integration.test_system_status import check, system_api
+
+		lower_price_policy("Refund automatically")
+		b = guest_books(session="gcm3-kept-2o")
+		as_staff(lambda: pay.record_manual(booking=b["booking"], amount="842.50", method="Cash",
+		                                   reference="desk receipt 12", idempotency_key="gcm3-kept-2o-1"))
+		out = self.accept(b, self.propose(b, (6, 12)))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance closes the money left to staff
+
+		def overpaid() -> int:
+			return check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"]
+
+		before = overpaid()                                       # 267.50 the hotel still owes back: counted
+		crs_api.resolve_guest_change(request=out["request"], action="close", reason="guest keeps it as credit",
+		                             staff_money="Kept on the booking")
+		self.assertEqual(overpaid(), before - 1)
+		req = frappe.db.get_value(DT, out["request"], ["staff_kept_excess", "staff_kept_at"], as_dict=True)
+		self.assertEqual((D(req.staff_kept_excess), bool(req.staff_kept_at)), (D("267.50"), True))
+		paid = frappe.db.get_value("TEX Booking", b["booking"], "paid_amount")
+		frappe.db.set_value("TEX Booking", b["booking"], "paid_amount", paid + 10, update_modified=False)
+		self.assertEqual(overpaid(), before)                      # 10 more than was kept: counted again
+
 	def test_staff_record_a_refund_made_outside_tex_from_the_payment_screen(self):
 		b = self.fully_paid("gcm3-outside-pay")
 		_deposit, balance = charges(b["booking"])

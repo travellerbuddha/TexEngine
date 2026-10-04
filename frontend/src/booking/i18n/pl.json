@@ -687,6 +687,7 @@
   "refusal.MEMBER_SESSION_ENDED": "Wylogowano Cię. Zaloguj się ponownie, aby zobaczyć ceny dla członków.",
   "refusal.NOT_A_MEMBER": "Z tym adresem e-mail nie ma jeszcze członkostwa. Możesz dołączyć do programu.",
   "refusal.MEMBERS_ONLY": "Ta cena dla członków jest tylko dla członków programu hotelu. Odśwież ceny, aby zobaczyć cenę, którą możesz zarezerwować.",
+  "refusal.MEMBER_EMAIL_UNUSABLE": "Nie można wysłać linku na adres e-mail z Twojego profilu. Skontaktuj się z hotelem, aby go poprawić.",
   "member.signIn": "Logowanie członków",
   "member.signInTitle": "Logowanie członków",
   "member.signInTab": "Zaloguj się",

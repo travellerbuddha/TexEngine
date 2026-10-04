@@ -17,6 +17,12 @@ class TEXChannelMapping(Document):
 		self.property = conn.property
 		if frappe.db.get_value("Room Type", self.room_type, "property") != self.property:
 			frappe.throw(_("The room type belongs to another hotel."))
+		# a room type TEX no longer sells is never made enabled on a channel (batch 2O, §6K3): it would only send closed
+		# days. One enabled before its type was disabled stays editable and keeps sending the close-out (LO-03)
+		enabling = self.is_new() or self.has_value_changed("enabled") or self.has_value_changed("room_type")
+		if self.enabled and enabling and frappe.db.get_value("Room Type", self.room_type, "disabled"):
+			frappe.throw(_("This room type is no longer sold (it is disabled): enable it first, or map another room "
+			               "type."))
 		if self.rate_plan and frappe.db.get_value("Rate Plan", self.rate_plan, "property") != self.property:
 			frappe.throw(_("The rate plan belongs to another hotel."))
 		if self.contract and frappe.db.get_value("TEX Contract", self.contract, "property") != self.property:

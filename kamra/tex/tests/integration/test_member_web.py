@@ -511,3 +511,267 @@ class TestReviewRound2(WebMemberCase):
 		for raw in ("x@mail.exämple.de", "anna@mail.exámple.de", "ſam@example.com", "x@gmail.cöm"):
 			self.assertEqual(self.refused(public.member_link, site=SLUG, email=raw), "GUEST_EMAIL_INVALID", repr(raw))
 		self.assertEqual(self.mails, [])
+
+
+class TestRejoinBlocked(WebMemberCase):
+	"""C-04h (owner, 2026-10-04; HANDOFF §2 6b, option b): staff who end a membership may block a rejoin on the web
+	(a reason such as abuse). A web join then never makes it active again: the site answers as it answers anyone, and
+	the mail, which only the address's owner reads, says to ask the hotel, with no link. Staff joining the guest lift
+	it; a membership ended without the block is rejoined on the web as before (``test_r1_n19_…_rejoins_on_the_web``)."""
+
+	def leave(self, *, block: bool, guest: str | None = None) -> dict:
+		from kamra.tex.api import crm as crm_api
+
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff end the membership
+		try:
+			return crm_api.loyalty_leave(guest=guest or self.guest, program=self.club, reason="Abused member prices",
+			                             block_rejoin=int(block))
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+	def audited(self, action: str, name: str) -> dict:
+		import json
+
+		raw = frappe.get_all("TEX Audit Event", filters={"action": action, "reference_name": name},
+		                     pluck="new_value", order_by="creation desc", limit=1)
+		return json.loads(raw[0]) if raw else {}
+
+	def test_c04h_a_blocked_member_cannot_rejoin_on_the_web(self):
+		self.join(self.guest)
+		name = self.leave(block=True)["name"]
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Left", 1))
+		self.assertTrue(self.audited("loyalty.member_leave", name).get("rejoin_blocked"))
+		# a visitor's join: the same answer as anyone's; the mail says to ask the hotel and carries no link
+		self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1), {"ok": True})
+		to, _subject, html = self.mails[-1]
+		self.assertEqual(to, self.email)
+		self.assertIsNone(self.token())
+		self.assertNotIn("/member", html)
+		self.assertIn("contact the hotel", html)
+		self.assertEqual(loyalty.membership(self.guest, self.club).status, "Left")
+		# a signed-in guest's join is answered the same way
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		self.assertEqual(self.as_guest(public.member_join, site=SLUG, member_session=session, accepted=1), {"ok": True})
+		self.assertIsNone(self.token())
+		self.assertIn("contact the hotel", self.mails[-1][2])
+		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
+
+	def test_c04h_a_join_link_asked_before_the_block_rejoins_nobody(self):
+		self.join(self.guest)
+		self.leave(block=False)                                                # the guest asked to leave
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		token = self.token()
+		self.assertIsNotNone(token)                                            # not blocked yet: a link
+		self.leave(block=True)                                                 # staff block before it is opened
+		signed = self.verify(token)
+		self.assertFalse(signed["status"]["member"])
+		m = loyalty.membership(self.guest, self.club)
+		self.assertEqual((m.status, m.rejoin_blocked), ("Left", 1))
+
+	def test_c04h_staff_who_join_the_guest_lift_the_block(self):
+		self.join(self.guest)
+		name = self.leave(block=True)["name"]
+		self.join(self.guest)
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Active", 0))
+		self.assertTrue(self.audited("loyalty.member_join", name).get("unblocked"))
+		self.leave(block=False)
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		self.assertTrue(self.verify(self.token())["status"]["member"])
+
+	def test_c04h_staff_see_the_block(self):
+		from kamra.tex.api import crm as crm_api
+
+		self.join(self.guest)
+		self.leave(block=True)
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- the hotel's staff read the profile
+		try:
+			accounts = crm_api.loyalty_summary(self.guest)
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		m = next(a for a in accounts if a["program"] == self.club)["membership"]
+		self.assertEqual((m["status"], m["rejoin_blocked"]), ("Left", True))
+
+	def test_c04h_r1_n2_a_second_leave_keeps_the_block(self):
+		"""Review round 1 (NIT 2): ending a blocked membership again without the tick lifted the block silently; only
+		staff joining the guest lift it (the owner's option b)."""
+		self.join(self.guest)
+		name = self.leave(block=True)["name"]
+		self.leave(block=False)
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Left", 1))
+
+	def test_c04h_a_merge_keeps_the_block_of_the_last_word(self):
+		from kamra.tex.api import crm as crm_api
+
+		kept, dup = self.guest, self.profile("blocked-dup")
+		mine = self.join(kept)["name"]
+		self.join(dup)
+		theirs = self.leave(block=True, guest=dup)["name"]
+		frappe.db.set_value("TEX Loyalty Member", mine, "modified", "2026-01-01 10:00:00", update_modified=False)
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff merge the duplicate
+		crm_api.merge_guests(source=dup, target=kept)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertFalse(frappe.db.exists("TEX Loyalty Member", theirs))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", mine, ["status", "rejoin_blocked"]), ("Left", 1))
+
+
+class TestPendingLinksAndErasure(WebMemberCase):
+	"""§6N2 "Not done" (batch 2O): a link mailed before the guest's erasure and opened after it still worked for its 30
+	minutes, and a join link then made a new profile with the erased e-mail and the name typed before the erasure."""
+
+	def erase(self, guest: str) -> None:
+		from kamra.api import anonymize_guest
+
+		anonymize_guest(guest)
+
+	def test_2o_an_erasure_drops_the_links_not_yet_opened(self):
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		join_link = self.token()
+		self.ask(self.email)
+		sign_in_link = self.token()
+		self.erase(self.guest)
+		for purpose, token in (("join", join_link), ("sign_in", sign_in_link)):
+			with self.subTest(link=purpose):
+				self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))           # nobody made again
+		self.assertFalse(frappe.db.exists("TEX Member Session", {"guest": self.guest}))
+
+	def test_2o_r1_s1_a_profile_of_no_enterprise_loses_its_links_too(self):
+		"""Review round 1 (S1): a profile of no enterprise (made by Administrator, or by staff of several enterprises)
+		matches any enterprise's site, so its link was filed under the site's enterprise and the erasure, looking under
+		the profile's (none), missed it: opened after the erasure, the join link made the profile again."""
+		frappe.db.set_value("Guest", self.guest, "tex_enterprise", None)
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		join_link = self.token()
+		self.erase(self.guest)
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=join_link), "MEMBER_LINK_INVALID")
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
+
+	def test_2o_another_address_keeps_its_link(self):
+		other = self.profile("keeps")
+		other_email = frappe.db.get_value("Guest", other, "email")
+		self.ask(other_email)
+		theirs = self.token()
+		self.erase(self.guest)
+		self.assertTrue(self.verify(theirs)["status"]["signed_in"])
+
+	def test_2o_a_signed_in_join_says_when_the_profiles_e_mail_cannot_take_a_link(self):
+		"""§6N2 "Not done" (batch 2O): a signed-in guest's join for a profile whose stored e-mail is not one plain ASCII
+		address (entered by staff) answered "sent" and sent nothing. The guest is signed in to that profile: telling
+		them so tells nobody else anything."""
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		frappe.db.set_value("Guest", self.guest, "email", "mia.müller@example.de")
+		sent = len(self.mails)
+		self.assertEqual(self.refused(public.member_join, site=SLUG, member_session=session, accepted=1),
+		                 "MEMBER_EMAIL_UNUSABLE")
+		self.assertEqual(len(self.mails), sent)
+
+	def test_2o_r1_n1_the_refusal_carries_its_own_message_only(self):
+		"""Review round 1 (NIT 1): the address check's own "Please enter a valid e-mail address." stayed in the
+		response's messages beside MEMBER_EMAIL_UNUSABLE's."""
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		frappe.db.set_value("Guest", self.guest, "email", "mia.müller@example.de")
+		frappe.clear_messages()
+		with self.assertRaises(frappe.ValidationError):
+			self.as_guest(public.member_join, site=SLUG, member_session=session, accepted=1)
+		said = " ".join(str(m) for m in frappe.local.message_log)
+		self.assertNotIn("valid e-mail address", said)
+		self.assertIn("contact the hotel", said)
+
+
+class TestStaffSeeAndEndSessions(WebMemberCase):
+	"""§6N2 "Not done" (batch 2O): staff could not see a guest's web sessions, nor end one (a lost phone, a shared
+	computer); only an erasure ended them."""
+
+	def test_2o_staff_see_and_end_a_guests_web_sessions(self):
+		import json
+
+		from kamra.tex.api import crm as crm_api
+
+		self.ask(self.email)
+		first = self.verify(self.token())["session"]
+		self.ask(self.email)
+		second = self.verify(self.token())["session"]
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		from kamra.tex.tests.integration.test_crm_segments import agent
+
+		reader = agent("c04-2o-finance@example.com", fx.PROPERTY, "Finance")          # crm.view, no crm.edit
+		frappe.set_user(reader)  # nosemgrep: frappe-setuser -- staff who may read the guest, not edit
+		try:
+			rows = crm_api.member_sessions(guest=self.guest)
+			self.assertEqual(len(rows), 2)
+			self.assertEqual([r["can_end"] for r in rows], [False, False])          # review round 1, NIT 3
+			self.assertTrue(all(r["active"] and r["site"] == site.name and r["expires_at"] for r in rows))
+			self.assertFalse(any("token" in k for r in rows for k in r))                   # never a token or its hash
+			with self.assertRaises(frappe.PermissionError):
+				crm_api.end_member_sessions(guest=self.guest)
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff who may edit the guest
+		try:
+			self.assertEqual([r["can_end"] for r in crm_api.member_sessions(guest=self.guest)], [True, True])
+			newest = rows[0]["name"]
+			self.assertEqual(crm_api.end_member_sessions(guest=self.guest, session=newest), {"ended": 1})
+			self.assertEqual(sum(members.session_guest(site, t) == self.guest for t in (first, second)), 1)
+			self.assertEqual(crm_api.end_member_sessions(guest=self.guest), {"ended": 1})
+			self.assertEqual([r["active"] for r in crm_api.member_sessions(guest=self.guest)], [False, False])
+			self.assertEqual(crm_api.end_member_sessions(guest=self.guest), {"ended": 0})
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertIsNone(members.session_guest(site, first))
+		self.assertIsNone(members.session_guest(site, second))
+		audits = frappe.get_all("TEX Audit Event", filters={"action": "member.sessions_end", "reference_name": self.guest},
+		                        pluck="new_value")
+		self.assertEqual(sorted(json.loads(a)["ended"] for a in audits), [0, 1, 1])
+
+	def test_2o_a_session_of_another_guest_is_not_ended(self):
+		from kamra.tex.api import crm as crm_api
+
+		self.ask(self.email)
+		mine = self.verify(self.token())["session"]
+		other = self.profile("other-sessions")
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff
+		try:
+			name = frappe.db.get_value("TEX Member Session", {"token_hash": members.digest(mine)})
+			self.assertEqual(crm_api.end_member_sessions(guest=other, session=name), {"ended": 0})
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), mine), self.guest)
+
+
+class TestBatch2OReviewRound2(WebMemberCase):
+	"""Review round 2 of batch 2O (S-1, from 2N-2): the address rule held one way only. A typed address must be ASCII,
+	but the database compares accents away, so ana@muller.de found the profile of ana@müller.de (stored by staff):
+	the link went to the typed address and signed its owner in to someone else's profile."""
+
+	def test_2o_r2_a_look_alike_address_never_finds_an_accented_profile(self):
+		frappe.db.set_value("Guest", self.guest, "email", "mia.r2@exämple.de")
+		self.ask("mia.r2@example.de")
+		to, _subject, html = self.mails[-1]
+		self.assertEqual(to, "mia.r2@example.de")
+		self.assertIsNone(self.token())                                       # no profile here: no link
+		self.assertIn("no membership", html)
+		# a join makes the typed address its own profile, never the accented one's
+		self.ask("mia.r2@example.de", "join", first_name="Other", last_name="Person", accepted=1)
+		signed = self.verify(self.token())
+		self.assertNotEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), signed["session"]),
+		                    self.guest)
+		self.assertEqual(frappe.db.get_value("Guest", self.guest, "first_name"), "Mia")
+
+	def test_2o_r2_the_same_address_in_another_case_is_the_profile(self):
+		frappe.db.set_value("Guest", self.guest, "email", self.email.upper())
+		self.ask(self.email)
+		signed = self.verify(self.token())
+		self.assertEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), signed["session"]), self.guest)
+
+	def test_2o_r2_a_failed_drop_after_the_erasure_is_logged_not_raised(self):
+		"""Review round 2 of 2O (NIT-A): the second drop runs after the erasure's commit, outside Frappe's error
+		handling: a Redis failure there must not turn a recorded erasure into a 500 or a failed job."""
+		from kamra.tex.crm import service as crm_service
+
+		before = frappe.db.count("Error Log", {"method": "TEX erasure: member links"})
+		with mock.patch.object(members, "drop_links", side_effect=ConnectionError("redis is down")):
+			crm_service._drop_links_after_commit((self.email,))
+		self.assertEqual(frappe.db.count("Error Log", {"method": "TEX erasure: member links"}), before + 1)

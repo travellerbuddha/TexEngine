@@ -44,7 +44,10 @@
   "error",
   "resolved_by",
   "resolved_at",
-  "resolution"
+  "resolution",
+  "staff_kept_excess",
+  "staff_kept_at",
+  "credit_at"
  ],
  "fields": [
   {
@@ -304,10 +307,29 @@
    "fieldname": "resolution",
    "fieldtype": "Small Text",
    "label": "Staff note"
+  },
+  {
+   "fieldname": "staff_kept_excess",
+   "fieldtype": "Currency",
+   "label": "Kept on the booking",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "staff_kept_at",
+   "fieldtype": "Datetime",
+   "label": "Kept on the booking at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "credit_at",
+   "fieldtype": "Datetime",
+   "label": "Credit decided at",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-09-28 00:00:00.000000",
+ "modified": "2026-10-04 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Guest Change Request",

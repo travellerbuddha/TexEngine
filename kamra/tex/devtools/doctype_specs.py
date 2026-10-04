@@ -954,11 +954,17 @@ BOOKING_SPECS = [
 		F("resolved_by", "Link", "Resolved by", "User"),
 		F("resolved_at", "Datetime", "Resolved at"),
 		F("resolution", "Small Text", "Staff note"),
+		# batch 2O (§6K1): staff kept the money on the booking (G-93): the whole excess the booking holds on purpose
+		# then, and when; the overpaid check reads the latest such decision, as a "Credit on booking" (LO-17)
+		F("staff_kept_excess", "Currency", "Kept on the booking", options="currency", read_only=1),
+		F("staff_kept_at", "Datetime", "Kept on the booking at", read_only=1),
+		# when staff approved a lower price as credit (review round 1 S2): the credit's decision, not the guest's ask
+		F("credit_at", "Datetime", "Credit decided at", read_only=1),
 	], perms=IMMUTABLE_LOG, autoname="GCR-.YYYY.-.#####", naming_rule="Expression (old style)",
 	   sort_field="creation", in_create=True,
-	   # the staff fields, then the refund-run fields, then the refunds made, came after the first
-	   # migration: a newer stamp makes migrate load them
-	   extra={"modified": "2026-09-28 00:00:00.000000"}),
+	   # the staff fields, then the refund-run fields, then the refunds made, then the money kept and the credit's
+	   # time (2O), came after the first migration: a newer stamp makes migrate load them
+	   extra={"modified": "2026-10-04 13:00:00.000000"}),
 
 	dt("TEX Booking Domain", B, [
 		F("domain", "Data", "Domain", reqd=1, in_list_view=1,
@@ -1345,8 +1351,11 @@ CRM_SPECS = [
 		  description="The hotel the membership was made at (for a member by their stays who left: where it ended)"),
 		F("left_at", "Datetime", "Left at"),
 		F("left_reason", "Small Text", "Why the membership ended"),
+		# C-04h (owner, 2026-10-04): staff who end a membership may block a rejoin on the web; only staff lift it
+		F("rejoin_blocked", "Check", "May not rejoin online", default="0",
+		  description="Set by staff who ended the membership: a join on the web does not make it active again"),
 	], perms=READONLY_AUDIT, autoname="hash", naming_rule="Random", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-10-03 23:00:00.000000"}),
+	   extra={"modified": "2026-10-04 12:00:00.000000"}),
 
 	# C-04 on the web (ADR-078): a guest signed in on a booking site by a one-time e-mail link, for 30 days on
 	# that device; only the session token's hash is stored

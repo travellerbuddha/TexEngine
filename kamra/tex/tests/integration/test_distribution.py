@@ -110,6 +110,30 @@ class TestAri(DistributionCase):
 		self.assertEqual(len(self.jobs()), 1)
 		self.assertFalse(dist.build_days(self.mapping, a, a)[0].closed)
 
+	def test_2o_a_mapping_of_a_disabled_room_type_is_not_saved_enabled(self):
+		"""§6K3 "Not done" (batch 2O): a mapping of a room type TEX no longer sells could be saved enabled (it then sends
+		every day closed). Making one enabled is refused; one enabled before its type was disabled stays editable (it
+		keeps sending the close-out, LO-03), and disabling one is always allowed."""
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		try:
+			new = {"connection": self.conn.name, "room_type": self.std, "external_room_code": "2O-DBL",
+			       "external_rate_code": "2O-BAR", "board": "AI", "market": "DE", "sales_channel": "OTA",
+			       "sell_currency": "EUR", "rate_plan": self.flex}
+			with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):
+				dist_api.save_mapping(new)
+			self.assertTrue(dist_api.save_mapping({**new, "enabled": 0})["name"])                # saved disabled
+			dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "horizon_days": 30})
+			dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "enabled": 0})
+			with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):
+				dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "enabled": 1})
+			dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})
+			dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "room_type": dlx,
+			                       "enabled": 1})
+			with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):         # moved onto the disabled one
+				dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "room_type": self.std})
+		finally:
+			frappe.db.set_value("Room Type", self.std, "disabled", 0)
+
 	def test_the_preview_starts_on_the_sites_day(self):
 		# the push horizon starts on the site's day, so the preview does too: a browser in an earlier
 		# time zone just after the site's midnight must not show yesterday as a day never sent
@@ -594,6 +618,17 @@ class TestChannelBookings(DistributionCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "channel"):
 			pay.allocate(points.name, booking=booking, amount="30", reason="move the points")
 		self.assertFalse(frappe.db.exists("TEX Payment Allocation", {"transaction": points.name}))
+
+	def test_2o_the_crm_says_which_stay_is_a_channels(self):
+		"""§6K2 "Not done" (batch 2O): the CRM offered "Redeem" on a channel's booking, which the server refuses
+		(LO-02). Each stay the profile lists says whether its booking is a channel's, so the screen leaves it out."""
+		from kamra.tex.api import crm as crm_api
+
+		booking, _rooms = self.booked("L1")
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		stays = crm_api.guest(name=guest)["stays"]
+		self.assertTrue(stays)
+		self.assertEqual({(s["tex_booking"], s["channel_booking"]) for s in stays}, {(booking, True)})
 
 	def test_a_channel_cancellation_gives_the_points_back(self):
 		"""LO-02 (D-16): points spent on a booking a channel later cancels come back as points (before: lost, their

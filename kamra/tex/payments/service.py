@@ -728,6 +728,13 @@ REVERIFY_LAST_CHANCE_MINUTES = 5  # a deadline before the next tick: the expiry 
 REVERIFY_SAVEPOINT = "tex_reverify"
 
 
+def mark_reverified(transaction: str, now=None) -> None:
+	"""The charge was asked at the gateway (by the job or staff): the job's next tick asks the charges that waited
+	longest first (LO-22). The charge's row only, after its question: no other lock is taken after it."""
+	frappe.db.set_value("TEX Payment Transaction", transaction, "last_reverified_at", now or now_datetime(),
+	                    update_modified=False)
+
+
 def reverify_pending(now=None) -> dict:
 	"""Scheduler, first of the 5-minute jobs (NEW-2): card charges still Pending whose gateway TEX can ask
 	(``status_query``) are asked, as the guest's browser would have told TEX had it come back — before this
@@ -801,7 +808,7 @@ def reverify_pending(now=None) -> dict:
 		# asked, whatever the answer: the next tick asks the ones that waited first (LO-22). The charge's row only,
 		# after its question: no other lock is taken after it. A lock wait here is logged and the tick goes on
 		try:
-			frappe.db.set_value("TEX Payment Transaction", name, "last_reverified_at", now, update_modified=False)
+			mark_reverified(name, now)
 		except Exception as e:
 			if transaction_lost(e):
 				frappe.db.rollback()         # its answer is asked again next tick

@@ -24,7 +24,7 @@ from email.utils import formataddr
 import frappe
 from frappe.utils import escape_html, get_datetime, validate_email_address
 
-from kamra.tex.lib_text import AFTER_EXPIRY_NEXT, render
+from kamra.tex.lib_text import AFTER_EXPIRY_NEXT, NO_LINK, render
 from kamra.tex.money import from_db, to_str
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services.txn import transaction_lost, undo_step
@@ -119,7 +119,8 @@ def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], gu
 def member_mail(site, email: str, key: str, *, token: str | None = None, guest: str | None = None,
                 language: str = "en") -> dict:
 	"""A web member's link (C-04, ADR-078): ``member_sign_in`` / ``member_join`` with the one-time token in the URL
-	fragment, or ``member_none`` (no membership with this e-mail: a link to joining, no token). Sent in the site's
+	fragment, or ``member_none`` (no membership with this e-mail: a link to joining, no token), or ``member_blocked``
+	(staff blocked a rejoin, C-04h: ask the hotel, no link at all). Sent in the site's
 	hotel's name (a group site: its first hotel's). The token is in no log and no record of ours: only the outgoing
 	mail itself carries it (Frappe's Email Queue, System Manager only, until the mail is sent and purged), and it works
 	once, within ``members.LINK_MINUTES``. A profile's mail is recorded as its communication, without the link."""
@@ -134,7 +135,8 @@ def member_mail(site, email: str, key: str, *, token: str | None = None, guest: 
 		hotel = (frappe.db.get_value("Property", property, "property_name") if property else None) or site.site_name
 		programs = [frappe.db.get_value("TEX Loyalty Program", p, "program_name") or "" for p in
 		            members.site_programs(site)]
-		link = sites.guest_url(site, f"member#token={token}") if token else sites.guest_url(site, "?join=1")
+		link = (sites.guest_url(site, f"member#token={token}") if token else
+		        "" if key in NO_LINK else sites.guest_url(site, "?join=1"))
 		# greeted by no name: a visitor types the names for an address they may not own (review round 1)
 		subject, body = render(key, lang, link=link, hotel=escape_html(hotel), program=escape_html(", ".join(programs)),
 		                       minutes=str(members.LINK_MINUTES))

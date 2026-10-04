@@ -44,7 +44,7 @@ ORDERED: tuple[str, ...] = (
 	"PRICE_MOVED", "CHANGE_NOT_MADE", "EXTRAS_REFUSED",
 	# loyalty members on the web (C-04, ADR-078): signing in and joining by a one-time e-mail link
 	"MEMBERSHIP_UNAVAILABLE", "MEMBER_CONSENT_REQUIRED", "MEMBER_LINK_INVALID", "MEMBER_SESSION_ENDED", "NOT_A_MEMBER",
-	"MEMBERS_ONLY",
+	"MEMBERS_ONLY", "MEMBER_EMAIL_UNUSABLE",
 )
 
 CODES: frozenset[str] = frozenset(ORDERED)

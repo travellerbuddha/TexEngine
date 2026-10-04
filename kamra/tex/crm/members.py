@@ -13,11 +13,13 @@ A guest signs in on a booking site, or joins its hotels' loyalty program, by a o
   name given when there is none: the link proves the e-mail is theirs, so nobody is joined with another's e-mail.
 * ``join_signed_in``: a signed-in guest who is no member asks to join with a tick: a join link goes to their own
   e-mail, as every web join is confirmed (the owner's choice), so a script that holds a session joins nobody.
+* A membership staff ended with a rejoin blocked (C-04h, owner 2026-10-04) is never made active on the web: a join
+  asked for it gets a mail that says to ask the hotel, with no link; staff joining the guest lift the block.
 
 A link's token lives only in the mail (in the URL fragment, which browsers never send to a server) and in the cache,
 by its hash, with what opening it needs (the e-mail, the name to join with) until it is used or expires. A session's
-token is stored by its hash (``TEX Member Session``). Erasure deletes the guest's sessions; a merge moves them with the
-other links to the profile; sessions ended long ago are purged daily.
+token is stored by its hash (``TEX Member Session``). Erasure deletes the guest's sessions and drops the links mailed to its address and not opened yet; a merge moves the
+sessions with the other links to the profile; sessions ended long ago are purged daily.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ PURPOSES = ("sign_in", "join")
 LINK_KEY = "tex:member_link:"                # + the token's hash
 COUNT_KEY = "tex:member_links:"              # + site and the address's hash
 REQUEST_KEY = "tex:member_request:"          # + site and the idempotency key's hash
+PENDING_KEY = "tex:member_pending:"          # + the address's hash: its links' hashes not yet opened
 REQUEST_SECONDS = 600
 # a refusal that settles a link: anything else (a deadlock answered BUSY, a database error) leaves it to be used
 FINAL = frozenset({"NOT_A_MEMBER", "MEMBER_LINK_INVALID"})
@@ -92,11 +95,21 @@ def _name(raw, code: str) -> str:
 	return value
 
 
-def _profile(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
-	"""The profile a booking with this e-mail would join (``booking._find_profile``: the e-mail is the identity)."""
-	from kamra.tex.services.booking import _find_profile
+# the profiles of an address in a site's enterprise (or of none), as ``booking._find_profile`` reads them: the database
+# compares accents and case away (utf8mb4_unicode_ci), so the exact address is chosen among them below
+PROFILES_OF = """SELECT g.name, g.email FROM `tabGuest` g WHERE g.email = %(email)s
+                 AND (IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)
+                 ORDER BY g.creation ASC, g.name ASC"""
 
-	return _find_profile({"email": email}, enterprise, staff=False, lock=lock)
+
+def _profile(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
+	"""The profile of this e-mail, the oldest of the site's enterprise (or of none), as a booking finds it
+	(``booking._find_profile``: the e-mail is the identity), but only one whose stored e-mail is this address, in any
+	case (review round 2 of 2O, S-1: the database compares accents away, so ana@muller.de found the profile of
+	ana@müller.de and its link signed the look-alike's owner in to it). ``lock``: locking reads."""
+	rows = frappe.db.sql(PROFILES_OF + (" FOR UPDATE" if lock else ""), {"email": email, "ent": enterprise or ""},
+	                     as_dict=True)
+	return next((r.name for r in rows if (r.email or "").strip().lower() == email), None)
 
 
 def _cache():
@@ -146,18 +159,60 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	if purpose == "sign_in" and not profile:
 		notify.member_mail(site, email, "member_none", language=language)
 		return
+	if purpose == "join" and profile and _rejoin_blocked(site, profile):
+		# staff blocked a rejoin wherever the guest could join here (C-04h): no link; the mail, which only the
+		# address's owner reads, says to ask the hotel. The site's answer is the same as ever
+		notify.member_mail(site, email, "member_blocked", guest=profile, language=language)
+		return
 	token = secrets.token_urlsafe(32)
-	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once)
-	_cache().set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once); its
+	# hash also among the address's pending links, which an erasure drops (batch 2O). One transaction: the address's
+	# set always has its expiry, and outlives each of its links
+	pending = _pending_key(email)
+	pipe = _cache().pipeline(transaction=True)
+	pipe.set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 		"site": site.name, "purpose": purpose, "email": email, "language": language,
 		"expires_at": str(add_to_date(now_datetime(), minutes=LINK_MINUTES)), **names}), ex=LINK_MINUTES * 60)
+	pipe.sadd(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	pipe.expire(pending, LINK_MINUTES * 60)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	pipe.execute()
 	# greeted by the profile's own name, or by none: never by what a visitor typed for an address they may not own
 	notify.member_mail(site, email, "member_join" if purpose == "join" else "member_sign_in", token=token,
 	                   guest=profile, language=language)
 
 
+def _rejoin_blocked(site, guest: str) -> bool:
+	"""Every program of the site the guest is no member of is one staff blocked a rejoin of (C-04h): a join link
+	would join nothing. Opening a link checks again, under the profile's lock (``loyalty.join_web``)."""
+	open_ = [p for p in site_programs(site) if not loyalty.member_of(guest, p)]
+	return bool(open_) and all(loyalty.rejoin_blocked(guest, p) for p in open_)
+
+
 def _link_key(token: str) -> str:
 	return frappe.cache.make_key(f"{LINK_KEY}{digest(token)}")
+
+
+def _pending_key(email: str) -> str:
+	"""The address's pending links, whatever site or enterprise sent them (review round 1 S1: a profile of no
+	enterprise matches every enterprise's site, so a set by enterprise missed its links). Site-scoped by ``make_key``."""
+	return frappe.cache.make_key(f"{PENDING_KEY}{digest(email)}")
+
+
+def drop_links(emails) -> int:
+	"""Right to erasure (``erase_traces``): the links mailed to the profile's addresses and not opened yet go, on every
+	booking site of this Frappe site (batch 2O, §6N2: one opened after the erasure signed in, or joined a profile made
+	again from the name typed before it). Another enterprise's link to the same address goes too: its owner asks for a
+	new one. → how many."""
+	dropped = 0
+	for email in sorted({str(e).strip().lower() for e in emails or () if e}):
+		pending = _pending_key(email)
+		pipe = _cache().pipeline(transaction=True)
+		pipe.smembers(pending)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		pipe.delete(pending)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		hashes = [h.decode() if isinstance(h, bytes) else h for h in pipe.execute()[0] or ()]
+		if hashes:
+			dropped += _cache().delete(*(frappe.cache.make_key(f"{LINK_KEY}{h}") for h in hashes))  # nosemgrep: frappe-cache-breaks-multitenancy -- keys are site-scoped by make_key
+	return dropped
 
 
 def _take_link(site, token: str) -> dict:
@@ -184,9 +239,15 @@ def _take_link(site, token: str) -> dict:
 
 
 def _put_back(token: str, data: dict) -> None:
-	"""A link taken by a request that failed before it was used (review round 1): usable again until it expires."""
+	"""A link taken by a request that failed before it was used (review round 1): usable again until it expires, unless
+	an erasure dropped the address's links meanwhile (batch 2O). No database read: the request may have lost it."""
 	left = int((get_datetime(data.get("expires_at")) - now_datetime()).total_seconds())
-	if left > 0:
+	if left <= 0:
+		return
+	# the raw command, as every one here: the wrapper's own sismember would prefix the made key again
+	pipe = _cache().pipeline(transaction=False)
+	pipe.sismember(_pending_key(data.get("email") or ""), digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	if pipe.execute()[0]:
 		_cache().set(_link_key(token), json.dumps(data), ex=left)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 
 
@@ -311,7 +372,12 @@ def join_signed_in(site, token: str | None, accepted, *, language: str = "en",
 	try:
 		email = _email(email)
 	except frappe.ValidationError:
-		return                                         # a profile whose e-mail is not one address: nothing to send to
+		# a profile whose stored e-mail is not one plain ASCII address (staff typed it): the guest, signed in to it, is
+		# told so (batch 2O; it answered "sent" and sent nothing). Their own profile's: nobody else learns anything.
+		# The address check's own message is not this answer's (review round 1, NIT 1)
+		frappe.clear_last_message()
+		frappe.throw(_("A link cannot be sent to the e-mail address of your profile. Please contact the hotel."),
+		             refusal("MEMBER_EMAIL_UNUSABLE"))
 	_send_link(site, email, "join", {}, language, idempotency_key)
 
 
@@ -320,6 +386,59 @@ def sign_out(site, token: str | None) -> None:
 	                                                  "revoked_at": ("is", "not set")})
 	if name:
 		frappe.db.set_value("TEX Member Session", name, "revoked_at", now_datetime())
+
+
+def _seen_by(row, hotels: set[str], cache: dict) -> bool:
+	"""A session staff see through ``hotels``: its site's hotel's, or on a hotel group's site (no hotel), one of the
+	site's hotels (as ``perm`` reads a site's records)."""
+	if row.property:
+		return row.property in hotels
+	if row.site not in cache:
+		site = frappe.get_doc("TEX Booking Site", row.site) if frappe.db.exists("TEX Booking Site", row.site) else None
+		cache[row.site] = set(site_properties(site)) if site else set()
+	return bool(cache[row.site] & hotels)
+
+
+SESSION_FIELDS = ["name", "site", "property", "creation", "expires_at", "revoked_at"]
+
+
+def staff_sessions(guest: str, hotels: set[str], edit: set[str] | None = None) -> list[dict]:
+	"""The guest's sessions on the booking sites of ``hotels`` (those the staff member sees the guest through), newest
+	first: where, since when, until when, whether signed out (batch 2O); ``can_end``: an open one of a site of
+	``edit`` (where they may edit the guest: review round 1, NIT 3). Never a token or its hash."""
+	now, cache, out = now_datetime(), {}, []
+	for r in frappe.get_all("TEX Member Session", filters={"guest": guest}, fields=SESSION_FIELDS,
+	                        order_by="creation desc, name desc"):
+		if not _seen_by(r, hotels, cache):
+			continue
+		# a nullable end read here, never filtered on (ADR-064): no end yet is open
+		active = not r.revoked_at and bool(r.expires_at) and r.expires_at > now
+		out.append({"name": r.name, "site": r.site,
+		            "site_name": frappe.db.get_value("TEX Booking Site", r.site, "site_name") or r.site,
+		            "hotel": r.property, "signed_in_at": str(r.creation),
+		            "expires_at": str(r.expires_at) if r.expires_at else None,
+		            "signed_out_at": str(r.revoked_at) if r.revoked_at else None, "active": active,
+		            "can_end": active and _seen_by(r, edit or set(), cache)})
+	return out
+
+
+def staff_end_sessions(guest: str, hotels: set[str], name: str | None = None) -> int:
+	"""Staff sign the guest out (a lost phone, a shared computer): every open session of theirs at the booking sites of
+	``hotels`` (those where the user may edit the guest), or the one named; audited ``member.sessions_end`` on the guest,
+	to the hotels it reached (batch 2O). → how many ended."""
+	from kamra.tex.security.audit import audit
+
+	now, cache, ended, reached = now_datetime(), {}, [], set()
+	for r in frappe.get_all("TEX Member Session", filters={"guest": guest, **({"name": name} if name else {})},
+	                        fields=SESSION_FIELDS):
+		if r.revoked_at or not r.expires_at or r.expires_at <= now or not _seen_by(r, hotels, cache):
+			continue
+		frappe.db.set_value("TEX Member Session", r.name, "revoked_at", now)
+		ended.append(r.name)
+		reached |= {r.property} if r.property else cache.get(r.site, set()) & hotels
+	audit("member.sessions_end", reference_doctype="Guest", reference_name=guest,
+	      property=min(reached) if reached else None, hotels=reached, new={"ended": len(ended), "sessions": ended})
+	return len(ended)
 
 
 def end_sessions(guest: str) -> int:

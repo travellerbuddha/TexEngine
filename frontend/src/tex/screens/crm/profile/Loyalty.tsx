@@ -5,8 +5,10 @@ import { tex, useTexMutation, useTexQuery, type TexModule } from "../../../lib/a
 import { useProperty, useSession } from "../../../lib/session"
 import { date, month, num, pct } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
+import { Badge, Button, Checkbox, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
 import { isInteger, useEvent, useIntentKey } from "../lib"
+import { redeemableBookings } from "./redeem"
+import { WebSessions } from "./WebSessions"
 import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyMembership, LoyaltyProgramInfo, Stay } from "../types"
 
 /** Our optional helper module (kamra/tex/api/ui_backoffice_crm_payments.py). */
@@ -44,7 +46,7 @@ export function LoyaltyPanel({
     for (const p of programs.data ?? []) m.set(p.program, p.program_name)
     return [...m.entries()].map(([value, label]) => ({ value, label }))
   }, [accounts, programs.data])
-  const redeemable = stays.some((s) => s.tex_booking && s.status !== "Cancelled" && can("payment.link", s.property))
+  const redeemable = redeemableBookings(stays, can, hotels)
   const closeAdjust = useEvent(() => setAdjust(null))
   const closeRedeem = useEvent(() => setRedeem(false))
   const closeMembership = useEvent(() => setMembership(null))
@@ -63,7 +65,7 @@ export function LoyaltyPanel({
           {t("crm.loyalty.adjust")}
         </Button>
       )}
-      {redeemable && accounts.some((a) => a.available > 0) && (
+      {redeemable.length > 0 && accounts.some((a) => a.available > 0) && (
         <Button variant="secondary" size="sm" icon={<Gift className="size-4" aria-hidden />} onClick={() => setRedeem(true)}>
           {t("crm.loyalty.redeem")}
         </Button>
@@ -167,6 +169,7 @@ export function LoyaltyPanel({
           ))}
         </>
       )}
+      <WebSessions guest={guest.name} />
       <AdjustDialog
         open={adjust !== null}
         program={adjust ?? ""}
@@ -184,6 +187,7 @@ export function LoyaltyPanel({
         mode={membership?.mode ?? "join"}
         program={membership?.program ?? ""}
         programName={memberPrograms.find((p) => p.value === membership?.program)?.label ?? ""}
+        blocked={Boolean(accounts.find((a) => a.program === membership?.program)?.membership?.rejoin_blocked)}
         programHotels={programHotels}
         hotels={hotels.filter((h) => can("crm.edit", h))}
         defaultHotel={current}
@@ -194,7 +198,7 @@ export function LoyaltyPanel({
       <RedeemDialog
         open={redeem}
         guest={guest.name}
-        stays={stays.filter((s) => s.tex_booking && s.status !== "Cancelled" && can("payment.link", s.property) && hotels.includes(s.property))}
+        stays={redeemable}
         programs={programs.data ?? []}
         accounts={accounts}
         onClose={closeRedeem}
@@ -275,6 +279,7 @@ function MemberBadge({ member, membership }: { member: boolean; membership?: Loy
       <>
         <Badge tone="neutral">{t("crm.loyalty.member.left")}</Badge>
         {membership.left_at && <span className="text-xs text-zinc-500">{t("crm.loyalty.member.left_on", { date: when(membership.left_at) })}</span>}
+        {membership.rejoin_blocked && <Badge tone="warning">{t("crm.loyalty.member.blocked")}</Badge>}
       </>
     )
   return <Badge tone="neutral">{t("crm.loyalty.member.no")}</Badge>
@@ -285,6 +290,7 @@ function MembershipDialog({
   mode,
   program,
   programName,
+  blocked,
   programHotels,
   hotels,
   defaultHotel,
@@ -296,6 +302,8 @@ function MembershipDialog({
   mode: "join" | "leave"
   program: string
   programName: string
+  /** staff blocked a rejoin on the web (C-04h): joining the guest here lifts it */
+  blocked: boolean
   programHotels: ProgramHotels
   /** the hotels through which the user may edit this guest */
   hotels: string[]
@@ -307,11 +315,12 @@ function MembershipDialog({
   const { t } = useTexT()
   const toast = useToast()
   const [reason, setReason] = useState("")
+  const [block, setBlock] = useState(false)
   const [hotel, setHotel] = useState("")
   // a membership is made at one hotel of the program, whose staff read it in full (as an adjustment, ADR-056)
   const hotelOptions = hotelChoices(programHotels, program, hotels)
   const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
-  const m = useTexMutation<{ guest: string; program: string; reason?: string; property?: string }, { name: string; status: string }>(
+  const m = useTexMutation<{ guest: string; program: string; reason?: string; block_rejoin?: 0 | 1; property?: string }, { name: string; status: string }>(
     "crm",
     mode === "join" ? "loyalty_join" : "loyalty_leave",
   )
@@ -321,6 +330,7 @@ function MembershipDialog({
   useEffect(() => {
     if (open) {
       setReason("")
+      setBlock(false)
       setHotel(defaultHotel && hotels.includes(defaultHotel) ? defaultHotel : "")
       m.clearError()
     }
@@ -330,7 +340,12 @@ function MembershipDialog({
   const submit = async () => {
     if (!valid) return
     try {
-      await m.run({ guest, program, ...(mode === "leave" ? { reason: reason.trim() } : {}), ...(chosenHotel ? { property: chosenHotel } : {}) })
+      await m.run({
+        guest,
+        program,
+        ...(mode === "leave" ? { reason: reason.trim(), block_rejoin: block ? 1 : 0 } : {}),
+        ...(chosenHotel ? { property: chosenHotel } : {}),
+      })
       toast.success(t(mode === "join" ? "crm.loyalty.member.joined" : "crm.loyalty.member.ended", { program: programName }))
       onDone()
       onClose()
@@ -366,10 +381,17 @@ function MembershipDialog({
             />
           </Field>
         )}
+        {mode === "join" && blocked && <Notice tone="warning">{t("crm.loyalty.member.join_lifts_block")}</Notice>}
         {mode === "leave" && (
           <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} autoComplete="off" data-autofocus />
           </Field>
+        )}
+        {mode === "leave" && (
+          <div className="space-y-1">
+            <Checkbox checked={block} onChange={(e) => setBlock(e.target.checked)} label={t("crm.loyalty.member.block_rejoin")} />
+            <p className="text-xs text-zinc-500">{t("crm.loyalty.member.block_rejoin_hint")}</p>
+          </div>
         )}
         <InlineError error={m.error} />
       </div>

@@ -25,6 +25,17 @@ class TestMoney(unittest.TestCase):
 		self.assertEqual(minor_units("try"), 2)
 		self.assertEqual(quantize(D("1234.5"), "JPY"), Decimal("1235"))
 
+	def test_clp_and_isk_are_whole_units(self):
+		"""The owner's answer (2026-10-04, option a): ISO 4217 gives the Chilean peso and the Icelandic króna no minor
+		unit; the server kept them in two decimals (HANDOFF §2 item 7, §6K6 "Not done")."""
+		from kamra.tex.money import split_evenly
+
+		for ccy in ("CLP", "isk"):
+			with self.subTest(ccy=ccy):
+				self.assertEqual(minor_units(ccy), 0)
+				self.assertEqual(to_str(quantize(D("15000.5"), ccy)), "15001")
+				self.assertEqual(split_evenly(D("100"), 3, ccy), [D("33"), D("33"), D("34")])
+
 	def test_to_str_and_db(self):
 		self.assertEqual(to_str(D("-0.00")), "0.00")
 		self.assertEqual(from_db(1080.0000000001, "EUR"), Decimal("1080.00"))

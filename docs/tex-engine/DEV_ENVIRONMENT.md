@@ -6,15 +6,25 @@ Frappe **v16.36.1**, Python **3.14**, Node **24**, MariaDB 10.11+/11.x, Redis, a
 before 2Z-F (Frappe v16.25.0, payments `develop`) moves in place as `deploy/tex-local/NATIVE.md` §5 shows.
 
 ## Cloud-session bench (reproducible recipe)
+A fresh container has none of this (2O rebuilt it from scratch, about 20 minutes). Frappe v16.36.1 needs **Node 24**
+(`bench init`'s `yarn install` refuses 22) and `cron` (`bench init` writes a crontab); CI uses MariaDB 11.8.
 ```bash
-# system
-apt-get update && apt-get install -y mariadb-server mariadb-client libmariadb-dev pkg-config redis-server
-# utf8mb4 config in /etc/mysql/mariadb.conf.d/99-frappe.cnf, then:
-mysqld_safe &  ;  redis-server --daemonize yes
-mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('root')"
-# python 3.14 + node 24 (+ yarn) ; bench must not run as root:
+# system: MariaDB 11.8 from its own repository (Ubuntu 24.04 ships 10.11), Redis, cron, acl
+curl -fsSL https://mariadb.org/mariadb_release_signing_key.pgp -o /etc/apt/keyrings/mariadb-keyring.pgp
+echo "deb [signed-by=/etc/apt/keyrings/mariadb-keyring.pgp] https://mirror.mariadb.org/repo/11.8/ubuntu noble main" \
+  > /etc/apt/sources.list.d/mariadb.list
+apt-get update && apt-get install -y mariadb-server mariadb-client libmariadb-dev pkg-config redis-server cron acl
+# /etc/mysql/mariadb.conf.d/99-frappe.cnf: utf8mb4, innodb_snapshot_isolation = OFF (ADR-063), then:
+mysqld_safe &  ;  redis-server --daemonize yes --dir /tmp
+mariadb -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('root')"
+# python 3.14 (uv python install 3.14, linked as /opt/py314/bin/python3.14) and node 24 + yarn (/opt/node24)
+# bench must not run as root; the checkout stays root's, the frappe user writes through an ACL:
 useradd -m frappe
-su frappe; source /home/user/bench/env.sh     # PATH, proxy CA vars
+setfacl -R -m u:frappe:rwX -m d:u:frappe:rwX /home/user/TexEngine
+# env.sh: PATH (node 24 first), the session's proxy, and every CA variable (SSL_CERT_FILE, REQUESTS_CA_BUNDLE,
+# NODE_EXTRA_CA_CERTS, HTTPLIB2_CA_CERTS, …) at a copy of /root/.ccr/ca-bundle.crt the frappe user can read
+su frappe; source /home/user/bench/env.sh
+pip install frappe-bench==5.31.0          # CI's bench CLI (a venv of python 3.14)
 bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.36.1 \
   --python /opt/py314/bin/python3.14 frappe-bench
 cd frappe-bench
@@ -28,8 +38,11 @@ printf "frappe\npayments\nkamra\n" > sites/apps.txt
 bench new-site test.localhost --db-root-password root --admin-password admin
 bench --site test.localhost install-app payments && bench --site test.localhost install-app kamra
 bench --site test.localhost set-config developer_mode 1 && bench --site test.localhost set-config allow_tests true
+bench --site test.localhost execute frappe.utils.password.get_encryption_key   # a new site has none yet (2O)
 bench build --apps frappe,payments       # needed by email-rendering tests
 ```
+Without the `encryption_key`, six `test_member_web` tests fail when the module runs alone on a new site (CI's run
+makes the key earlier, in the eval harness).
 Notes: Python 3.14's strict X.509 verification rejects the session proxy CA for
 `api.github.com` in `bench get-app`, hence the manual `git clone`.
 
@@ -69,6 +82,10 @@ bench --site test.localhost execute kamra.tex.devtools.demo_seed.execute --kwarg
 bench --site test.localhost set-config -p tex_public_write_limit 1000
 bench --site test.localhost set-config -p tex_public_search_limit 1000
 bench serve --port 8000        # test.localhost must resolve to 127.0.0.1
+# a paid guest change and a refund are made by a job: a worker runs them (CI does the same; the site's scheduler stays
+# off). Without it manage-money.spec's two paid changes wait for nothing (2O's full run lost them this way)
+bench worker --queue short,default &
+bench schedule &
 cd frontend && TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD='TexDemo#2026' \
   PW_CHROMIUM=/opt/pw-browsers/chromium npx playwright test -c e2e
 ```
@@ -92,7 +109,8 @@ Docker Compose (`cd deploy/tex-local && docker compose up -d`, then
 for local testing only (well-known demo passwords, `developer_mode`, never `tex_production`).
 
 ## After a container restart
-Cloud containers can restart between turns; files survive, processes do not. Bring the
+Cloud containers can restart between turns; files survive, processes do not (and the proxy's port and CA may
+change: refresh the CA copy `env.sh` points at, `cp /root/.ccr/ca-bundle.crt /home/user/bench/`). Bring the
 services back (as root):
 ```bash
 mysqld_safe > /dev/null 2>&1 &                     # MariaDB (root password "root")

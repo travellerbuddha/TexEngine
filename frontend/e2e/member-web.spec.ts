@@ -290,6 +290,38 @@ test("a guest joins on the site, signs in by the mailed link, books the member p
       await expect(page.getByText("Your member price")).toHaveCount(0)
       expect(await page.evaluate((slug) => sessionStorage.getItem(`tex.member.${slug}`), SLUG)).toBeNull()
     })
+
+    await test.step("staff see the guest's sign-in in CRM and sign them out there (batch 2O)", async () => {
+      const asked = await pageApi(page, "kamra.tex.api.public.member_link", { site: SLUG, email, purpose: "sign_in" })
+      expect(asked.ok, JSON.stringify(asked.body).slice(0, 300)).toBeTruthy()
+      let fresh = token
+      await expect.poll(async () => (fresh = await mailedToken(mail, email)), { timeout: 20_000 }).not.toBe(token)
+      await page.goto(`/book/${SLUG}/member#token=${fresh}`)
+      await page.getByRole("button", { name: "Continue" }).click()
+      await page.waitForURL((u) => u.pathname === `/book/${SLUG}`, { timeout: 30_000 })
+      await expect(header.getByText("Hello, Nora")).toBeVisible()
+
+      const agent = await staff(browser, AGENT, opened)
+      await agent.goto(texPath("/tex/crm"))
+      const found = await pageApi<{ rows: { name: string }[] }>(agent, "kamra.tex.api.crm.guests", { q: email, limit: 5 })
+      expect(found.ok, JSON.stringify(found.body).slice(0, 300)).toBeTruthy()
+      await agent.goto(texPath(`/tex/crm/guests/${encodeURIComponent(found.message.rows[0].name)}`))
+      await agent.getByRole("tab", { name: /^Loyalty/ }).click()
+      const sessions = agent.getByRole("region", { name: "Signed in on the booking site" })
+      await expect(sessions.getByRole("listitem")).toHaveCount(2)                 // the one signed out, and this one
+      const signOut = sessions.getByRole("button", { name: "Sign out", exact: true })
+      await expect(signOut).toHaveCount(1)
+      await Promise.all([
+        agent.waitForResponse((r) => r.url().includes("kamra.tex.api.crm.end_member_sessions") && r.ok()),
+        signOut.click(),
+      ])
+      await expect(signOut).toHaveCount(0)
+      await expect(sessions.getByText("Signed in", { exact: true })).toHaveCount(0)
+
+      await page.reload()
+      await expect(header.getByRole("button", { name: "Member sign-in" })).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByText("Your member price")).toHaveCount(0)
+    })
     noErrors()
   } finally {
     if (outbox) await outboxOff(mail, outbox)

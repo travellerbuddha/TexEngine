@@ -14,7 +14,8 @@
   "joined_by",
   "property",
   "left_at",
-  "left_reason"
+  "left_reason",
+  "rejoin_blocked"
  ],
  "fields": [
   {
@@ -82,10 +83,17 @@
    "fieldname": "left_reason",
    "fieldtype": "Small Text",
    "label": "Why the membership ended"
+  },
+  {
+   "fieldname": "rejoin_blocked",
+   "fieldtype": "Check",
+   "label": "May not rejoin online",
+   "default": "0",
+   "description": "Set by staff who ended the membership: a join on the web does not make it active again"
   }
  ],
  "links": [],
- "modified": "2026-10-03 23:00:00.000000",
+ "modified": "2026-10-04 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Loyalty Member",

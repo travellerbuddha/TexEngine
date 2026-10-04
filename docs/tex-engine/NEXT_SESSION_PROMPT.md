@@ -4,27 +4,26 @@ TEX Engine'de çalışmaya devam ediyorsun (repo: travellerbuddha/texengine, tem
 Gereksinimleri bana yeniden sorma. Durumu şu sırayla oku:
 1. `CLAUDE.md`
 2. `docs/tex-engine/HANDOFF.md` (hepsini; özellikle §1, §2, §3, §9 ve §10)
-3. `docs/tex-engine/IMPLEMENTATION_STATUS.md` (en son §6 bölümleri: §6N1, §6N2)
+3. `docs/tex-engine/IMPLEMENTATION_STATUS.md` (en son §6 bölümleri: §6N2, §6O)
 4. `TARGET_ARCHITECTURE.md`
-5. `ARCHITECTURE_DECISIONS.md` (ADR-077, ADR-078)
+5. `ARCHITECTURE_DECISIONS.md` (ADR-078, ADR-079)
 6. `PRODUCT_SPEC.md`
-7. `git log` ve PR #31–#34 açıklamaları
+7. `git log` ve PR #32–#35 açıklamaları
 
 Son durum:
-- Denetim Part 2 bitti.
-- Üye fiyatları (C-04) tamamlandı:
-  - çağrı merkezi kısmı 2N-1, PR #33 (birleşti);
-  - web kısmı 2N-2, PR #34 (sahip birleştirecek).
+- Denetim Part 2 bitti; üye fiyatları (C-04) tamamlandı (2N-1 PR #33, 2N-2 PR #34; ikisi de birleşti).
+- 2O partisi, PR #35 (sahip birleştirecek): LOW kalanlar ve iki karar:
+  - 6b: personel üyeliği kapatırken web'den yeniden katılımı engelleyebilir (C-04h);
+  - CLP/ISK kuruşsuz (ISO 4217);
+  - C-08, C-09, C-11 varsayılanlarıyla kapandı; C-13 D-12 ile cevaplı.
 
 ## İlk adımlar
-1. GitHub'da PR #34'ün birleşip birleşmediğine bak. Birleşmediyse önce bana sor. Birleşmemiş bir tabanın üzerinde yeni partiye başlama, PR'ı kendin de birleştirme.
+1. GitHub'da PR #35'in birleşip birleşmediğine bak. Birleşmediyse önce bana sor. Birleşmemiş bir tabanın üzerinde yeni partiye başlama, PR'ı kendin de birleştirme.
 2. Yerel bench'i `docs/tex-engine/DEV_ENVIRONMENT.md`'ye göre kur. Konteyner yeniden başladıysa servisleri o dosyadaki "Cloud containers can restart" bölümüne göre yeniden başlat. Saf birim testlerini ve bir entegrasyon modülünü çalıştırıp ortamın sağlam olduğunu göster.
 3. Sonraki partiyi benimle birlikte seç. Seçenekleri HANDOFF §2'den çıkar; her birinin sonucunu sade bir dille yazıp bana sor:
    - D-15: her otelde hangi PMS? (PMS adaptörleri, SMS/WhatsApp, PMS'ten gelen olaylar)
-   - C-04 ek sorusu (§2 madde 6b): personelin kapattığı bir üyeliği misafir web'den yeniden açabilsin mi?
-   - Açık C maddeleri: C-08 … C-11, C-13 … C-15
-   - CLP/ISK kuruş basamağı
-   - Karar gerektirmeyen düşük öncelikli işler (LOW partisi: §2 madde 6c ve §6* "Not done" satırları)
+   - Dış taraf bekleyen C maddeleri: C-10, C-14, C-15 (belge veya hesap geldiyse)
+   - Karar gerektirmeyen düşük öncelikli işler (yeni bir LOW partisi: §6* ve §6O "Not done" satırları)
 
    Cevabımı almadan, karar bekleyen bir işe başlama.
 
@@ -37,8 +36,8 @@ Son durum:
   - her madde için bir commit at (Conventional Commits).
 - Ön yüz değişikliklerinde derlenmiş paketleri de commit et: `cd frontend && npm ci && npm run build`, ardından `git add -A kamra/public`.
 - Belgeleri aynı partide güncelle:
-  - ilgili ADR'ye ek yaz ya da yeni ADR aç (sıradaki ADR-079);
-  - `IMPLEMENTATION_STATUS.md` sonuna yeni bir §6 bölümü ekle (sıradaki §6O veya partinin adı);
+  - ilgili ADR'ye ek yaz ya da yeni ADR aç (sıradaki ADR-080);
+  - `IMPLEMENTATION_STATUS.md` sonuna yeni bir §6 bölümü ekle (sıradaki §6P veya partinin adı);
   - HANDOFF, gerekiyorsa SECURITY_MODEL ve MIGRATION_PLAN'ı güncelle;
   - yeni yama gerekiyorsa p79'dan devam et.
 - Bağımsız, salt okunur bir inceleyiciyle en çok 2 tur inceleme yap. Bulguları düzelt.

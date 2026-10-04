@@ -90,6 +90,8 @@ export interface Stay {
   cancellation_fee?: string | null
   /** a hold that ran out of time: no cancellation, never a sale (O-24) */
   hold_expired?: boolean
+  /** its booking is a channel's: points never pay it (LO-02; batch 2O) */
+  channel_booking?: boolean
 }
 
 /** An extra on one of the guest's stays at the viewer's hotels (from its price-locked snapshot). */
@@ -183,6 +185,20 @@ export interface LoyaltyAccount {
   membership?: LoyaltyMembership | null
 }
 
+/** kamra.tex.crm.members.staff_sessions (C-04 on the web, ADR-078; batch 2O): a guest's sign-in on a booking site */
+export interface MemberSession {
+  name: string
+  site: string
+  site_name: string
+  hotel: string | null
+  signed_in_at: string
+  expires_at: string | null
+  signed_out_at: string | null
+  active: boolean
+  /** open, at a hotel where the user may edit the guest: they may sign it out */
+  can_end: boolean
+}
+
 /** kamra.tex.crm.loyalty.membership_view (C-04, ADR-077) */
 export interface LoyaltyMembership {
   status: "Active" | "Left"
@@ -191,6 +207,8 @@ export interface LoyaltyMembership {
   other_hotel: boolean
   joined_at: string | null
   left_at: string | null
+  /** staff ended it and blocked a rejoin on the web (C-04h): only staff joining the guest lift it */
+  rejoin_blocked?: boolean
 }
 
 /** kamra.tex.api.ui_backoffice_crm_payments.loyalty_programs */

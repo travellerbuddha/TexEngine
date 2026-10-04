@@ -404,7 +404,9 @@ def membership_view(m: dict, hotels: set[str] | None, program_hotel: str | None)
 	day = (lambda v: str(v)[:7]) if elsewhere else str
 	return {"status": m.status, "source": m.source, "other_hotel": elsewhere,
 	        "joined_at": day(m.joined_at) if m.joined_at else None,
-	        "left_at": day(m.left_at) if m.left_at else None}
+	        "left_at": day(m.left_at) if m.left_at else None,
+	        # the whole program's: its staff at every hotel know a web join will not make it active (C-04h)
+	        "rejoin_blocked": bool(m.status == "Left" and m.rejoin_blocked)}
 
 
 def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> list[dict]:
@@ -495,7 +497,7 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 
 # ─── membership (C-04, ADR-077) ──────────────────────────────────────────
 
-MEMBER_FIELDS = ["name", "status", "source", "joined_at", "property", "left_at", "left_reason"]
+MEMBER_FIELDS = ["name", "status", "source", "joined_at", "property", "left_at", "left_reason", "rejoin_blocked"]
 
 
 def membership(guest: str | None, program: str | None, *, lock: bool = False) -> dict | None:
@@ -530,6 +532,13 @@ def member_of(guest: str | None, program: str | None, *, lock: bool = False) -> 
 	                                                    "status": ("in", list(FINAL))}))
 
 
+def rejoin_blocked(guest: str | None, program: str | None, *, lock: bool = False) -> bool:
+	"""Staff ended the guest's membership of ``program`` and blocked a rejoin on the web (C-04h, owner 2026-10-04):
+	a web join leaves it as it is; staff joining the guest lift it."""
+	m = membership(guest, program, lock=lock)
+	return bool(m and m.status == "Left" and m.rejoin_blocked)
+
+
 def is_member(guest: str | None, property: str, *, lock: bool = False) -> bool:
 	"""A member of the hotel's program (its own, else its group's): who the program's members-only prices are for.
 	``lock``: as ``member_of``."""
@@ -555,22 +564,26 @@ def join(guest: str, program: str, *, property: str | None = None) -> dict:
 def join_web(guest: str, program: str, *, property: str | None = None) -> dict | None:
 	"""The guest joins on a booking site (C-04, ADR-078): their own act, proven by the link sent to their e-mail
 	(``members``), with no staff member. The profile is locked by the caller. A disabled program is skipped (None);
-	a membership the guest left is made active again (they asked for it); audited as a staff join is, its source
-	Web."""
+	a membership the guest left is made active again (they asked for it), unless staff who ended it blocked a rejoin
+	(C-04h: skipped, None; read with a lock, as committed now); audited as a staff join is, its source Web."""
 	if not frappe.db.get_value("TEX Loyalty Program", program, "enabled"):
 		return None
 	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=True):
+		return None
+	if rejoin_blocked(guest, program, lock=True):
 		return None
 	return _activate(guest, program, property=property, source="Web", by=None)
 
 
 def _activate(guest: str, program: str, *, property: str | None, source: str, by: str | None) -> dict:
-	"""The membership made, or made active again, the profile locked: an active one is returned as it is."""
+	"""The membership made, or made active again, the profile locked: an active one is returned as it is. Staff
+	joining a guest whose rejoin was blocked lift the block (``join_web`` never gets here with one: C-04h)."""
 	m = membership(guest, program, lock=True)
 	if m and m.status == "Active":
 		return {"name": m.name, "status": m.status}
+	unblocked = bool(m and m.rejoin_blocked)
 	values = {"status": "Active", "source": source, "joined_at": now_datetime(), "joined_by": by,
-	          "property": property, "left_at": None, "left_reason": None}
+	          "property": property, "left_at": None, "left_reason": None, "rejoin_blocked": 0}
 	if m:
 		frappe.db.set_value("TEX Loyalty Member", m.name, values)
 		name = m.name
@@ -578,13 +591,15 @@ def _activate(guest: str, program: str, *, property: str | None, source: str, by
 		name = frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest,
 		                       **values}).insert(ignore_permissions=True).name
 	audit("loyalty.member_join", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
-	      new={"guest": guest, "program": program, "source": source})
+	      new={"guest": guest, "program": program, "source": source, **({"unblocked": True} if unblocked else {})})
 	return {"name": name, "status": "Active"}
 
 
-def leave(guest: str, program: str, *, reason: str, property: str | None = None) -> dict:
+def leave(guest: str, program: str, *, reason: str, property: str | None = None, block_rejoin: bool = False) -> dict:
 	"""Staff end the guest's membership, with a reason: a guest who left is no member, whatever they earned (their
-	points stay theirs). A guest without a record (a member by their stays) gets one that says they left."""
+	points stay theirs). A guest without a record (a member by their stays) gets one that says they left.
+	``block_rejoin`` (C-04h, owner 2026-10-04: a reason such as abuse): a join on the web does not make it active
+	again; staff joining the guest lift it. Without it the guest may come back on the web (they asked to leave)."""
 	from kamra.tex.crm.service import require_live_guest
 
 	prog = frappe.get_doc("TEX Loyalty Program", program)
@@ -593,7 +608,11 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None)
 		frappe.throw(_("A reason is required."))
 	require_live_guest(guest)
 	m = membership(guest, program, lock=True)
-	values = {"status": "Left", "left_at": now_datetime(), "left_reason": reason.strip()[:500]}
+	# a block stays until staff join the guest (the owner's option b): ending a blocked membership again without the
+	# tick keeps it (review round 1, NIT 2)
+	blocked = bool(block_rejoin or (m and m.status == "Left" and m.rejoin_blocked))
+	values = {"status": "Left", "left_at": now_datetime(), "left_reason": reason.strip()[:500],
+	          "rejoin_blocked": 1 if blocked else 0}
 	if m:
 		frappe.db.set_value("TEX Loyalty Member", m.name, values)
 		name = m.name
@@ -601,7 +620,7 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None)
 		name = frappe.get_doc({"doctype": "TEX Loyalty Member", "program": program, "guest": guest,
 		                       "property": property, **values}).insert(ignore_permissions=True).name
 	audit("loyalty.member_leave", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
-	      new={"guest": guest, "program": program}, reason=reason)
+	      new={"guest": guest, "program": program, "rejoin_blocked": blocked}, reason=reason)
 	return {"name": name, "status": "Left"}
 
 

@@ -687,6 +687,7 @@
   "refusal.MEMBER_SESSION_ENDED": "Ați fost deconectat. Conectați-vă din nou pentru a vedea prețurile de membru.",
   "refusal.NOT_A_MEMBER": "Nu există încă o calitate de membru cu acest e-mail. Vă puteți înscrie în program.",
   "refusal.MEMBERS_ONLY": "Acest preț de membru este doar pentru membrii programului hotelului. Actualizați prețurile pentru a vedea prețul pe care îl puteți rezerva.",
+  "refusal.MEMBER_EMAIL_UNUSABLE": "Nu se poate trimite un link la adresa de e-mail din profilul dvs. Vă rugăm să contactați hotelul pentru a o corecta.",
   "member.signIn": "Autentificare membri",
   "member.signInTitle": "Autentificare membri",
   "member.signInTab": "Autentificare",

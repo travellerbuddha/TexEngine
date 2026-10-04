@@ -2259,6 +2259,26 @@ class TestAFailedTryLeavesNothing(HoldCase):
 		self.assertEqual(txn_state(txn).status, "Pending")
 		self.assertEqual(pay.allocated_of(txn), 0)
 
+	def test_2o_staff_reverify_records_when_the_charge_was_asked(self):
+		"""§6K4 "Not done" (batch 2O): staff re-verification asked the gateway but wrote no ``last_reverified_at`` (only
+		the job did, LO-22), so the job's next tick asked the same charge first again. Written whatever the answer,
+		also when the gateway confirms nothing (the refusal comes after it is on record)."""
+		from kamra.tex.api import payments as payments_api
+
+		_b, txn = self.two_tokens()
+		self.gw.answers["tok-1"] = {"status": "success", "paymentStatus": "WAITING"}       # nothing paid yet
+		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", txn, "last_reverified_at"))
+		with mock.patch.object(pay, "reverify", return_value=(None, pay.ProviderError("no answer"))):
+			with self.assertRaisesRegex(frappe.ValidationError, "did not confirm"):
+				payments_api.reverify(transaction=txn)
+		first = frappe.db.get_value("TEX Payment Transaction", txn, "last_reverified_at")
+		self.assertIsNotNone(first)
+		frappe.db.set_value("TEX Payment Transaction", txn, "last_reverified_at", add_to_date(first, minutes=-30),
+		                    update_modified=False)
+		payments_api.reverify(transaction=txn)
+		self.assertGreater(frappe.db.get_value("TEX Payment Transaction", txn, "last_reverified_at"),
+		                   add_to_date(first, minutes=-30))
+
 	def sniffed_reverify(self, txn: str) -> list[str]:
 		"""Staff re-verify ``txn`` (tok-1 answers it failed, tok-2 paid), recording each gateway question, each
 		``FOR UPDATE`` and each step commit, in order."""

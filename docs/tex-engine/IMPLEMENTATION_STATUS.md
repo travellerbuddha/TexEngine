@@ -2193,3 +2193,86 @@ booked by a non-member was refused with `SEARCH_AGAIN`, the booking app had no m
   - a change of a stay through the manage page is priced by ADR-077's rule (the sale's terms), never by a session;
   - a guest asked for a link is not told when an address's limit was reached (by design: the same answer);
   - the other owner questions of HANDOFF_LEFTOVERS §3 (C-08 … C-11, C-13 … C-15) and D-15, CLP / ISK.
+
+## 6O. Audit Part 2O — LOW leftovers, a web rejoin staff blocked (C-04h) and CLP / ISK (2026-10-04)
+
+The owner chose (2026-10-04) the recommended batch: the LOW leftovers that need no decision (HANDOFF §2 6c and the
+§6* "Not done" lines), with two answers folded in: 6b option (b), a rejoin on the web staff may block, and CLP / ISK
+option (a), whole units. C-08, C-09 and C-11 keep their defaults; C-13 is D-12's answer. ADR-079. Each card was
+re-verified against the code first; all held (the erasure item was worse than listed: a profile was made again).
+
+- 2O-1 C-04h **COMPLETE**: `TEX Loyalty Member.rejoin_blocked`; `crm.loyalty_leave(block_rejoin=1)`, lifted by staff
+  joining the guest; `loyalty.join_web` skips a blocked membership (locked read); a web join for a blocked address
+  gets the same answer and a mail with no link (`member_blocked`, six languages); the CRM shows "may not rejoin
+  online", the end dialog's "Do not let them rejoin online" and the join dialog's notice; a merge keeps it. Tests:
+  `test_member_web.TestRejoinBlocked` (5), e2e `crm-membership.spec` (a new step). Red: `TypeError: loyalty_leave()
+  got an unexpected keyword argument 'block_rejoin'` (5 errors).
+- 2O-2 CLP / ISK **COMPLETE**: `MINOR_UNITS` CLP 0, ISK 0, both apps' tables too. Tests: unit
+  `test_money_and_ages.test_clp_and_isk_are_whole_units`, node `minor-units` (+1). Red: `2 != 0`; node `server CLP`
+  actual 2, expected 0.
+- 2O-3 (§6G3) **COMPLETE**: a malformed party in a search is refused by code (`INVALID_REQUEST`, `PARTY_INVALID`,
+  `CHILD_AGE_INVALID`, `CHILD_AGE_REQUIRED`), whole numbers read through `money.whole_number`. Test:
+  `test_public_booking.TestRefusalCodes.test_2o_a_malformed_party_is_refused_by_code_never_a_500`. Red:
+  `JSONDecodeError`, `ValueError: invalid literal for int()`, `AttributeError: 'str' object has no attribute 'get'`,
+  `ROOMS_COUNT` for a JSON string, 4.5 taken (failures=2, errors=4).
+- 2O-4 (§6N2) **COMPLETE**: an erasure drops the member links mailed to its address and not opened yet (the
+  address's pending set, `members.drop_links`, `member_links_dropped`); a link put back after a failed request only
+  while still pending. Tests: `test_member_web.TestPendingLinksAndErasure` (2). Red: both links opened after the
+  erasure, `'G-00004' is not false` (a profile made again).
+- 2O-5 (§6N2) **COMPLETE**: a signed-in join for a profile e-mail that cannot take a link is refused with the new
+  guest code `MEMBER_EMAIL_UNUSABLE` (six languages). Test: `test_member_web.…test_2o_a_signed_in_join_says_when_the_
+  profiles_e_mail_cannot_take_a_link`. Red: `ValidationError not raised`.
+- 2O-6 (§6N2) **COMPLETE**: `crm.member_sessions` (`crm.view`) and `crm.end_member_sessions` (`crm.edit`, audited
+  `member.sessions_end`); CRM → Loyalty "Signed in on the booking site", "Sign out", "Sign out everywhere". Tests:
+  `test_member_web.TestStaffSeeAndEndSessions` (2), e2e `member-web.spec` (a new step). Red: `AttributeError: module
+  'kamra.tex.api.crm' has no attribute 'member_sessions'` / `'end_member_sessions'`.
+- 2O-7 (§6K3) **COMPLETE**: a channel mapping of a disabled room type is never made enabled; one enabled before stays
+  editable. Test: `test_distribution.TestAri.test_2o_a_mapping_of_a_disabled_room_type_is_not_saved_enabled`. Red:
+  `ValidationError not raised`.
+- 2O-8 (§6K1) **COMPLETE**: money staff kept on the booking (G-93) is no overpayment: `TEX Guest Change
+  Request.staff_kept_excess` / `staff_kept_at`, the latest decision read as for LO-17. Test:
+  `test_self_service_money.TestRefundedOutsideTex.test_2o_money_kept_on_the_booking_is_no_overpayment`. Red:
+  `1 != 0`.
+- 2O-9 (§6K4) **COMPLETE**: staff re-verification writes `last_reverified_at` (`payments.mark_reverified`), committed
+  before a refusal. Test: `test_hold_payment_race.TestAFailedTryLeavesNothing.test_2o_staff_reverify_records_when_the_
+  charge_was_asked`. Red: `unexpectedly None`.
+- 2O-10 (§6K2) **COMPLETE**: "Redeem" is not offered on a channel's booking (`channel_booking` per stay, the pure
+  `redeemableBookings`). Tests: `test_distribution.TestChannelBookings.test_2o_the_crm_says_which_stay_is_a_channels`,
+  node `crm-redeem`. Red: `KeyError: 'channel_booking'`; node `ERR_MODULE_NOT_FOUND`.
+- 2O-11 (§6L) **COMPLETE**: the command palette resets its query in a layout effect. Test: e2e
+  `command-palette.spec` (new). Red (the previous bundle): `Expected: "" Received: "zzz-last-query"`.
+- 2O-12 (§6K1) **COMPLETE**: e2e `payments-not-paid.spec` (new) for "Not paid (checked with the bank)" (LO-18). A
+  test only; its teeth shown by a mutation (the button hidden: `locator.click` timed out).
+- Docs: ADR-078 addendum and ADR-079; HANDOFF (§1, §2, §6, §7, §10); DEV_ENVIRONMENT (Node 24 for Frappe v16.36.1,
+  `cron`, the frappe user's CA variables, a new site's `encryption_key`, the MariaDB 11.8 repository); SECURITY_MODEL (the member row, the review log). No patch: the new fields are Checks, Currency and Datetime
+  the model sync adds (D-14).
+- Review round 1 **COMPLETE** (an independent read-only reviewer; no BLOCKER, 2 SHOULD, 6 NITs): S1, the erasure
+  missed the links of a profile of no enterprise (it matches every enterprise's site; the pending set was the
+  site's enterprise's): the set is the address's only; S2, a credit staff approve was ordered by its request's
+  creation, so a keep made in between won: `credit_at` set on approval, read by the check; NITs: the erasure drops
+  the links again after its commit; MEMBER_EMAIL_UNUSABLE carries its own message only; a second leave keeps the
+  block; `can_end` per session; the e2e's clean-up. Not taken: NIT 6 (the `member_blocked` mail names every program
+  of a multi-program site; cosmetic). Tests: `test_member_web` +3, `test_system_status.test_2o_r1_s2_…`. Red: S1
+  `ValidationError not raised`; S2 `1 != 0`; `'valid e-mail address' unexpectedly found`; `('Left', 0) != ('Left',
+  1)`; `KeyError: 'can_end'`.
+- Review round 2 **COMPLETE** (no BLOCKER; every round-1 finding verified fixed; 1 SHOULD from 2N-2, 3 NITs): S-1, a
+  typed ASCII address found the profile of an accented look-alike (the database compares accents away) and its link
+  signed its owner in to it: `members._profile` takes only a profile whose stored e-mail is the address; NIT-A, the
+  after-commit drop logs a failure, never raises; NIT-B, this "Not done" list; NIT-C, "every open session at a hotel
+  where the user may edit the guest" (docstrings, ADR-079). Tests: `test_member_web.TestBatch2OReviewRound2` (3).
+- **Not done:**
+  - a booking still joins the profile `booking._find_profile` finds, accents compared away (ADR-056's identity): a
+    guest typing `ana@muller.de` joins the stays of `ana@müller.de`'s older profile; the same exact-address rule as
+    `members._profile` there changes how every booking finds its guest (LOW, a separate batch);
+  - the `member_blocked` mail names every program of a multi-program site, also one the guest is still a member of
+    (cosmetic, review round 1 NIT 6);
+  - staff add a block only while ending a membership: for a guest who left without one, they join and end it again
+    (LOW, review round 1 NIT 2's second half);
+  - a request that read the profile before an erasure committed and files its link after the second drop keeps that
+    link for its 30 minutes (rare);
+  - the rest of the §6* "Not done" lines 2O did not take (HANDOFF §2 item 10), among them: a misconfigured extra's
+    uncoded 500 and the basket's `problem_code` (§6G3); a duplicate capture not audited apart and a review recorded
+    while a new charge starts (§6K1); an outbox delivery a worker never finishes (§6K4); the digest an editor
+    without cost reads, and a refused reprice's audit digests (§6L); a group program's membership when one hotel gets
+    its own program (§6N1).
+

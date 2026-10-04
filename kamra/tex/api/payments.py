@@ -189,7 +189,10 @@ def reverify(transaction: str):
 	# never runs a request again once it committed a step
 	out, error = pay.reverify(transaction, attempts=cls.status_params(row.provider_ref) or [{"token": ""}],
 	                          step_commit=True)
+	# asked, whatever the answer, as the job records it (batch 2O): its next tick asks the ones that waited first
+	pay.mark_reverified(transaction)
 	if out is None:
+		pay._commit_step()                     # on record before the refusal, which would undo it
 		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(error)[:200]))
 	return out
 

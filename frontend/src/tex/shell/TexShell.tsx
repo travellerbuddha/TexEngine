@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Link, useHref, useLocation, useNavigate } from "react-router-dom"
 import { Building2, ChevronDown, ExternalLink, LogOut, Menu, Moon, Rocket, Search, Sun, X } from "lucide-react"
 import { cn } from "../../lib/utils"
@@ -433,7 +433,9 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
     return /[\d@]/.test(term) ? [...matches, ...pages, ...find] : [...pages, ...matches, ...find]
   }, [commands, q, matches])
 
-  useEffect(() => {
+  // reset before the opening commit is painted (batch 2O, ADR-073): a passive effect let the first commit show the
+  // last query, and what was typed then was lost
+  useLayoutEffect(() => {
     if (open) {
       setQ("")
       setActive(0)
