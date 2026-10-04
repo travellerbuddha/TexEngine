@@ -633,6 +633,28 @@ class TestRefusalCodes(TexTestCase):
 		self.refused("CHILD_TOO_OLD", search, rooms=[{"adults": 2, "children": [{"dob": "1990-01-01"}]}],
 		             params={"child": 1, "age": 18})
 
+	def test_2o_a_malformed_party_is_refused_by_code_never_a_500(self):
+		"""§6G3 "Not done" (batch 2O): a malformed rooms JSON or a child's age that is not a whole number was an
+		uncoded 500 (a raw ``json.loads`` / ``int``), never a refusal the booking app can explain."""
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		ci, co = str(fx.d(6, 10)), str(fx.d(6, 13))
+
+		def search(**kw):
+			return public.search(**({"site": SLUG, "check_in": ci, "check_out": co, "rooms": [{"adults": 2}],
+			                         "session_id": "2o-s"} | kw))
+
+		for rooms in ('[{"adults": 2', '{"adults": 2}', '"two adults"', ["two adults"], [{"adults": 2, "children": "4"}]):
+			with self.subTest(rooms=rooms):
+				self.refused("INVALID_REQUEST", search, rooms=rooms)
+		self.refused("PARTY_INVALID", search, rooms=[{"adults": "two"}])
+		self.refused("PARTY_INVALID", search, rooms=[{"adults": 1.5}])
+		for child in ("four", {"age": "four"}, 4.5, {"age": "4.5"}, True):
+			with self.subTest(child=child):
+				self.refused("CHILD_AGE_INVALID", search, rooms=[{"adults": 2, "children": [child]}])
+		self.refused("CHILD_AGE_REQUIRED", search, rooms=[{"adults": 2, "children": [None]}])
+		# a whole number in any spelling still is one
+		self.assertIn("properties", search(rooms='[{"adults": "2", "children": ["4", 5.0, {"age": "6"}]}]'))
+
 	def test_offers_and_quotes_are_refused_by_code(self):
 		room = next(o for o in _search([{"adults": 2, "children": []}], session="g70b-q")["offers"]
 		            if o["room_type"] == self.f["room_types"]["STD"])["rooms"][0]

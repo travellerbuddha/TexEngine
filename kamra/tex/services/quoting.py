@@ -24,7 +24,7 @@ from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
-from kamra.tex.money import D, quantize, to_str
+from kamra.tex.money import D, quantize, to_str, whole_number
 from kamra.tex.pricing import ages, engine, promotions, serialize
 from kamra.tex.pricing.model import ChildSpec, ExtraRequest, PricingError, StayRequest, Unsellable
 from kamra.tex.security.keys import site_secret
@@ -113,17 +113,22 @@ class Party:
 		checked against ``arrival`` (when the stay is known) and gives the child's age on
 		arrival for display; pricing counts completed months from it (G-52)."""
 		raw = raw or {}
-		adults = int(raw.get("adults") or 0)
+		children = raw.get("children") if isinstance(raw, dict) else None
+		if not isinstance(raw, dict) or not isinstance(children or [], list):
+			_malformed()
+		adults = whole_number(raw.get("adults"))
+		if adults is None:
+			frappe.throw(_("Each room needs 1–12 adults and at most 8 children."), refusal("PARTY_INVALID"))
 		kids = []
-		for n, c in enumerate(raw.get("children") or [], start=1):
+		for n, c in enumerate(children or [], start=1):
 			if isinstance(c, dict):
 				dob = parse_dob(c["dob"]) if c.get("dob") else None
-				age = int(c["age"]) if c.get("age") not in (None, "") else None
+				age = _child_age(c.get("age"))
 				if dob is not None and arrival is not None:
 					age = checked_dob(dob, arrival, n)
 				kids.append(ChildSpec(age=age, dob=dob))
 			else:
-				kids.append(ChildSpec(age=int(c)))
+				kids.append(ChildSpec(age=_child_age(c)))
 		if adults < 1 or adults > 12 or len(kids) > 8:
 			frappe.throw(_("Each room needs 1–12 adults and at most 8 children."), refusal("PARTY_INVALID"))
 		for k in kids:
@@ -143,9 +148,30 @@ class Party:
 		return {"adults": self.adults, "children": [c.age for c in self.children]}
 
 
+def _malformed():
+	"""A party that is not the shape a search sends (batch 2O: was an uncoded 500)."""
+	frappe.throw(_("Invalid request."), refusal("INVALID_REQUEST"))
+
+
+def _child_age(value) -> int | None:
+	"""A child's age in whole years, in any spelling of a whole number ("4", 4, 4.0); none given → None. Anything
+	else is refused (batch 2O: ``int()`` gave a 500 for "four" and took 4.5 for 4)."""
+	if value is None or value == "":
+		return None
+	age = whole_number(value)
+	if age is None:
+		frappe.throw(_("Child ages must be 0–17."), refusal("CHILD_AGE_INVALID"))
+	return age
+
+
 def parse_rooms(rooms, *, arrival: date | None = None) -> list[Party]:
 	if isinstance(rooms, str):
-		rooms = json.loads(rooms)
+		try:
+			rooms = json.loads(rooms)
+		except ValueError:
+			_malformed()
+	if rooms and not isinstance(rooms, list):
+		_malformed()
 	if not rooms:
 		frappe.throw(_("At least one room is required."), refusal("ROOMS_COUNT", max=MAX_ROOMS))
 	if len(rooms) > MAX_ROOMS:
