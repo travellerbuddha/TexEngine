@@ -934,10 +934,12 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	from kamra.tex.crm import members
 
 	sessions = members.end_sessions(guest)              # signed out on every booking site (ADR-078)
+	# the sign-in and join links mailed to its address and not opened yet (batch 2O)
+	pending = members.drop_links(frappe.db.get_value("Guest", guest, "tex_enterprise"), emails)
 	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
 	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended,
-	       "sessions_ended": sessions}
-	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended + sessions
+	       "sessions_ended": sessions, "member_links_dropped": pending}
+	out["changed"] = forgotten + named + history + masked + len(files) + copies + ended + sessions + pending
 	if audit_event:
 		audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
 	return out

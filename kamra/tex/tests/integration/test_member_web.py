@@ -605,3 +605,33 @@ class TestRejoinBlocked(WebMemberCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
 		self.assertFalse(frappe.db.exists("TEX Loyalty Member", theirs))
 		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", mine, ["status", "rejoin_blocked"]), ("Left", 1))
+
+
+class TestPendingLinksAndErasure(WebMemberCase):
+	"""§6N2 "Not done" (batch 2O): a link mailed before the guest's erasure and opened after it still worked for its 30
+	minutes, and a join link then made a new profile with the erased e-mail and the name typed before the erasure."""
+
+	def erase(self, guest: str) -> None:
+		from kamra.api import anonymize_guest
+
+		anonymize_guest(guest)
+
+	def test_2o_an_erasure_drops_the_links_not_yet_opened(self):
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		join_link = self.token()
+		self.ask(self.email)
+		sign_in_link = self.token()
+		self.erase(self.guest)
+		for purpose, token in (("join", join_link), ("sign_in", sign_in_link)):
+			with self.subTest(link=purpose):
+				self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))           # nobody made again
+		self.assertFalse(frappe.db.exists("TEX Member Session", {"guest": self.guest}))
+
+	def test_2o_another_address_keeps_its_link(self):
+		other = self.profile("keeps")
+		other_email = frappe.db.get_value("Guest", other, "email")
+		self.ask(other_email)
+		theirs = self.token()
+		self.erase(self.guest)
+		self.assertTrue(self.verify(theirs)["status"]["signed_in"])

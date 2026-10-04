@@ -18,8 +18,8 @@ A guest signs in on a booking site, or joins its hotels' loyalty program, by a o
 
 A link's token lives only in the mail (in the URL fragment, which browsers never send to a server) and in the cache,
 by its hash, with what opening it needs (the e-mail, the name to join with) until it is used or expires. A session's
-token is stored by its hash (``TEX Member Session``). Erasure deletes the guest's sessions; a merge moves them with the
-other links to the profile; sessions ended long ago are purged daily.
+token is stored by its hash (``TEX Member Session``). Erasure deletes the guest's sessions and drops the links mailed to its address and not opened yet; a merge moves the
+sessions with the other links to the profile; sessions ended long ago are purged daily.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ PURPOSES = ("sign_in", "join")
 LINK_KEY = "tex:member_link:"                # + the token's hash
 COUNT_KEY = "tex:member_links:"              # + site and the address's hash
 REQUEST_KEY = "tex:member_request:"          # + site and the idempotency key's hash
+PENDING_KEY = "tex:member_pending:"          # + enterprise and the address's hash: its links' hashes not yet opened
 REQUEST_SECONDS = 600
 # a refusal that settles a link: anything else (a deadlock answered BUSY, a database error) leaves it to be used
 FINAL = frozenset({"NOT_A_MEMBER", "MEMBER_LINK_INVALID"})
@@ -144,7 +145,8 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 		return                                         # the same answer: nobody learns the limit was reached
 	from kamra.tex.services import notify
 
-	profile = _profile(email, site_enterprise(site))
+	enterprise = site_enterprise(site)
+	profile = _profile(email, enterprise)
 	if purpose == "sign_in" and not profile:
 		notify.member_mail(site, email, "member_none", language=language)
 		return
@@ -154,10 +156,17 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 		notify.member_mail(site, email, "member_blocked", guest=profile, language=language)
 		return
 	token = secrets.token_urlsafe(32)
-	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once)
-	_cache().set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
-		"site": site.name, "purpose": purpose, "email": email, "language": language,
+	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once); its
+	# hash also among the address's pending links, which an erasure drops (batch 2O). One transaction: the address's
+	# set always has its expiry, and outlives each of its links
+	pending = _pending_key(enterprise, email)
+	pipe = _cache().pipeline(transaction=True)
+	pipe.set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		"site": site.name, "enterprise": enterprise, "purpose": purpose, "email": email, "language": language,
 		"expires_at": str(add_to_date(now_datetime(), minutes=LINK_MINUTES)), **names}), ex=LINK_MINUTES * 60)
+	pipe.sadd(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	pipe.expire(pending, LINK_MINUTES * 60)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	pipe.execute()
 	# greeted by the profile's own name, or by none: never by what a visitor typed for an address they may not own
 	notify.member_mail(site, email, "member_join" if purpose == "join" else "member_sign_in", token=token,
 	                   guest=profile, language=language)
@@ -172,6 +181,26 @@ def _rejoin_blocked(site, guest: str) -> bool:
 
 def _link_key(token: str) -> str:
 	return frappe.cache.make_key(f"{LINK_KEY}{digest(token)}")
+
+
+def _pending_key(enterprise: str | None, email: str) -> str:
+	return frappe.cache.make_key(f"{PENDING_KEY}{enterprise or ''}:{digest(email)}")
+
+
+def drop_links(enterprise: str | None, emails) -> int:
+	"""Right to erasure (``erase_traces``): the links mailed to the profile's addresses in its enterprise and not opened
+	yet go (batch 2O, §6N2: one opened after the erasure signed in, or joined a profile made again from the name typed
+	before it). → how many."""
+	dropped = 0
+	for email in sorted({str(e).strip().lower() for e in emails or () if e}):
+		pending = _pending_key(enterprise, email)
+		pipe = _cache().pipeline(transaction=True)
+		pipe.smembers(pending)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		pipe.delete(pending)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		hashes = [h.decode() if isinstance(h, bytes) else h for h in pipe.execute()[0] or ()]
+		if hashes:
+			dropped += _cache().delete(*(frappe.cache.make_key(f"{LINK_KEY}{h}") for h in hashes))  # nosemgrep: frappe-cache-breaks-multitenancy -- keys are site-scoped by make_key
+	return dropped
 
 
 def _take_link(site, token: str) -> dict:
@@ -198,9 +227,15 @@ def _take_link(site, token: str) -> dict:
 
 
 def _put_back(token: str, data: dict) -> None:
-	"""A link taken by a request that failed before it was used (review round 1): usable again until it expires."""
+	"""A link taken by a request that failed before it was used (review round 1): usable again until it expires, unless
+	an erasure dropped the address's links meanwhile (batch 2O). No database read: the request may have lost it."""
 	left = int((get_datetime(data.get("expires_at")) - now_datetime()).total_seconds())
-	if left > 0:
+	if left <= 0:
+		return
+	# the raw command, as every one here: the wrapper's own sismember would prefix the made key again
+	pipe = _cache().pipeline(transaction=False)
+	pipe.sismember(_pending_key(data.get("enterprise"), data.get("email") or ""), digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+	if pipe.execute()[0]:
 		_cache().set(_link_key(token), json.dumps(data), ex=left)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 
 
