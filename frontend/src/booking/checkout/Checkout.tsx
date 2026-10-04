@@ -19,7 +19,7 @@ import type { MemberStatus, PaymentMethod, PaymentStart, QuoteResponse, SiteExtr
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
-import { basketExpiry, basketFailureText, checkoutChoices } from "../lib/methods"
+import { basketExpiry, basketFailureText, checkoutChoices, searchesAgain } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
 import { plainEmail } from "../../lib/email"
@@ -605,6 +605,14 @@ function PaymentStep() {
     if (expiry) setFlowError({ kind: "expired", ...expiry })
   }, [expiry, setFlowError])
 
+  // a rate the hotel cannot sell now: trying the basket again fails the same way (§6P; batch 2Q)
+  const searchAgain = async () => {
+    setPending(true)
+    await b.runSearch({ force: true })
+    setPending(false)
+    b.goStep("rooms")
+  }
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setMethodError(null)
@@ -742,7 +750,15 @@ function PaymentStep() {
               tone="warn"
               className="mt-3"
               title={basketFailureText(i18n, b.basket.error).title}
-              actions={<Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>}
+              actions={
+                searchesAgain(b.basket.error) ? (
+                  <Button onClick={searchAgain} busy={pending}>
+                    {t("errors.seeAvailable")}
+                  </Button>
+                ) : (
+                  <Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>
+                )
+              }
             >
               {basketFailureText(i18n, b.basket.error).body}
             </Alert>

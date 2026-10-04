@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react"
 import { useI18n } from "../i18n"
 import { extraAnchor, refusalText } from "../lib/extras"
+import { searchesAgain } from "../lib/methods"
 import { refusalMessage } from "../lib/refusals"
 import { Button } from "../ui/controls"
 import { Alert } from "../ui/feedback"
@@ -135,6 +136,16 @@ export function FlowErrorAlert() {
     // new search (§5b; batch 2P)
     title = t("errors.quoteUsedTitle")
     body = t("errors.quoteUsedBody")
+    action = (
+      <Button size="sm" onClick={research} busy={b.pending}>
+        {t("errors.seeAvailable")}
+      </Button>
+    )
+  } else if (searchesAgain(e)) {
+    // a rate the hotel cannot sell now: a refresh quotes it again and fails the same way, its text asks for a new
+    // search (§6P; batch 2Q)
+    title = t("errors.unavailableTitle")
+    body = refusalMessage(i18n, e)
     action = (
       <Button size="sm" onClick={research} busy={b.pending}>
         {t("errors.seeAvailable")}

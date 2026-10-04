@@ -58,3 +58,14 @@ test("a basket read but not usable asks for a refresh with its problem's code, a
   assert.deepEqual(basketExpiry({ status: "done", data: data(false, null) }), { code: null, message: "" })   // an older server
   assert.equal(basketExpiry({ status: "idle", data: null }), null)
 })
+
+// §6P (batch 2Q): a rate the hotel cannot sell now (RATE_UNAVAILABLE: a fixed amount it cannot convert, a payload that
+// fails its check) asked to "Try again" at the basket and to "Refresh prices" at the booking, each failing the same
+// way; its own text asks for a new search. The other refusals keep their answer (LO-14)
+test("a refusal neither a retry nor a refresh clears sends the guest to a new search; the others keep theirs", async () => {
+  const { searchesAgain } = await import("../../src/booking/lib/methods.ts")
+  assert.equal(searchesAgain({ kind: "expired", code: "RATE_UNAVAILABLE" }), true)
+  for (const e of [{ kind: "expired", code: "QUOTE_INVALID" }, { kind: "expired", code: "SEARCH_AGAIN" }, { kind: "expired", code: "QUOTE_EXPIRED" },
+                   { kind: "rate_limit", code: "RATE_LIMITED" }, { kind: "network", message: "" }, null])
+    assert.equal(searchesAgain(e), false, JSON.stringify(e))
+})

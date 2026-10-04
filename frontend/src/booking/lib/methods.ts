@@ -63,6 +63,15 @@ export function basketFailureText(i18n: RefusalI18n, error: (Refused & { kind?: 
 }
 
 /**
+ * A refusal neither a retry nor a refresh clears (§6P, batch 2Q): the rate itself cannot be sold now (a fixed amount
+ * the hotel cannot convert, a payload that fails its check). Its own text asks for a new search, and the checkout
+ * offers one ("See available rooms") where it offered "Try again" or "Refresh prices", each failing the same way.
+ */
+export function searchesAgain(error: { code?: string | null } | null | undefined): boolean {
+  return error?.code === "RATE_UNAVAILABLE"
+}
+
+/**
  * The refresh a basket asks for (§5b, §6G3; batch 2P): read, but its quotes used or expired since they were made. The
  * code of its rooms' problem goes with it, a price already booked first: refreshing that one would book the stay a
  * second time. Null when nothing is to refresh.
