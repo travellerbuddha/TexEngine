@@ -687,6 +687,7 @@
   "refusal.MEMBER_SESSION_ENDED": "Sie sind abgemeldet. Bitte melden Sie sich erneut an, um Ihre Mitgliederpreise zu sehen.",
   "refusal.NOT_A_MEMBER": "Mit dieser E-Mail gibt es noch keine Mitgliedschaft. Sie können stattdessen dem Programm beitreten.",
   "refusal.MEMBERS_ONLY": "Dieser Mitgliederpreis gilt nur für Mitglieder des Programms des Hotels. Aktualisieren Sie die Preise, um den Preis zu sehen, den Sie buchen können.",
+  "refusal.MEMBER_EMAIL_UNUSABLE": "An die E-Mail-Adresse Ihres Profils kann kein Link gesendet werden. Bitte wenden Sie sich an das Hotel, um sie zu korrigieren.",
   "member.signIn": "Mitglieder-Login",
   "member.signInTitle": "Mitglieder-Login",
   "member.signInTab": "Anmelden",

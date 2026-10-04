@@ -687,6 +687,7 @@
   "refusal.MEMBER_SESSION_ENDED": "Oturumunuz kapandı. Üye fiyatlarınızı görmek için yeniden giriş yapın.",
   "refusal.NOT_A_MEMBER": "Bu e-posta adresiyle henüz bir üyelik yok. Bunun yerine programa katılabilirsiniz.",
   "refusal.MEMBERS_ONLY": "Bu üye fiyatı yalnızca otelin programının üyeleri içindir. Rezerve edebileceğiniz fiyatı görmek için fiyatları yenileyin.",
+  "refusal.MEMBER_EMAIL_UNUSABLE": "Profilinizdeki e-posta adresine bağlantı gönderilemiyor. Düzeltmek için lütfen otelle iletişime geçin.",
   "member.signIn": "Üye girişi",
   "member.signInTitle": "Üye girişi",
   "member.signInTab": "Giriş yap",

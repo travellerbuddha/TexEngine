@@ -635,3 +635,15 @@ class TestPendingLinksAndErasure(WebMemberCase):
 		theirs = self.token()
 		self.erase(self.guest)
 		self.assertTrue(self.verify(theirs)["status"]["signed_in"])
+
+	def test_2o_a_signed_in_join_says_when_the_profiles_e_mail_cannot_take_a_link(self):
+		"""§6N2 "Not done" (batch 2O): a signed-in guest's join for a profile whose stored e-mail is not one plain ASCII
+		address (entered by staff) answered "sent" and sent nothing. The guest is signed in to that profile: telling
+		them so tells nobody else anything."""
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		frappe.db.set_value("Guest", self.guest, "email", "mia.müller@example.de")
+		sent = len(self.mails)
+		self.assertEqual(self.refused(public.member_join, site=SLUG, member_session=session, accepted=1),
+		                 "MEMBER_EMAIL_UNUSABLE")
+		self.assertEqual(len(self.mails), sent)

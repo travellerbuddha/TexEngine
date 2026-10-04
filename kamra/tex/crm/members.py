@@ -360,7 +360,10 @@ def join_signed_in(site, token: str | None, accepted, *, language: str = "en",
 	try:
 		email = _email(email)
 	except frappe.ValidationError:
-		return                                         # a profile whose e-mail is not one address: nothing to send to
+		# a profile whose stored e-mail is not one plain ASCII address (staff typed it): the guest, signed in to it, is
+		# told so (batch 2O; it answered "sent" and sent nothing). Their own profile's: nobody else learns anything
+		frappe.throw(_("A link cannot be sent to the e-mail address of your profile. Please contact the hotel."),
+		             refusal("MEMBER_EMAIL_UNUSABLE"))
 	_send_link(site, email, "join", {}, language, idempotency_key)
 
 

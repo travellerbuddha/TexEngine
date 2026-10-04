@@ -687,6 +687,7 @@
   "refusal.MEMBER_SESSION_ENDED": "You are signed out. Please sign in again to see your member prices.",
   "refusal.NOT_A_MEMBER": "There is no membership with this e-mail yet. You can join the program instead.",
   "refusal.MEMBERS_ONLY": "This member price is for members of the hotel's program only. Refresh the prices to see the price you can book.",
+  "refusal.MEMBER_EMAIL_UNUSABLE": "A link cannot be sent to the e-mail address of your profile. Please contact the hotel to correct it.",
   "member.signIn": "Member sign-in",
   "member.signInTitle": "Member sign-in",
   "member.signInTab": "Sign in",
