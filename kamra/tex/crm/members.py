@@ -95,21 +95,14 @@ def _name(raw, code: str) -> str:
 	return value
 
 
-# the profiles of an address in a site's enterprise (or of none), as ``booking._find_profile`` reads them: the database
-# compares accents and case away (utf8mb4_unicode_ci), so the exact address is chosen among them below
-PROFILES_OF = """SELECT g.name, g.email FROM `tabGuest` g WHERE g.email = %(email)s
-                 AND (IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)
-                 ORDER BY g.creation ASC, g.name ASC"""
-
-
 def _profile(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
-	"""The profile of this e-mail, the oldest of the site's enterprise (or of none), as a booking finds it
-	(``booking._find_profile``: the e-mail is the identity), but only one whose stored e-mail is this address, in any
-	case (review round 2 of 2O, S-1: the database compares accents away, so ana@muller.de found the profile of
-	ana@müller.de and its link signed the look-alike's owner in to it). ``lock``: locking reads."""
-	rows = frappe.db.sql(PROFILES_OF + (" FOR UPDATE" if lock else ""), {"email": email, "ent": enterprise or ""},
-	                     as_dict=True)
-	return next((r.name for r in rows if (r.email or "").strip().lower() == email), None)
+	"""The profile of this e-mail, as a booking finds it (``booking.profile_of_email``: the e-mail is the identity):
+	the oldest of the site's enterprise (or of none) whose stored e-mail is this address, in any case (review round 2
+	of 2O, S-1: the database compares accents away, so ana@muller.de found the profile of ana@müller.de and its link
+	signed the look-alike's owner in to it). ``lock``: locking reads."""
+	from kamra.tex.services import booking
+
+	return booking.profile_of_email(email, enterprise, lock=lock)
 
 
 def _cache():

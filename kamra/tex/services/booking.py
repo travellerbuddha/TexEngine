@@ -123,24 +123,39 @@ def consent_given(value) -> bool:
 	return isinstance(value, str) and value.strip().lower() in ("1", "true")
 
 
+TENANT = "(IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)"
+
+
+def profile_of_email(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
+	"""The oldest profile of the enterprise (or of none) whose stored e-mail is this address, in any case, and only
+	this address (owner, batch 2P: the same address is the same guest; ADR-080). The database compares accents and
+	case away (utf8mb4_unicode_ci), so it gives the candidates and the exact address is chosen among them here: a
+	booking for ana.muller@… never joins the profile of ana.müller@…. ``lock``: a locking read (of every candidate)."""
+	email = (email or "").strip().lower()
+	if not email:
+		return None
+	rows = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
+		f"""SELECT g.name, g.email FROM `tabGuest` g WHERE g.email = %(email)s AND {TENANT}
+		ORDER BY g.creation ASC, g.name ASC{" FOR UPDATE" if lock else ""}""", {"email": email, "ent": enterprise or ""},
+		as_dict=True)
+	return next((r.name for r in rows if (r.email or "").strip().lower() == email), None)
+
+
 def _find_profile(g: dict, enterprise: str | None, staff: bool, *, lock: bool = False) -> str | None:
-	"""The profile a booking joins (``resolve_guest``): the e-mail's, when one is given; the phone's only
-	for staff, for a booking without an e-mail or a profile without one, and only when exactly one
+	"""The profile a booking joins (``resolve_guest``): the e-mail's (``profile_of_email``), when one is given; the
+	phone's only for staff, for a booking without an e-mail or a profile without one, and only when exactly one
 	profile of the enterprise (or of none) has it. The e-mail is the identity when given: another e-mail
 	on a shared phone (a family, a colleague, a travel agent's number) is another person, never their
 	stays or history (ADR-056 review). ``lock``: a locking read (the profile found is locked)."""
 	tail = " FOR UPDATE" if lock else ""
-	tenant = "(IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)"
 	if g.get("email"):
-		found = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
-			f"""SELECT g.name FROM `tabGuest` g WHERE g.email = %(email)s AND {tenant}
-			ORDER BY g.creation ASC, g.name ASC LIMIT 1{tail}""", {"email": g["email"], "ent": enterprise or ""}, pluck=True)
+		found = profile_of_email(g["email"], enterprise, lock=lock)
 		if found:
-			return found[0]
+			return found
 	if g.get("phone") and staff:
 		no_email = "AND IFNULL(g.email, '') = ''" if g.get("email") else ""
 		found = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
-			f"""SELECT g.name FROM `tabGuest` g WHERE g.phone = %(phone)s AND {tenant} {no_email}
+			f"""SELECT g.name FROM `tabGuest` g WHERE g.phone = %(phone)s AND {TENANT} {no_email}
 			ORDER BY g.creation ASC, g.name ASC LIMIT 2{tail}""", {"phone": g["phone"], "ent": enterprise or ""},
 			pluck=True)
 		return found[0] if len(found) == 1 else None

@@ -1008,3 +1008,36 @@ class TestMandatoryExtrasInSearch(TexTestCase):
 		self.assertTrue(q["ok"], q)
 		self.assertEqual(D(q["quote"]["totals"]["total"]), D(room["quote"]["totals"]["total"]))
 		self.assertFalse(q["price_changed"])
+
+
+class TestBookingIdentity(TexTestCase):
+	"""Owner, 2026-10-04 (batch 2P): the same e-mail address is the same guest, in any case, and only the same address.
+	The database compares accents away (utf8mb4_unicode_ci), so a booking for ana.muller@… joined the profile of
+	ana.müller@… (staff typed it): its stays, points and the hotel's history of another person."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		ent = frappe.db.get_value("Property", fx.PROPERTY, "tex_enterprise")
+		self.accented = frappe.get_doc({"doctype": "Guest", "first_name": "Ana", "last_name": "Muller",
+		                                "tex_enterprise": ent}).insert(ignore_permissions=True).name
+		# as staff may have typed it, on a returning guest's profile (nothing for a booking to fill in on it)
+		frappe.db.set_value("Guest", self.accented, {"email": "ana.müller.2p@example.de", "tex_language": "en",
+		                                             "tex_country": "Germany",
+		                                             "tex_market": frappe.db.get_value("TEX Market", {}, "name")})
+
+	def booker(self, email: str, session: str) -> str:
+		b = guest_books(session=session, guest={**GUEST, "first_name": "Ana", "last_name": "Other", "email": email})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read back
+		return frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+
+	def test_2p_a_look_alike_address_is_another_guest(self):
+		other = self.booker("ana.muller.2p@example.de", "2p-id-1")
+		self.assertNotEqual(other, self.accented)
+		self.assertEqual(frappe.db.get_value("Guest", other, "email"), "ana.muller.2p@example.de")
+		self.assertFalse(frappe.db.exists("Reservation", {"guest": self.accented}))
+
+	def test_2p_the_same_address_in_another_case_is_the_same_guest(self):
+		frappe.db.set_value("Guest", self.accented, "email", "Ana.Muller.2P@Example.DE")    # staff typed it so
+		self.assertEqual(self.booker("ana.muller.2p@EXAMPLE.de", "2p-id-2"), self.accented)
