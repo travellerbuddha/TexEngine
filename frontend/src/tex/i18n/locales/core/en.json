@@ -130,6 +130,7 @@
  "core.login.otp_submit": "Verify",
  "core.login.back": "Back",
  "core.login.password_expired": "Your password has expired. Set a new one with \"Forgot password?\".",
+ "core.login.password_expired_mailed": "Your password has expired. A link to set a new one was sent to your e-mail address; only the latest link works.",
  "core.login.incomplete": "Signing in did not complete. Try the other sign-in options.",
  "core.login.session_ended": "Your session ended. Sign in to pick up where you left off.",
  "core.login.demo.title": "Demo accounts: one click to try each role",

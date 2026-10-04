@@ -130,6 +130,7 @@
  "core.login.otp_submit": "Bestätigen",
  "core.login.back": "Zurück",
  "core.login.password_expired": "Ihr Passwort ist abgelaufen. Legen Sie über „Passwort vergessen?“ ein neues fest.",
+ "core.login.password_expired_mailed": "Ihr Passwort ist abgelaufen. Ein Link zum Festlegen eines neuen Passworts wurde an Ihre E-Mail-Adresse gesendet; nur der zuletzt gesendete Link ist gültig.",
  "core.login.incomplete": "Die Anmeldung wurde nicht abgeschlossen. Versuchen Sie die anderen Anmeldeoptionen.",
  "core.login.session_ended": "Ihre Sitzung ist abgelaufen. Melden Sie sich an, um dort weiterzumachen, wo Sie aufgehört haben.",
  "core.login.demo.title": "Demo-Konten: jede Rolle mit einem Klick ausprobieren",
