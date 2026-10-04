@@ -138,6 +138,10 @@ export interface ExtraOutcome {
   /** why it was not added (ok=false); a limited extra says "sold out on yyyy-mm-dd",
    * "not enough left on yyyy-mm-dd" or "closed on yyyy-mm-dd" (G-19; guests never see a count) */
   reason?: string
+  /** the same refusal of a limited extra by code and day (batch 2Q): SOLD_OUT, NOT_ENOUGH or CLOSED; absent from a
+   * quote made before, and for any other reason */
+  reason_code?: string
+  reason_date?: string
   quantity: string
   amount: Money
   currency: string

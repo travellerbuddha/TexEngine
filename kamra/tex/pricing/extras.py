@@ -45,17 +45,24 @@ class ExtraOutcome:
 	revision: str | None = None       # the extra revision that priced it (G-20)
 	fx_rate: Decimal | None = None    # extra currency → sell currency, when converted
 	usage: tuple[tuple[str, int], ...] = ()   # (ISO day, units) it consumes of a limited capacity (G-19)
+	# a limited extra's refusal by code and day (``capacity_reason``; batch 2Q): SOLD_OUT, NOT_ENOUGH (never how
+	# many are left) or CLOSED; empty otherwise
+	reason_code: str = ""
+	reason_date: str = ""
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6, to_str_rate
 
-		return {"code": self.code, "name": self.name, "ok": self.ok, "reason": self.reason,
-		        "quantity": to_str6(self.quantity), "amount": to_str6(self.amount), "currency": self.currency,
-		        "tax_category": self.tax_category, "mandatory": self.mandatory,
-		        "pricing_mode": self.pricing_mode, "service_dates": list(self.service_dates),
-		        "rule_id": self.rule_id, "detail": self.detail, "revision": self.revision,
-		        "fx_rate": to_str_rate(self.fx_rate) if self.fx_rate is not None else None,
-		        "usage": [{"date": d, "units": u} for d, u in self.usage]}
+		out = {"code": self.code, "name": self.name, "ok": self.ok, "reason": self.reason,
+		       "quantity": to_str6(self.quantity), "amount": to_str6(self.amount), "currency": self.currency,
+		       "tax_category": self.tax_category, "mandatory": self.mandatory,
+		       "pricing_mode": self.pricing_mode, "service_dates": list(self.service_dates),
+		       "rule_id": self.rule_id, "detail": self.detail, "revision": self.revision,
+		       "fx_rate": to_str_rate(self.fx_rate) if self.fx_rate is not None else None,
+		       "usage": [{"date": d, "units": u} for d, u in self.usage]}
+		if self.reason_code:      # only when set: every other quote is as it always was (ADR-061)
+			out["reason_code"], out["reason_date"] = self.reason_code, self.reason_date
+		return out
 
 
 def _in(d: date, lo: date | None, hi: date | None) -> bool:
@@ -163,17 +170,26 @@ def usage(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext) -> tuple[tuple[d
 	return tuple((d, u) for d, u in sorted(per_day.items()) if u > 0)
 
 
-def capacity_refusal(use: tuple[tuple[date, int], ...], days: dict[date, ExtraDayAvailability]) -> str | None:
-	"""Why a limited extra cannot be sold for these days, or None (G-19)."""
+def capacity_reason(use: tuple[tuple[date, int], ...],
+                    days: dict[date, ExtraDayAvailability]) -> tuple[str, str, str] | None:
+	"""Why a limited extra cannot be sold for these days, or None (G-19): its code (SOLD_OUT, NOT_ENOUGH, CLOSED;
+	never how many are left), the day (ISO) and the text staff read (with the count). Batch 2Q: the code and day."""
 	for d, units in use:
 		a = days.get(d)
+		day = d.isoformat()
 		if a is None or a.remaining <= 0:
-			return f"sold out on {d.isoformat()}" if not (a and a.closed) else f"closed on {d.isoformat()}"
+			return ("SOLD_OUT", day, f"sold out on {day}") if not (a and a.closed) else ("CLOSED", day, f"closed on {day}")
 		if a.closed:
-			return f"closed on {d.isoformat()}"
+			return "CLOSED", day, f"closed on {day}"
 		if units > a.remaining:
-			return f"only {a.remaining} left on {d.isoformat()}"
+			return "NOT_ENOUGH", day, f"only {a.remaining} left on {day}"
 	return None
+
+
+def capacity_refusal(use: tuple[tuple[date, int], ...], days: dict[date, ExtraDayAvailability]) -> str | None:
+	"""Why a limited extra cannot be sold for these days, as text, or None (G-19; ``capacity_reason``)."""
+	why = capacity_reason(use, days)
+	return why[2] if why else None
 
 
 _ONLY_LEFT = re.compile(r"\bonly \d+ left on\b")

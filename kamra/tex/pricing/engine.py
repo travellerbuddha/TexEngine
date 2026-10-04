@@ -568,9 +568,11 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 				use = extras.usage(d, requested[code], ex_ctx)
 				outcome = replace(outcome, usage=tuple((day.isoformat(), u) for day, u in use))
 				days = (ctx.extra_availability or {}).get(code)
-				refusal = extras.capacity_refusal(use, days) if days is not None else None
+				why = extras.capacity_reason(use, days) if days is not None else None
+				refusal = why[2] if why else None
 				if refusal:
-					outcome = replace(outcome, ok=False, reason=refusal, amount=ZERO)
+					outcome = replace(outcome, ok=False, reason=refusal, amount=ZERO, reason_code=why[0],
+					                  reason_date=why[1])
 					ex.add("extra", "EXTRA_SOLD_OUT", "{name} not added: {reason}", name=d.name, reason=refusal,
 					       rule=RuleRef("extra", d.code, Level.HOTEL, f"extra:{d.revision}" if d.revision else "",
 					                    d.name))

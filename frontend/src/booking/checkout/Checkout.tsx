@@ -256,7 +256,7 @@ function ExtraItem({ extra, roomIndex, days }: { extra: SiteExtra; roomIndex: nu
         {rejected && (
           <p className="mt-2 flex items-start gap-1.5 text-sm font-medium text-ink">
             <AlertTriangle className="mt-0.5 size-4 flex-none text-warn" aria-hidden />
-            {refusalText(i18n, rejected.reason)}
+            {refusalText(i18n, rejected.reason, rejected)}
           </p>
         )}
         <div className="mt-2">{control}</div>

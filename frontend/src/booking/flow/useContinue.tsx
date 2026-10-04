@@ -295,7 +295,7 @@ export function RejectedExtrasNotice() {
         {list.map((r) => (
           <li key={`${r.room}|${r.code}`} className="break-words">
             {multi ? `${t("guests.room", { n: r.room + 1 })}: ` : ""}
-            <span className="font-medium text-ink">{r.name}</span> — {refusalText(i18n, r.reason)}
+            <span className="font-medium text-ink">{r.name}</span> — {refusalText(i18n, r.reason, r)}
           </li>
         ))}
       </ul>

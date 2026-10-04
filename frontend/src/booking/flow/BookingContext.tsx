@@ -61,6 +61,9 @@ export interface RejectedExtra {
   name: string
   /** the server's reason, e.g. "sold out on 2027-06-10" (see lib/extras refusalText) */
   reason: string
+  /** the same by code and day, when the quote has them (batch 2Q) */
+  reasonCode?: string
+  reasonDate?: string
 }
 
 export interface QuoteOutcome {
@@ -225,7 +228,7 @@ function findRejected(quotes: (QuoteResponse | null)[], extras: FlowState["extra
     for (const e of q?.ok ? q.quote?.extras ?? [] : []) {
       const code = codes.get((e.code ?? "").toUpperCase())
       if (e.ok || !code || out.some((r) => r.room === room && r.code === code)) continue
-      out.push({ room, code, name: e.name || code, reason: e.reason ?? "" })
+      out.push({ room, code, name: e.name || code, reason: e.reason ?? "", reasonCode: e.reason_code, reasonDate: e.reason_date })
     }
   })
   return out

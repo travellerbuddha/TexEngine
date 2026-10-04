@@ -3,7 +3,7 @@
 // (never how many); these helpers work out what that means for one extra of this stay,
 // and turn the quote's English refusal reasons into the guest's language.
 import type { I18n } from "../i18n"
-import { addDays, isoDay, nightsBetween } from "./dates"
+import { addDays, isoDay, nightsBetween } from "./dates.ts"
 
 export interface DayAvailability {
   available: boolean
@@ -82,7 +82,19 @@ const SOLD_OUT_ON = /^sold out on (\d{4}-\d{2}-\d{2})$/i
 const NOT_ENOUGH_ON = /^(?:not enough|only \d+) left on (\d{4}-\d{2}-\d{2})$/i
 const CLOSED_ON = /^closed on (\d{4}-\d{2}-\d{2})$/i
 
-export function parseRefusal(reason: string | null | undefined): Refusal {
+/** A limited extra's refusal by code and day, as a quote gives it (``reason_code``, ``reason_date``; batch 2Q). */
+export interface CodedRefusal {
+  reasonCode?: string | null
+  reasonDate?: string | null
+}
+
+const CODED: Record<string, "sold_out" | "few_left" | "closed"> = { SOLD_OUT: "sold_out", NOT_ENOUGH: "few_left", CLOSED: "closed" }
+
+/** Why an extra was not added: by the quote's code and day when it has them, else read from its text (a quote made
+ * before the codes, an extra added after booking). */
+export function parseRefusal(reason: string | null | undefined, coded?: CodedRefusal): Refusal {
+  const kind = coded?.reasonCode ? CODED[coded.reasonCode] : undefined
+  if (kind && coded?.reasonDate) return { kind, date: coded.reasonDate }
   const r = (reason ?? "").trim()
   let m = SOLD_OUT_ON.exec(r)
   if (m) return { kind: "sold_out", date: m[1] }
@@ -94,8 +106,8 @@ export function parseRefusal(reason: string | null | undefined): Refusal {
 }
 
 /** Why the quote did not add an extra, in the guest's words (never the remaining count). */
-export function refusalText(i18n: Pick<I18n, "t" | "day">, reason: string | null | undefined): string {
-  const r = parseRefusal(reason)
+export function refusalText(i18n: Pick<I18n, "t" | "day">, reason: string | null | undefined, coded?: CodedRefusal): string {
+  const r = parseRefusal(reason, coded)
   if (r.kind === "sold_out") return i18n.t("extras.reasonSoldOut", { date: i18n.day(r.date) })
   if (r.kind === "few_left") return i18n.t("extras.reasonFewLeft", { date: i18n.day(r.date) })
   if (r.kind === "closed") return i18n.t("extras.reasonClosed", { date: i18n.day(r.date) })
