@@ -1345,8 +1345,11 @@ CRM_SPECS = [
 		  description="The hotel the membership was made at (for a member by their stays who left: where it ended)"),
 		F("left_at", "Datetime", "Left at"),
 		F("left_reason", "Small Text", "Why the membership ended"),
+		# C-04h (owner, 2026-10-04): staff who end a membership may block a rejoin on the web; only staff lift it
+		F("rejoin_blocked", "Check", "May not rejoin online", default="0",
+		  description="Set by staff who ended the membership: a join on the web does not make it active again"),
 	], perms=READONLY_AUDIT, autoname="hash", naming_rule="Random", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-10-03 23:00:00.000000"}),
+	   extra={"modified": "2026-10-04 12:00:00.000000"}),
 
 	# C-04 on the web (ADR-078): a guest signed in on a booking site by a one-time e-mail link, for 30 days on
 	# that device; only the session token's hash is stored

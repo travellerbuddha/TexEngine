@@ -13,6 +13,8 @@ A guest signs in on a booking site, or joins its hotels' loyalty program, by a o
   name given when there is none: the link proves the e-mail is theirs, so nobody is joined with another's e-mail.
 * ``join_signed_in``: a signed-in guest who is no member asks to join with a tick: a join link goes to their own
   e-mail, as every web join is confirmed (the owner's choice), so a script that holds a session joins nobody.
+* A membership staff ended with a rejoin blocked (C-04h, owner 2026-10-04) is never made active on the web: a join
+  asked for it gets a mail that says to ask the hotel, with no link; staff joining the guest lift the block.
 
 A link's token lives only in the mail (in the URL fragment, which browsers never send to a server) and in the cache,
 by its hash, with what opening it needs (the e-mail, the name to join with) until it is used or expires. A session's
@@ -146,6 +148,11 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	if purpose == "sign_in" and not profile:
 		notify.member_mail(site, email, "member_none", language=language)
 		return
+	if purpose == "join" and profile and _rejoin_blocked(site, profile):
+		# staff blocked a rejoin wherever the guest could join here (C-04h): no link; the mail, which only the
+		# address's owner reads, says to ask the hotel. The site's answer is the same as ever
+		notify.member_mail(site, email, "member_blocked", guest=profile, language=language)
+		return
 	token = secrets.token_urlsafe(32)
 	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once)
 	_cache().set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
@@ -154,6 +161,13 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	# greeted by the profile's own name, or by none: never by what a visitor typed for an address they may not own
 	notify.member_mail(site, email, "member_join" if purpose == "join" else "member_sign_in", token=token,
 	                   guest=profile, language=language)
+
+
+def _rejoin_blocked(site, guest: str) -> bool:
+	"""Every program of the site the guest is no member of is one staff blocked a rejoin of (C-04h): a join link
+	would join nothing. Opening a link checks again, under the profile's lock (``loyalty.join_web``)."""
+	open_ = [p for p in site_programs(site) if not loyalty.member_of(guest, p)]
+	return bool(open_) and all(loyalty.rejoin_blocked(guest, p) for p in open_)
 
 
 def _link_key(token: str) -> str:

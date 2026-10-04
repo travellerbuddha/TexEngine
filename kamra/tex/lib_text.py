@@ -174,6 +174,35 @@ T["member_none"] = {
 	       "prosiłeś, zignoruj tę wiadomość."),
 }
 
+# C-04h (owner, 2026-10-04): a join asked for an address whose membership staff ended with a rejoin blocked. Only the
+# address's owner reads it; it carries no link (joining online is not possible for them)
+T["member_blocked"] = {
+	"en": ("About joining {program} at {hotel}",
+	       "Hello,<br><br>someone asked to join {program} at {hotel} with this e-mail. This membership cannot be renewed "
+	       "online: please contact the hotel if you would like to become a member again. If you did not ask for it, you "
+	       "can ignore this e-mail."),
+	"tr": ("{hotel} {program} üyeliği hakkında",
+	       "Merhaba,<br><br>bu e-posta adresiyle {hotel} {program} programına katılmak istendi. Bu üyelik çevrimiçi "
+	       "yenilenemez: yeniden üye olmak isterseniz lütfen otelle iletişime geçin. Bu isteği siz yapmadıysanız bu "
+	       "e-postayı dikkate almayın."),
+	"de": ("Zum Beitritt zu {program} im {hotel}",
+	       "Guten Tag,<br><br>jemand wollte mit dieser E-Mail {program} im {hotel} beitreten. Diese Mitgliedschaft kann "
+	       "nicht online erneuert werden: Bitte wenden Sie sich an das Hotel, wenn Sie wieder Mitglied werden möchten. "
+	       "Wenn Sie das nicht angefordert haben, können Sie diese E-Mail ignorieren."),
+	"ru": ("Об участии в {program} отеля {hotel}",
+	       "Здравствуйте!<br><br>С этим адресом пытались вступить в {program} отеля {hotel}. Это участие нельзя "
+	       "возобновить онлайн: если вы хотите снова стать участником, пожалуйста, свяжитесь с отелем. Если вы этого не "
+	       "запрашивали, просто проигнорируйте письмо."),
+	"ro": ("Despre înscrierea în {program} de la {hotel}",
+	       "Bună ziua,<br><br>cineva a cerut înscrierea în {program} de la {hotel} cu acest e-mail. Această calitate de "
+	       "membru nu poate fi reînnoită online: vă rugăm să contactați hotelul dacă doriți să deveniți din nou membru. "
+	       "Dacă nu ați cerut acest lucru, puteți ignora e-mailul."),
+	"pl": ("W sprawie dołączenia do {program} w {hotel}",
+	       "Dzień dobry,<br><br>ktoś chciał dołączyć do {program} w {hotel} tym adresem e-mail. Tego członkostwa nie "
+	       "można odnowić online: jeśli chcesz ponownie zostać członkiem, skontaktuj się z hotelem. Jeśli o to nie "
+	       "prosiłeś, zignoruj tę wiadomość."),
+}
+
 LINK_LABEL = {
 	"booking_confirmed": {"en": "View or change your booking", "tr": "Rezervasyonunuzu görüntüleyin veya değiştirin",
 	                      "de": "Buchung ansehen oder ändern", "ru": "Посмотреть или изменить бронирование",
@@ -223,7 +252,9 @@ MEMBER_FOOTER = {
 	"ro": "Păstrați acest e-mail privat: linkul vă conectează.",
 	"pl": "Nie udostępniaj tej wiadomości: link loguje Cię na Twoje konto.",
 }
-FOOTERS = {"member_sign_in": MEMBER_FOOTER, "member_join": MEMBER_FOOTER, "member_none": {}}
+FOOTERS = {"member_sign_in": MEMBER_FOOTER, "member_join": MEMBER_FOOTER, "member_none": {}, "member_blocked": {}}
+# member mails that carry no link at all (C-04h)
+NO_LINK = frozenset({"member_blocked"})
 
 
 def render(key: str, lang: str, *, link: str = "", **values: str) -> tuple[str, str]:

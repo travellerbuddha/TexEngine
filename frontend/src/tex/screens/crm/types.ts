@@ -191,6 +191,8 @@ export interface LoyaltyMembership {
   other_hotel: boolean
   joined_at: string | null
   left_at: string | null
+  /** staff ended it and blocked a rejoin on the web (C-04h): only staff joining the guest lift it */
+  rejoin_blocked?: boolean
 }
 
 /** kamra.tex.api.ui_backoffice_crm_payments.loyalty_programs */

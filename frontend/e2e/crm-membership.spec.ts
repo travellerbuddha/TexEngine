@@ -243,6 +243,36 @@ test("a member joined in CRM gets the member price in the Call Center; the membe
       await expect(row).toContainText("Left")
       await expect(row.getByRole("button", { name: "Join program" })).toBeVisible()
     })
+
+    await test.step("CRM: joined again, then ended with a rejoin on the web blocked (C-04h)", async () => {
+      await row.getByRole("button", { name: "Join program" }).click()
+      const join = agent.getByRole("dialog")
+      await expect(join).toContainText("only with their agreement")
+      await expect(join).not.toContainText("lifts that block")              // ended without the block
+      await Promise.all([
+        agent.waitForResponse((r) => r.url().includes("kamra.tex.api.crm.loyalty_join") && r.ok()),
+        join.getByRole("button", { name: "Join program" }).click(),
+      ])
+      await expect(join).toBeHidden()
+      await row.getByRole("button", { name: "End membership" }).click()
+      const end = agent.getByRole("dialog")
+      await byLabel(end, "Reason").fill("Abused member prices (E2E)")
+      const block = end.getByRole("checkbox", { name: "Do not let them rejoin online" })
+      await expect(block).not.toBeChecked()
+      await block.check()
+      const [left] = await Promise.all([
+        agent.waitForResponse((r) => r.url().includes("kamra.tex.api.crm.loyalty_leave") && r.ok()),
+        end.getByRole("button", { name: "End membership" }).click(),
+      ])
+      expect(left.request().postData() ?? "").toMatch(/block_rejoin\W+1/)
+      await expect(end).toBeHidden()
+      await expect(row).toContainText("may not rejoin online")
+      await row.getByRole("button", { name: "Join program" }).click()
+      const again = agent.getByRole("dialog")
+      await expect(again).toContainText("Joining them here lifts that block")
+      await again.getByRole("button", { name: "Cancel" }).click()
+      await expect(again).toBeHidden()
+    })
     noErrors()
   } finally {
     await pageApi(agent, "kamra.tex.api.crs.cancel", { reservation, reason: "E2E clean-up (membership)" })

@@ -132,9 +132,10 @@ def loyalty_join(guest: str, program: str, property: str | None = None):
 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
-def loyalty_leave(guest: str, program: str, reason: str, property: str | None = None):
+def loyalty_leave(guest: str, program: str, reason: str, property: str | None = None, block_rejoin=0):
 	_guests_program(guest, program)
-	return loyalty.leave(guest, program, reason=text(reason, 500) or "", property=text(property, 140) or None)
+	return loyalty.leave(guest, program, reason=text(reason, 500) or "", property=text(property, 140) or None,
+	                     block_rejoin=bool(as_int(block_rejoin, 0, lo=0, hi=1)))
 
 
 @frappe.whitelist(methods=["POST"])

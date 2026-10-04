@@ -511,3 +511,97 @@ class TestReviewRound2(WebMemberCase):
 		for raw in ("x@mail.exämple.de", "anna@mail.exámple.de", "ſam@example.com", "x@gmail.cöm"):
 			self.assertEqual(self.refused(public.member_link, site=SLUG, email=raw), "GUEST_EMAIL_INVALID", repr(raw))
 		self.assertEqual(self.mails, [])
+
+
+class TestRejoinBlocked(WebMemberCase):
+	"""C-04h (owner, 2026-10-04; HANDOFF §2 6b, option b): staff who end a membership may block a rejoin on the web
+	(a reason such as abuse). A web join then never makes it active again: the site answers as it answers anyone, and
+	the mail, which only the address's owner reads, says to ask the hotel, with no link. Staff joining the guest lift
+	it; a membership ended without the block is rejoined on the web as before (``test_r1_n19_…_rejoins_on_the_web``)."""
+
+	def leave(self, *, block: bool, guest: str | None = None) -> dict:
+		from kamra.tex.api import crm as crm_api
+
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff end the membership
+		try:
+			return crm_api.loyalty_leave(guest=guest or self.guest, program=self.club, reason="Abused member prices",
+			                             block_rejoin=int(block))
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+	def audited(self, action: str, name: str) -> dict:
+		import json
+
+		raw = frappe.get_all("TEX Audit Event", filters={"action": action, "reference_name": name},
+		                     pluck="new_value", order_by="creation desc", limit=1)
+		return json.loads(raw[0]) if raw else {}
+
+	def test_c04h_a_blocked_member_cannot_rejoin_on_the_web(self):
+		self.join(self.guest)
+		name = self.leave(block=True)["name"]
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Left", 1))
+		self.assertTrue(self.audited("loyalty.member_leave", name).get("rejoin_blocked"))
+		# a visitor's join: the same answer as anyone's; the mail says to ask the hotel and carries no link
+		self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1), {"ok": True})
+		to, _subject, html = self.mails[-1]
+		self.assertEqual(to, self.email)
+		self.assertIsNone(self.token())
+		self.assertNotIn("/member", html)
+		self.assertIn("contact the hotel", html)
+		self.assertEqual(loyalty.membership(self.guest, self.club).status, "Left")
+		# a signed-in guest's join is answered the same way
+		self.ask(self.email)
+		session = self.verify(self.token())["session"]
+		self.assertEqual(self.as_guest(public.member_join, site=SLUG, member_session=session, accepted=1), {"ok": True})
+		self.assertIsNone(self.token())
+		self.assertIn("contact the hotel", self.mails[-1][2])
+		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
+
+	def test_c04h_a_join_link_asked_before_the_block_rejoins_nobody(self):
+		self.join(self.guest)
+		self.leave(block=False)                                                # the guest asked to leave
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		token = self.token()
+		self.assertIsNotNone(token)                                            # not blocked yet: a link
+		self.leave(block=True)                                                 # staff block before it is opened
+		signed = self.verify(token)
+		self.assertFalse(signed["status"]["member"])
+		m = loyalty.membership(self.guest, self.club)
+		self.assertEqual((m.status, m.rejoin_blocked), ("Left", 1))
+
+	def test_c04h_staff_who_join_the_guest_lift_the_block(self):
+		self.join(self.guest)
+		name = self.leave(block=True)["name"]
+		self.join(self.guest)
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Active", 0))
+		self.assertTrue(self.audited("loyalty.member_join", name).get("unblocked"))
+		self.leave(block=False)
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		self.assertTrue(self.verify(self.token())["status"]["member"])
+
+	def test_c04h_staff_see_the_block(self):
+		from kamra.tex.api import crm as crm_api
+
+		self.join(self.guest)
+		self.leave(block=True)
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- the hotel's staff read the profile
+		try:
+			accounts = crm_api.loyalty_summary(self.guest)
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		m = next(a for a in accounts if a["program"] == self.club)["membership"]
+		self.assertEqual((m["status"], m["rejoin_blocked"]), ("Left", True))
+
+	def test_c04h_a_merge_keeps_the_block_of_the_last_word(self):
+		from kamra.tex.api import crm as crm_api
+
+		kept, dup = self.guest, self.profile("blocked-dup")
+		mine = self.join(kept)["name"]
+		self.join(dup)
+		theirs = self.leave(block=True, guest=dup)["name"]
+		frappe.db.set_value("TEX Loyalty Member", mine, "modified", "2026-01-01 10:00:00", update_modified=False)
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff merge the duplicate
+		crm_api.merge_guests(source=dup, target=kept)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertFalse(frappe.db.exists("TEX Loyalty Member", theirs))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", mine, ["status", "rejoin_blocked"]), ("Left", 1))
