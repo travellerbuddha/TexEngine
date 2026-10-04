@@ -175,6 +175,10 @@ class Localizer:
 	def room_type_name(self, property: str, room_type: str, default):
 		return self.text(property, "Room Type", room_type, "room_type_name", default)
 
+	def extra_name(self, property: str, code: str | None, default):
+		"""An extra's name by its code (the one on sale now, else the newest), as the guest reads it."""
+		return self.text(property, "TEX Extra", _extra_name(property, code), "extra_name", default)
+
 
 def _extra_name(property: str, code: str | None) -> str | None:
 	"""The extra's root record: translations belong to the extra, not to one revision (G-20).

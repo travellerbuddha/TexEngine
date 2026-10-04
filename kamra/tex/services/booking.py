@@ -820,7 +820,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 			if d.available < need[(pool, d.day)]:
 				room = frappe.db.get_value("Room Type", req["room_type"], "room_type_name") or req["room_type"]
 				frappe.throw(_("Sorry — {0} has just sold out for {1}.").format(room, d.day.isoformat()),
-				             refusal("SOLD_OUT", room=room, date=d.day.isoformat()), title=_("Sold out"))
+				             refusal("SOLD_OUT", room=room, date=d.day.isoformat(),
+				                     names={"room": ("Room Type", property, req["room_type"])}), title=_("Sold out"))
 	cells = avail.restriction_cells(property, min(getdate(r[1]["check_in"]) for r in rows),
 	                                max(getdate(r[1]["check_out"]) for r in rows))
 	for _row, req, result in rows:

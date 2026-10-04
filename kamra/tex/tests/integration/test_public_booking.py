@@ -424,6 +424,37 @@ class TestContentTranslation(TexTestCase):
 		self.assertEqual(content.nights_label(2, "ru"), "2 ночи")
 		self.assertEqual(content.nights_label(5, "pl"), "5 nocy")
 
+	def test_2q_a_sold_out_room_is_named_in_the_guests_language(self):
+		"""Batch 2Q (§6G3): the room a booking found sold out was named in its refusal's params by the hotel's own text,
+		while every other answer to the guest names it in their language (G-70b put the name there for the booking
+		app to show)."""
+		import dataclasses
+
+		from kamra.tex.api import content as content_api
+		from kamra.tex.services import booking as booking_svc
+
+		std = self.f["room_types"]["STD"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- hotel content editor
+		content_api.save(fx.PROPERTY, [{"ref_doctype": "Room Type", "ref_name": std, "field": "room_type_name",
+		                                "language": "de", "text": "Standardzimmer"}])
+		frappe.local.lang = "de"
+		prop = _search([{"adults": 2, "children": []}], session="2q-sold-de")
+		offer = next(o for o in prop["offers"] if o["room_type"] == std and o["board"] == "AI"
+		             and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id="2q-sold-de")["quote_id"]
+		real = booking_svc.avail.stay_availability
+
+		def none_left(*args, **kwargs):
+			_count, days = real(*args, **kwargs)
+			return 0, [dataclasses.replace(d, available=0) for d in days]
+
+		with mock.patch.object(booking_svc.avail, "stay_availability", side_effect=none_left), \
+				self.assertRaises(frappe.ValidationError):
+			public.book(site=SLUG, quote_ids=[q], guest=GUEST, payment_method="Pay at Hotel", session_id="2q-sold-de",
+			            idempotency_key="2q-sold-de")
+		self.assertEqual(frappe.local.response["tex_code"], "SOLD_OUT")
+		self.assertEqual(frappe.local.response["tex_params"], {"room": "Standardzimmer", "date": str(fx.d(6, 10))})
+
 	def test_translations_are_bound_to_the_hotel(self):
 		from kamra.tex.api import content as content_api
 
