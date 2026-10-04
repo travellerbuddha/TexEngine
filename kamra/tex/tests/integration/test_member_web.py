@@ -632,6 +632,21 @@ class TestRejoinBlocked(WebMemberCase):
 			fn = getattr(fn, "__wrapped__", None)
 		self.assertIsNotNone(fn, "loyalty_block_rejoin runs again on a deadlock")
 
+	def test_2q_r2_no_blocked_mail_reaches_an_erased_profiles_address(self):
+		"""Review round 2 (NIT-2): a request whose read view predates an erasure found the blocked profile as it was and
+		mailed the erased address (no link in it), recorded as a communication of the erased profile. It reads the
+		profile again as committed first."""
+		from kamra.api import anonymize_guest
+
+		self.join(self.guest)
+		self.leave(block=True)
+		anonymize_guest(self.guest)
+		before = len(self.mails)
+		with mock.patch.object(members, "_profile", return_value=self.guest):   # its read view: the profile as it was
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		self.assertEqual(self.mails[before:], [])
+
 	def test_2q_the_blocked_mail_names_only_the_programs_blocked(self):
 		"""Batch 2Q (§6O, 2O review round 1 NIT 6): the mail named every program of a multi-program site, also one the
 		guest is still a member of: "you cannot rejoin Sister Club" for a club they are in. It names the programs the
@@ -782,6 +797,28 @@ class TestPendingLinksAndErasure(WebMemberCase):
 			                 {"ok": True})
 		self.assertEqual(self.mails[before:], [])
 		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
+
+	def test_2q_r2_a_link_for_a_profile_erased_since_it_was_mailed_joins_nobody(self):
+		"""Review round 2 (LOW-1): a join link opened while its profile was being erased (after the erasure's lock,
+		before its drop of the address's links) waited for the erasure, found no profile with the address and made a new
+		one from the name typed before; a link put back just after the drop did the same. A link names the profile it
+		was mailed for: opened when that one is gone, erased or no longer the address's, it is refused."""
+		from kamra.api import anonymize_guest
+
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		token = self.token()
+		with mock.patch.object(members, "drop_links", return_value=0):     # the link outlives the erasure's drops
+			anonymize_guest(self.guest)
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
+
+	def test_2q_r2_a_link_put_back_after_a_rollback_logs_a_failure_that_lasts(self):
+		"""Review round 2 (NIT-1): the put-back runs inside the rollback, whose transaction is never committed after it
+		in a web request: a log inserted there is lost. It is deferred (Frappe's own error snapshots are)."""
+		with mock.patch.object(members, "_put_back", side_effect=RuntimeError("redis down")), \
+				mock.patch.object(frappe, "log_error") as logged:
+			members._put_back_quietly("tok", {"email": self.email})
+		self.assertTrue(logged.call_args.kwargs.get("defer_insert"))
 
 	def test_2q_a_link_opened_by_a_request_that_then_fails_can_be_opened_again(self):
 		"""Batch 2Q (§6N2): a link is taken when it is opened; a request that failed after opening it (its answer, its

@@ -156,6 +156,8 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 		notify.member_mail(site, email, "member_none", language=language)
 		return
 	blocked = _rejoin_blocked(site, profile) if purpose == "join" and profile else []
+	if blocked and not _still_theirs(profile, email):
+		return                                         # erased meanwhile: nothing goes to its address (review round 2)
 	if blocked:
 		# staff blocked a rejoin wherever the guest could join here (C-04h): no link; the mail, which only the
 		# address's owner reads, says to ask the hotel, naming the programs blocked (never one the guest is still a
@@ -169,7 +171,7 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	pending = _pending_key(email)
 	pipe = _cache().pipeline(transaction=True)
 	pipe.set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
-		"site": site.name, "purpose": purpose, "email": email, "language": language,
+		"site": site.name, "purpose": purpose, "email": email, "language": language, "profile": profile,
 		"expires_at": str(add_to_date(now_datetime(), minutes=LINK_MINUTES)), **names}), ex=LINK_MINUTES * 60)
 	pipe.sadd(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 	pipe.expire(pending, LINK_MINUTES * 60)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
@@ -295,7 +297,7 @@ def _put_back_quietly(token: str, data: dict) -> None:
 	except Exception:
 		from kamra.tex.security.audit import log_exception
 
-		log_exception("TEX member link put back")
+		log_exception("TEX member link put back", defer=True)
 
 
 @retry_on_deadlock
@@ -304,6 +306,11 @@ def _open(site, data: dict) -> dict:
 
 	enterprise = site_enterprise(site)
 	profile = _profile(data["email"], enterprise, lock=True)
+	if data.get("profile") and profile != data["profile"]:
+		# the profile the link was mailed for is gone, erased or no longer this address's (a link opened while it was
+		# erased, or put back after the erasure's drop): never one made again from the name typed before (review round 2)
+		frappe.throw(_("This link is not valid or has expired. Please ask for a new one."),
+		             refusal("MEMBER_LINK_INVALID"))
 	if not profile:
 		# a sign-in link, or a signed-in guest's join link whose profile is gone since: no profile to make
 		if data["purpose"] != "join" or not data.get("first_name") or not data.get("last_name"):
