@@ -1109,3 +1109,11 @@ class TestBookingIdentity(TexTestCase):
 		joined it."""
 		frappe.db.set_value("Guest", self.accented, "email", "\u212aate.2p@example.com")
 		self.assertNotEqual(self.booker("kate.2p@example.com", "2p-r2-kelvin"), self.accented)
+
+	def test_2p_the_demo_guests_have_plain_addresses(self):
+		"""CI (batch 2P): the demo seed booked Emre Yılmaz as emre.yılmaz@example.com (a dotless ı, which Frappe's
+		field takes), and a booking now refuses an address that is not one plain address: the seed failed."""
+		from kamra.tex.devtools import demo_seed
+		from kamra.tex.services import booking
+
+		self.assertEqual([g[3] for g in demo_seed.DEMO_GUESTS if booking.plain_email(g[3]) != g[3]], [])

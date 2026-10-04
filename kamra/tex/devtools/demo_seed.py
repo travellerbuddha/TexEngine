@@ -300,17 +300,24 @@ def _content() -> None:
 	content.save(hotel, rows)
 
 
+# the demo bookings' guests: (first name, last name, market, e-mail). Each address is one plain ASCII address, as a
+# booking requires (``booking.plain_email``, batch 2P): Yılmaz's dotless ı stays in the name, never in the address
+DEMO_GUESTS = (
+	("Anna", "Schmidt", "DE", "anna.schmidt@example.com"), ("Emre", "Yılmaz", "TR", "emre.yilmaz@example.com"),
+	("Olga", "Ivanova", "RU", "olga.ivanova@example.com"), ("Andrei", "Popescu", "RO", "andrei.popescu@example.com"),
+	("Marta", "Nowak", "PL", "marta.nowak@example.com"), ("James", "Walker", "GLOBAL", "james.walker@example.com"),
+)
+
+
 def _demo_bookings(n: int) -> int:
 	from kamra.tex.services import booking, quoting
 
 	if frappe.db.count("TEX Booking", {"booking_site": SITE}) >= n:
 		return 0
-	guests = [("Anna", "Schmidt", "DE"), ("Emre", "Yılmaz", "TR"), ("Olga", "Ivanova", "RU"),
-	          ("Andrei", "Popescu", "RO"), ("Marta", "Nowak", "PL"), ("James", "Walker", "GLOBAL")]
 	made = 0
 	today = getdate(nowdate())
 	for i in range(n):
-		first, last, market = guests[i % len(guests)]
+		first, last, market, email = DEMO_GUESTS[i % len(DEMO_GUESTS)]
 		hotel = list(HOTELS)[i % 2]
 		ci = add_days(today, 20 + i * 9)
 		co = add_days(ci, 3 + i % 4)
@@ -324,7 +331,7 @@ def _demo_bookings(n: int) -> int:
 		if not q.get("ok"):
 			continue
 		b = booking.create_booking(quote_ids=[q["quote_id"]], guest={
-			"first_name": first, "last_name": last, "email": f"{first.lower()}.{last.lower()}@example.com",
+			"first_name": first, "last_name": last, "email": email,
 			"country": None}, payment_method="Pay at Hotel", idempotency_key=f"demo-{i}", booking_site=SITE,
 			source_tag="demo")
 		if b.get("status") != "Confirmed":
