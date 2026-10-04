@@ -350,7 +350,7 @@ def require_session(site, token: str | None) -> str:
 
 def member_hotels(site, guest: str | None) -> set[str]:
 	"""The site's hotels whose program the guest is a member of."""
-	return {p for p in site_properties(site) if loyalty.is_member(guest, p)} if guest else set()
+	return loyalty.member_hotels(guest, site_properties(site))
 
 
 def teaser_hotels(site, props: list[str]) -> set[str]:

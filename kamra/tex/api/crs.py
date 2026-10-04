@@ -59,7 +59,7 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 		from kamra.tex.crm import service as crm
 
 		seen = crm.require_guest(caller)                   # the agent sees this profile (and through which hotels)
-		members_at = {p for p in props if p in seen and loyalty.is_member(caller, p)}
+		members_at = loyalty.member_hotels(caller, [p for p in props if p in seen])
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=market,
 	                     channel=channel, currency=currency, promo_codes=parse(promo_codes, []) or (),
 	                     member=members_at, internal=True)
