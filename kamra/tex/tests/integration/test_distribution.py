@@ -110,6 +110,30 @@ class TestAri(DistributionCase):
 		self.assertEqual(len(self.jobs()), 1)
 		self.assertFalse(dist.build_days(self.mapping, a, a)[0].closed)
 
+	def test_2o_a_mapping_of_a_disabled_room_type_is_not_saved_enabled(self):
+		"""§6K3 "Not done" (batch 2O): a mapping of a room type TEX no longer sells could be saved enabled (it then sends
+		every day closed). Making one enabled is refused; one enabled before its type was disabled stays editable (it
+		keeps sending the close-out, LO-03), and disabling one is always allowed."""
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		try:
+			new = {"connection": self.conn.name, "room_type": self.std, "external_room_code": "2O-DBL",
+			       "external_rate_code": "2O-BAR", "board": "AI", "market": "DE", "sales_channel": "OTA",
+			       "sell_currency": "EUR", "rate_plan": self.flex}
+			with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):
+				dist_api.save_mapping(new)
+			self.assertTrue(dist_api.save_mapping({**new, "enabled": 0})["name"])                # saved disabled
+			dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "horizon_days": 30})
+			dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "enabled": 0})
+			with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):
+				dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "enabled": 1})
+			dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})
+			dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "room_type": dlx,
+			                       "enabled": 1})
+			with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):         # moved onto the disabled one
+				dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "room_type": self.std})
+		finally:
+			frappe.db.set_value("Room Type", self.std, "disabled", 0)
+
 	def test_the_preview_starts_on_the_sites_day(self):
 		# the push horizon starts on the site's day, so the preview does too: a browser in an earlier
 		# time zone just after the site's midnight must not show yesterday as a day never sent
