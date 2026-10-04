@@ -45,3 +45,16 @@ test("a basket that could not be read says why: a rate limit, a refusal in its o
   assert.deepEqual(basketFailureText(i18n, { kind: "network", message: "" }), { title: "payment.optionsFailedTitle", body: "payment.optionsFailedBody" })
   assert.deepEqual(basketFailureText(i18n, null), { title: "payment.optionsFailedTitle", body: "payment.optionsFailedBody" })
 })
+
+// §5b, §6G3 (batch 2P): a basket read but no longer usable sent the guest to "Refresh prices" whatever its rooms'
+// problem; for a price already booked (another tab, the browser's history) a refresh leads to a second booking
+test("a basket read but not usable asks for a refresh with its problem's code, a booked price first", async () => {
+  const { basketExpiry } = await import("../../src/booking/lib/methods.ts")
+  const data = (usable: boolean, ...codes: (string | null)[]) =>
+    ({ usable, methods: [], rooms: codes.map((c) => ({ problem: c && "…", problem_code: c })) }) as never
+  assert.equal(basketExpiry({ status: "done", data: data(true, null) }), null)
+  assert.deepEqual(basketExpiry({ status: "done", data: data(false, null, "QUOTE_EXPIRED") }), { code: "QUOTE_EXPIRED", message: "" })
+  assert.deepEqual(basketExpiry({ status: "done", data: data(false, "QUOTE_EXPIRED", "QUOTE_USED") }), { code: "QUOTE_USED", message: "" })
+  assert.deepEqual(basketExpiry({ status: "done", data: data(false, null) }), { code: null, message: "" })   // an older server
+  assert.equal(basketExpiry({ status: "idle", data: null }), null)
+})

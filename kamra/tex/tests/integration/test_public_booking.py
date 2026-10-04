@@ -257,6 +257,30 @@ class TestPublicBooking(TexTestCase):
 		self.assertNotIn("manage_token", out)
 
 
+class TestBasketProblems(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		self.std = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+
+	def test_2p_a_baskets_problem_carries_its_code(self):
+		"""§5b, §6G3 "Not done" (batch 2P): a basket whose quote was used or has expired said so in English only
+		(``rooms[].problem``), so the app offered "Refresh prices" for both, and refreshing a quote already booked
+		leads to a second booking. Each room's problem carries its refusal code too."""
+		from frappe.utils import add_to_date, now_datetime
+
+		prop = _search([{"adults": 2, "children": [8]}], session="sess-2p-b")
+		offer = next(o for o in prop["offers"] if o["room_type"] == self.std and o["board"] == "AI")
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id="sess-2p-b")
+		problem = lambda: [(r["problem"] is not None, r.get("problem_code")) for r in public.basket(  # noqa: E731
+			site=SLUG, quote_ids=[q["quote_id"]], session_id="sess-2p-b")["rooms"]]
+		self.assertEqual(problem(), [(False, None)])
+		frappe.db.set_value("TEX Quote", q["quote_id"], "expires_at", add_to_date(now_datetime(), minutes=-1))
+		self.assertEqual(problem(), [(True, "QUOTE_EXPIRED")])
+		frappe.db.set_value("TEX Quote", q["quote_id"], "status", "Used")
+		self.assertEqual(problem(), [(True, "QUOTE_USED")])
+
+
 class TestStaffBookingControls(TexTestCase):
 	def setUp(self):
 		super().setUp()

@@ -567,6 +567,7 @@
   "errors.extraSoldOutTogether": "Jedes Zimmer könnte es allein erhalten, zusammen benötigen Ihre Zimmer aber mehr, als noch verfügbar ist. Entfernen Sie das Extra bei einem der Zimmer, um fortzufahren.",
   "errors.reviewExtras": "Extras prüfen",
   "errors.expiredTitle": "Die Preise müssen kurz aktualisiert werden",
+  "errors.quoteUsedTitle": "Dieser Preis ist bereits gebucht",
   "errors.expiredBody": "Angebote werden nur begrenzte Zeit gehalten. Wir prüfen den aktuellen Preis für dieselben Zimmer – Ihre Angaben bleiben erhalten.",
   "errors.refreshPrices": "Preise aktualisieren",
   "errors.priceChangedTitle": "Der Preis hat sich geändert",

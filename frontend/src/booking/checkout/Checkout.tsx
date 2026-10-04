@@ -19,7 +19,7 @@ import type { MemberStatus, PaymentMethod, PaymentStart, QuoteResponse, SiteExtr
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
-import { basketFailureText, checkoutChoices } from "../lib/methods"
+import { basketExpiry, basketFailureText, checkoutChoices } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
 import { countryNames, isoCountry, regionDisplay, residencyProblem } from "../../lib/residency"
@@ -598,10 +598,11 @@ function PaymentStep() {
       setMethod(current.method, current.account)
   }, [current, flow.method, flow.providerAccount, setMethod])
 
-  // quotes used or expired since they were made: offer the refresh path
+  // quotes used or expired since they were made: offer the refresh path, or a new search for a price already booked
+  const expiry = useMemo(() => basketExpiry({ status: b.basket.status, data: basket }), [b.basket.status, basket])
   useEffect(() => {
-    if (basket && !basket.usable) setFlowError({ kind: "expired", message: "" })
-  }, [basket, setFlowError])
+    if (expiry) setFlowError({ kind: "expired", ...expiry })
+  }, [expiry, setFlowError])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()

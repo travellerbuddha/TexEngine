@@ -430,11 +430,15 @@ def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
 			due_known = False
 		else:
 			due += room_due
+		# why the quote cannot be booked, with its code: the app tells a quote already booked from an expired one
+		# (§5b; batch 2P)
+		why = quoting.quote_refusal(row)
 		rooms.append({
 			"quote_id": row.name, "room_type": req.get("room_type"), "total": to_str(room_total),
 			"due_now": to_str(room_due) if room_due is not None else None, "deposit_type": kind,
 			"payment_policy": policy.get("name"), "pay_at_hotel_allowed": allowed,
-			"expires_at": str(row.expires_at), "problem": quoting.quote_is_usable(row),
+			"expires_at": str(row.expires_at), "problem": str(why) if why else None,
+			"problem_code": why.code if why else None,
 		})
 	return {
 		"property": row.property, "currency": ccy, "market": market, "channel": channel,

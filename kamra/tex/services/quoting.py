@@ -714,12 +714,6 @@ def quote_refusal(row) -> Refusal | None:
 	return None
 
 
-def quote_is_usable(row) -> str | None:
-	"""``quote_refusal``'s text (a basket's ``problem``)."""
-	why = quote_refusal(row)
-	return str(why) if why else None
-
-
 def default_sale_window(check_in: date) -> timedelta:
 	return timedelta(days=max(0, (check_in - getdate(now_datetime())).days))
 

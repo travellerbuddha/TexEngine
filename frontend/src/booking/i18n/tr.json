@@ -567,6 +567,7 @@
   "errors.extraSoldOutTogether": "Odalarınızın her biri tek başına alabilir, ancak birlikte kalandan fazlası gerekiyor. Devam etmek için ekstrayı odalardan birinden kaldırın.",
   "errors.reviewExtras": "Ekstraları gözden geçir",
   "errors.expiredTitle": "Fiyatların yenilenmesi gerekiyor",
+  "errors.quoteUsedTitle": "Bu fiyatla rezervasyon zaten yapıldı",
   "errors.expiredBody": "Teklifler sınırlı bir süre için tutulur. Aynı odalar için en güncel fiyatı kontrol edeceğiz — bilgileriniz korunur.",
   "errors.refreshPrices": "Fiyatları yenile",
   "errors.priceChangedTitle": "Fiyat değişti",

@@ -130,6 +130,15 @@ export function FlowErrorAlert() {
         {t("errors.seeAvailable")}
       </Button>
     )
+  } else if (e.code === "QUOTE_USED") {
+    // this price was booked already (another tab, the browser's history): a refresh would book the stay again, so a
+    // new search (§5b; batch 2P)
+    title = t("errors.quoteUsedTitle")
+    action = (
+      <Button size="sm" onClick={research} busy={b.pending}>
+        {t("errors.seeAvailable")}
+      </Button>
+    )
   } else if (e.kind === "expired") {
     title = t("errors.expiredTitle")
     body = t("errors.expiredBody")
