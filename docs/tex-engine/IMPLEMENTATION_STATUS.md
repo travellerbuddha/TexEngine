@@ -2255,3 +2255,24 @@ re-verified against the code first; all held (the erasure item was worse than li
   of a multi-program site; cosmetic). Tests: `test_member_web` +3, `test_system_status.test_2o_r1_s2_…`. Red: S1
   `ValidationError not raised`; S2 `1 != 0`; `'valid e-mail address' unexpectedly found`; `('Left', 0) != ('Left',
   1)`; `KeyError: 'can_end'`.
+- Review round 2 **COMPLETE** (no BLOCKER; every round-1 finding verified fixed; 1 SHOULD from 2N-2, 3 NITs): S-1, a
+  typed ASCII address found the profile of an accented look-alike (the database compares accents away) and its link
+  signed its owner in to it: `members._profile` takes only a profile whose stored e-mail is the address; NIT-A, the
+  after-commit drop logs a failure, never raises; NIT-B, this "Not done" list; NIT-C, "every open session at a hotel
+  where the user may edit the guest" (docstrings, ADR-079). Tests: `test_member_web.TestBatch2OReviewRound2` (3).
+- **Not done:**
+  - a booking still joins the profile `booking._find_profile` finds, accents compared away (ADR-056's identity): a
+    guest typing `ana@muller.de` joins the stays of `ana@müller.de`'s older profile; the same exact-address rule as
+    `members._profile` there changes how every booking finds its guest (LOW, a separate batch);
+  - the `member_blocked` mail names every program of a multi-program site, also one the guest is still a member of
+    (cosmetic, review round 1 NIT 6);
+  - staff add a block only while ending a membership: for a guest who left without one, they join and end it again
+    (LOW, review round 1 NIT 2's second half);
+  - a request that read the profile before an erasure committed and files its link after the second drop keeps that
+    link for its 30 minutes (rare);
+  - the rest of the §6* "Not done" lines 2O did not take (HANDOFF §2 item 10), among them: a misconfigured extra's
+    uncoded 500 and the basket's `problem_code` (§6G3); a duplicate capture not audited apart and a review recorded
+    while a new charge starts (§6K1); an outbox delivery a worker never finishes (§6K4); the digest an editor
+    without cost reads, and a refused reprice's audit digests (§6L); a group program's membership when one hotel gets
+    its own program (§6N1).
+

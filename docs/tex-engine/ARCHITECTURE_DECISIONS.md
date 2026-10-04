@@ -10054,13 +10054,21 @@ scope prioritised after go-live), and C-13 is D-12's answer (loyalty is live at 
   e-mails `anonymize_guest` gives it, and again once the erasure is committed (a link a request filed meanwhile from
   the profile as it was). Another enterprise's link to the same address goes too: its owner asks for a new one. A
   request that failed after taking a link puts it back only while it is still pending, and reads no database to do
-  so. Not taken: matching the erased profile at verify (its e-mail is gone).
+  so. Not taken: matching the erased profile at verify (its e-mail is gone). The second drop, after the commit, logs a
+  failure and never raises (it runs outside Frappe's error handling: review round 2).
+- *A link finds the profile of exactly its address* (review round 2, S-1, from 2N-2): a typed address must be ASCII,
+  but the database compares accents away, so `ana@muller.de` found the profile of `ana@müller.de` (stored by staff)
+  and its link signed the look-alike's owner in to it. `members._profile` reads the address's profiles as a booking
+  does and takes the oldest whose stored e-mail is this address (in any case); none: a sign-in gets the "no
+  membership" mail, a join makes the address its own profile. A booking still joins the profile `_find_profile`
+  finds (a §6O "Not done" line).
 - *Staff and a guest's web sessions.* `crm.member_sessions(guest)` (`crm.view`) lists the guest's sessions on the
   booking sites of the hotels the user sees the guest through (a session of a group site belongs to the site's
   hotels, as `perm` reads site records): site, since, until, signed out, active, and `can_end` (open, at a hotel where
   the user may edit the guest: review round 1); never a token or its hash.
-  `crm.end_member_sessions(guest, session=None)` (`crm.edit`) signs the guest out of every open session the user sees,
-  or the one named, audited `member.sessions_end` on the guest to the hotels it reached. CRM → Loyalty shows them.
+  `crm.end_member_sessions(guest, session=None)` (`crm.edit`) signs the guest out of every open session at a hotel
+  where the user may edit the guest, or the one named, audited `member.sessions_end` on the guest to the hotels it
+  reached. CRM → Loyalty shows them.
 - *A signed-in join for a profile e-mail that cannot take a link* (staff typed an address that is not one plain ASCII
   address) is refused with `MEMBER_EMAIL_UNUSABLE` (it answered "sent" and sent nothing): the guest is signed in to
   that profile, so nobody else learns anything.
