@@ -202,7 +202,9 @@ the guest's manage token.
   never in the guest's error body. Independent review round 1: 1 High (CI's static guest-refusal check), 3 Low
   (the apps' address checks, a channel's display-name address, the call centre's booker and the CRM's profile
   address: one plain address, so `İNFO@…` typed with caps lock on a Turkish keyboard is refused, not a second
-  profile) and NITs fixed with fail-first tests (PR #36).
+  profile) and NITs fixed with fail-first tests; round 2: 2 Low (the CRM drawer checks only an address typed now;
+  the call centre's guest and booker checks) and NITs (Python's trim in the apps; a stored KELVIN SIGN address is
+  never joined) (PR #36).
 
 ## 7. Known gaps (tracked)
 

@@ -17,7 +17,9 @@ Son durum:
   - aynı e-posta adresi aynı misafirdir (büyük/küçük harf fark etmez); aksanlı benzeri başka misafirdir;
   - e-posta tek ve düz bir adres olmalı; değilse rezervasyon kodla reddedilir, kanal rezervasyonu adressiz girer;
   - sepet sorun kodları, "zaten rezerve edildi" uyarısı ve diğer LOW maddeler (§6P).
-- Sonraya bırakılan karar: başkası adına rezervasyon (puanı kim kazanır, üye fiyatı kimin, onay e-postası kime gider). Bu parti başlarken bana sorulacak (HANDOFF §2 madde 11).
+- Sonraya bırakılan kararlar (o iş başlarken bana sor):
+  - başkası adına rezervasyon: puanı kim kazanır, üye fiyatı kimin, onay e-postası kime gider (HANDOFF §2 madde 11);
+  - "geçersiz sepet" uyarısındaki "Tekrar dene" yerine fiyat yenileme: mevcut bir e2e testinin (LO-14) değişmesi gerekiyor (HANDOFF §2 madde 12).
 
 ## İlk adımlar
 1. GitHub'da PR #36'nın birleşip birleşmediğine bak. Birleşmediyse önce bana sor. Birleşmemiş bir tabanın üzerinde yeni partiye başlama, PR'ı kendin de birleştirme.

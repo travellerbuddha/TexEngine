@@ -10114,15 +10114,14 @@ the confirmation) are asked when it starts; until then the booker's address deci
   refused an accented address when the booking stored it, with no code; an invisible character passed Frappe's own
   check, which splits on it, and made a look-alike profile). A channel's booking leaves such an address out (the
   guest's profile and `booker_email`): the channel sold the stay, and its message no longer fails, retries and parks.
-  Not taken: the staff booker's own address in the CRS (`ui_crs._booker`): it is no identity, and Frappe's field
-  check still applies to it.
+  The call centre's booker address and the CRM's profile address take the same rule (review round 1).
 - *A basket's problem has its code* (§5b): `quotes_summary` gives each room `problem_code` beside `problem`
   (`quoting.quote_refusal`; `quote_is_usable` is gone). The booking app passes it on, a booked price first, and a
   `QUOTE_USED` refusal (the basket's or the booking's) shows "This price is already booked" with "See available
   rooms": a refresh of a price already booked (another tab, the browser's history) books the stay twice.
-- *A basket refused as gone* (an "expired" refusal: `QUOTE_INVALID`, `SEARCH_AGAIN`) takes the flow's refresh path,
-  its code with it, instead of "Try again", which failed the same way (§6K5). A connection failure or a rate limit
-  still asks to try again (LO-14).
+- *A basket refused as gone* (an "expired" refusal: `QUOTE_INVALID`, `SEARCH_AGAIN`) still offers "Try again": the
+  change was made (ab446f3) and withdrawn (b7333b6) because `booking.spec`'s LO-14 test (2K-5 review) asserts that
+  answer on purpose; changing it needs the owner (§6K5's "Not done" line stands).
 - *Extras a hotel cannot price* (two live revisions of one extra, two tax policies in force: `Unsellable`) refuse the
   add-extras calls by code: a guest `CHANGE_NOT_ONLINE` (contact the hotel), staff `EXTRAS_REFUSED` naming the
   problem (`reasons`: its code). It was an uncoded 500 (§6G3).
@@ -10158,3 +10157,9 @@ the confirmation) are asked when it starts; until then the booker's address deci
   Not taken: the Desk Guest form and the legacy PMS paths that make a profile (banquet, the legacy public API) keep
   Frappe's own check; a basket refusal a refresh does not clear asks for a refresh again (it asked to try again: as
   stuck either way); `HANDOFF_STAGE3.md` keeps its mention of `quote_is_usable` (a record of its time).
+- *Review round 2* (no HIGH or MEDIUM; every round-1 finding verified fixed): two LOW, the CRM drawer refused any edit
+  of a profile whose stored address is not plain (a Desk or legacy one), while the server checks only an address that
+  is sent: the drawer checks an address typed now (`editedEmailInvalid`); the call centre's guest and booker checks
+  took what the server refuses (`plainEmail`). NITs: the apps trim as Python's `strip()` does (a BOM passed, an
+  information separator was refused); `profile_of_email` checks a stored address's ASCII before lower case (a Desk
+  profile stored with a KELVIN SIGN was joined by every booking for `kate@…`); two docs lines.

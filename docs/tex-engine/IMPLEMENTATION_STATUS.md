@@ -2298,8 +2298,10 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   already booked" and "See available rooms" (`errors.quoteUsedTitle`, six languages). Tests:
   `test_public_booking.TestBasketProblems` (1), node `checkout-fallback` (+1). Red: `[(True, None)] != [(True,
   'QUOTE_EXPIRED')]`; node `basketExpiry is not a function`.
-- 2P-4 (§6K5) **COMPLETE**: a basket refused as gone takes the refresh path, not "Try again". Test: node
-  `checkout-fallback` (+1). Red: `actual: null, expected: { code: 'QUOTE_INVALID', … }`.
+- 2P-4 (§6K5) **NOT STARTED** (withdrawn): a basket refused as gone was sent to the refresh path (ab446f3; red: node
+  `actual: null, expected: { code: 'QUOTE_INVALID', … }`), but `booking.spec`'s LO-14 test asserts "Try again" for that
+  refusal on purpose (2K-5 review), and the batch's full Playwright run failed it: reverted (b7333b6); changing that
+  assertion needs the owner.
 - 2P-5 (§6G3) **COMPLETE**: extras a hotel cannot price refuse by code (`CHANGE_NOT_ONLINE` / `EXTRAS_REFUSED`).
   Tests: `test_post_booking_extras.TestMisconfiguredExtras` (2). Red: a bare `Unsellable` (errors=5).
 - 2P-6 (§6G3) **COMPLETE**: a paid guest change the engine refuses when applied keeps the engine's reasons for staff.
@@ -2324,7 +2326,8 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   never finishes (§6K4; the late-message check shows it, a separate watch needs a new column). Left for its own
   batch: a duplicate capture audited apart (§6K1, money).
 - Docs: ADR-080; HANDOFF (§1, §2, §6, §7, §9, §10); SECURITY_MODEL (the guest identity and the Desk audit rows, the
-  review log); NEXT_SESSION_PROMPT. No schema change, no patch.
+  review log); DEV_ENVIRONMENT (stop the worker before integration runs); NEXT_SESSION_PROMPT. No schema change, no
+  patch.
 - Review round 1 **COMPLETE** (an independent read-only reviewer; 1 HIGH, 3 LOW, 5 NITs): HIGH, CI's TEX unit check
   `test_guest_refusal_codes` counted `guest_unsellable`'s refusal as uncoded (built in a variable): `refusal(...,
   staff_detail=)` inline (red: `Lists differ: ["services/modification.py:77 guest_unsellable: …"] != []`, CI #241);
@@ -2338,7 +2341,17 @@ nine held, two were dropped (below) and one was left for its own batch (money).
   where the confirmation is (`errors.quoteUsedBody`, six languages). Tests: `test_public_booking.TestBookingIdentity`
   (+2), `test_distribution` (+1), `test_commercial_flows.TestPaymentMethodRules` (+1), `test_self_service_money` (+1),
   node `plain-email` (new, 2).
+- Review round 2 **COMPLETE** (no HIGH or MEDIUM; every round-1 finding verified fixed; 2 LOW, 4 NITs): LOW, the CRM
+  drawer refused any edit of a profile whose stored address is not plain (`editedEmailInvalid`: only an address typed
+  now; red: node `editedEmailInvalid is not a function`, today's drawer blocks the phone edit of `info@hotel.com.`);
+  LOW, the call centre's guest and booker checks (`plainEmail`; today's check accepts `bärbel@example.de`,
+  `ana@example.com.`, `İNFO@HOTEL.COM`); NIT, the apps trim as Python's `strip()` (red: `actual: 'ana@example.com',
+  expected: null` for a BOM); NIT, a stored address's ASCII before lower case (red: `'G-00592' == 'G-00592'`, a booking
+  for `kate@…` joined the KELVIN SIGN profile); NITs, ADR-080's booker line and HANDOFF's node count. Tests:
+  `test_public_booking.TestBookingIdentity` (+1), node `plain-email` (+2).
 - **Not done:**
+  - 2P-4, a basket refused as gone still offers "Try again" (§6K5): `booking.spec`'s LO-14 assertion would change
+    (owner);
   - the Desk Guest form and the legacy PMS paths that make a profile (banquet, the legacy public API) keep Frappe's
     own address check (it takes a display name, a Turkish dotted İ or a trailing dot); a profile stored that way is
     joined by no booking (ADR-080) and shows in the CRM's possible duplicates (LOW; the TEX CRM refuses it);
