@@ -600,8 +600,7 @@ function PaymentStep() {
   }, [current, flow.method, flow.providerAccount, setMethod])
 
   // quotes used or expired since they were made: offer the refresh path, or a new search for a price already booked
-  const expiry = useMemo(() => basketExpiry({ status: b.basket.status, data: basket, error: b.basket.error }),
-    [b.basket.status, basket, b.basket.error])
+  const expiry = useMemo(() => basketExpiry({ status: b.basket.status, data: basket }), [b.basket.status, basket])
   useEffect(() => {
     if (expiry) setFlowError({ kind: "expired", ...expiry })
   }, [expiry, setFlowError])
@@ -739,17 +738,14 @@ function PaymentStep() {
               <Spinner label={t("payment.checkingOptions")} />
             </p>
           ) : basketFailed ? (
-            // a basket refused as gone takes the refresh path (the flow's error above): no "Try again" (§6K5)
-            expiry ? null : (
-              <Alert
-                tone="warn"
-                className="mt-3"
-                title={basketFailureText(i18n, b.basket.error).title}
-                actions={<Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>}
-              >
-                {basketFailureText(i18n, b.basket.error).body}
-              </Alert>
-            )
+            <Alert
+              tone="warn"
+              className="mt-3"
+              title={basketFailureText(i18n, b.basket.error).title}
+              actions={<Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>}
+            >
+              {basketFailureText(i18n, b.basket.error).body}
+            </Alert>
           ) : !choices.length ? (
             <Alert tone="warn" className="mt-3" title={t("payment.noMethodsTitle")}>
               {t("payment.noMethodsBody")}
