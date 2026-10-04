@@ -7,6 +7,7 @@ import { date, month, num, pct } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Checkbox, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
 import { isInteger, useEvent, useIntentKey } from "../lib"
+import { redeemableBookings } from "./redeem"
 import { WebSessions } from "./WebSessions"
 import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyMembership, LoyaltyProgramInfo, Stay } from "../types"
 
@@ -45,7 +46,7 @@ export function LoyaltyPanel({
     for (const p of programs.data ?? []) m.set(p.program, p.program_name)
     return [...m.entries()].map(([value, label]) => ({ value, label }))
   }, [accounts, programs.data])
-  const redeemable = stays.some((s) => s.tex_booking && s.status !== "Cancelled" && can("payment.link", s.property))
+  const redeemable = redeemableBookings(stays, can, hotels)
   const closeAdjust = useEvent(() => setAdjust(null))
   const closeRedeem = useEvent(() => setRedeem(false))
   const closeMembership = useEvent(() => setMembership(null))
@@ -64,7 +65,7 @@ export function LoyaltyPanel({
           {t("crm.loyalty.adjust")}
         </Button>
       )}
-      {redeemable && accounts.some((a) => a.available > 0) && (
+      {redeemable.length > 0 && accounts.some((a) => a.available > 0) && (
         <Button variant="secondary" size="sm" icon={<Gift className="size-4" aria-hidden />} onClick={() => setRedeem(true)}>
           {t("crm.loyalty.redeem")}
         </Button>
@@ -197,7 +198,7 @@ export function LoyaltyPanel({
       <RedeemDialog
         open={redeem}
         guest={guest.name}
-        stays={stays.filter((s) => s.tex_booking && s.status !== "Cancelled" && can("payment.link", s.property) && hotels.includes(s.property))}
+        stays={redeemable}
         programs={programs.data ?? []}
         accounts={accounts}
         onClose={closeRedeem}

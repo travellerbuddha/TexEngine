@@ -619,6 +619,17 @@ class TestChannelBookings(DistributionCase):
 			pay.allocate(points.name, booking=booking, amount="30", reason="move the points")
 		self.assertFalse(frappe.db.exists("TEX Payment Allocation", {"transaction": points.name}))
 
+	def test_2o_the_crm_says_which_stay_is_a_channels(self):
+		"""§6K2 "Not done" (batch 2O): the CRM offered "Redeem" on a channel's booking, which the server refuses
+		(LO-02). Each stay the profile lists says whether its booking is a channel's, so the screen leaves it out."""
+		from kamra.tex.api import crm as crm_api
+
+		booking, _rooms = self.booked("L1")
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		stays = crm_api.guest(name=guest)["stays"]
+		self.assertTrue(stays)
+		self.assertEqual({(s["tex_booking"], s["channel_booking"]) for s in stays}, {(booking, True)})
+
 	def test_a_channel_cancellation_gives_the_points_back(self):
 		"""LO-02 (D-16): points spent on a booking a channel later cancels come back as points (before: lost, their
 		money left on the cancelled booking). Spent before the guard (an older booking)."""

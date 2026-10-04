@@ -90,6 +90,8 @@ export interface Stay {
   cancellation_fee?: string | null
   /** a hold that ran out of time: no cancellation, never a sale (O-24) */
   hold_expired?: boolean
+  /** its booking is a channel's: points never pay it (LO-02; batch 2O) */
+  channel_booking?: boolean
 }
 
 /** An extra on one of the guest's stays at the viewer's hotels (from its price-locked snapshot). */

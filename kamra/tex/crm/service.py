@@ -249,7 +249,13 @@ def profile(guest: str) -> dict:
 	                               "tex_booking", "tex_sales_channel", "tex_market", "cancellation_fee",
 	                               "tex_hold_expired"],
 	                       order_by="check_in_date desc", limit=200)
+	# a channel's booking: its price and payment are the channel's, points never pay it (LO-02); the CRM leaves it out
+	# of "Redeem" (batch 2O)
+	booked = sorted({s.tex_booking for s in stays if s.tex_booking})
+	channels = set(frappe.get_all("TEX Booking", filters={"name": ("in", booked), "channel_connection": ("is", "set")},
+	                              pluck="name")) if booked else set()
 	for s in stays:
+		s["channel_booking"] = s.tex_booking in channels
 		s["check_in_date"], s["check_out_date"] = str(s["check_in_date"]), str(s["check_out_date"])
 		# a hold that ran out of time is no cancellation and was never a sale (O-24, LO-24)
 		s["hold_expired"] = bool(s.pop("tex_hold_expired"))
