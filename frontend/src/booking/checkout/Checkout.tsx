@@ -585,8 +585,13 @@ function PaymentStep() {
     choices.find((c) => c.method === flow.method && (!c.account || !flow.providerAccount || c.account === flow.providerAccount)) ?? choices[0] ?? null
   const method: PaymentMethod = current?.method ?? "Card"
   const currency = basket?.currency ?? flow.selections[0]?.currency ?? ""
-  // a fixed deposit is named once per booking and policy, as the server takes it (LO-35)
-  const payLines = bookingPaymentTerms(i18n, flow.selections.map((s) => (s ? { info: s.rateInfo, currency: s.currency } : null)))
+  // a fixed deposit is named once per booking and policy, as the server takes it (LO-35); a later room names the part
+  // of it it pays, the basket's share of that room (§6K5, batch 2Q)
+  const shareOf = (i: number) => basket?.rooms.find((r) => r.quote_id === flow.quotes[i]?.quote_id)?.due_now ?? null
+  const payLines = bookingPaymentTerms(
+    i18n,
+    flow.selections.map((s, i) => (s ? { info: s.rateInfo, currency: s.currency, share: shareOf(i) } : null)),
+  )
   const payingNow = current?.dueNow ? !isZero(current.dueNow) : method !== "Pay at Hotel"
   const bookLabel = payingNow
     ? current?.dueNow
