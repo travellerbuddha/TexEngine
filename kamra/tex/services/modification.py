@@ -69,13 +69,13 @@ def guest_unsellable(result: dict) -> None:
 	warnings = result.get("warnings") or []
 	rows = [*warnings, *((result.get("proposed") or {}).get("reasons") or [])]
 	why = guest_reason("; ".join(w["message"] for w in warnings if w.get("message")))
-	exc = refusal("CHANGE_NOT_SELLABLE", reasons=[r["code"] for r in rows if isinstance(r, dict) and r.get("code")])
-	# the reasons themselves, for staff only (never in the refusal's params): a change paid for online that fails when
-	# it is applied keeps them on its request (§6G3; batch 2P)
-	exc.staff_detail = _("The modified stay cannot be sold: {0}").format(
-		"; ".join(r["message"] for r in rows if isinstance(r, dict) and r.get("message")))
+	# the reasons themselves go to staff only (``staff_detail``, never the refusal's params): a change paid for online
+	# that fails when it is applied keeps them on its request (§6G3; batch 2P)
 	frappe.throw(_("The modified stay cannot be sold: {0}").format(why) if why else
-	             _("The modified stay cannot be sold. Please choose other dates or contact the hotel."), exc)
+	             _("The modified stay cannot be sold. Please choose other dates or contact the hotel."),
+	             refusal("CHANGE_NOT_SELLABLE", reasons=[r["code"] for r in rows if isinstance(r, dict) and r.get("code")],
+	                     staff_detail=_("The modified stay cannot be sold: {0}").format(
+		                     "; ".join(r["message"] for r in rows if isinstance(r, dict) and r.get("message")))))
 
 
 def _snapshot(res) -> dict:

@@ -77,15 +77,20 @@ def _safe(params: dict | None) -> dict:
 	return out
 
 
-def refusal(code: str, base: type[Exception] | None = None, **params) -> Exception:
+def refusal(code: str, base: type[Exception] | None = None, *, staff_detail: str | None = None, **params) -> Exception:
 	"""A coded refusal to raise with ``frappe.throw(message, refusal(...))``. ``base`` keeps a refusal's class where
 	callers or its HTTP status depend on it (``frappe.PermissionError`` 403, ``frappe.DoesNotExistError`` 404, an
-	existing subclass); default :class:`Refusal` (417)."""
+	existing subclass); default :class:`Refusal` (417). ``staff_detail``: what staff are told where the guest's message
+	leaves it out (the engine's reasons), kept on the exception only, never in its params or the guest's error body
+	(batch 2P)."""
 	if base is None or issubclass(base, Refusal):
-		return (base or Refusal)(code=code, params=params)
-	e = base()
-	e.code = _known(code)
-	e.params = _safe(params)
+		e = (base or Refusal)(code=code, params=params)
+	else:
+		e = base()
+		e.code = _known(code)
+		e.params = _safe(params)
+	if staff_detail:
+		e.staff_detail = staff_detail
 	return e
 
 
