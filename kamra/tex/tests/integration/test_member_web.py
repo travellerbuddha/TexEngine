@@ -647,3 +647,61 @@ class TestPendingLinksAndErasure(WebMemberCase):
 		self.assertEqual(self.refused(public.member_join, site=SLUG, member_session=session, accepted=1),
 		                 "MEMBER_EMAIL_UNUSABLE")
 		self.assertEqual(len(self.mails), sent)
+
+
+class TestStaffSeeAndEndSessions(WebMemberCase):
+	"""§6N2 "Not done" (batch 2O): staff could not see a guest's web sessions, nor end one (a lost phone, a shared
+	computer); only an erasure ended them."""
+
+	def test_2o_staff_see_and_end_a_guests_web_sessions(self):
+		import json
+
+		from kamra.tex.api import crm as crm_api
+
+		self.ask(self.email)
+		first = self.verify(self.token())["session"]
+		self.ask(self.email)
+		second = self.verify(self.token())["session"]
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		from kamra.tex.tests.integration.test_crm_segments import agent
+
+		reader = agent("c04-2o-finance@example.com", fx.PROPERTY, "Finance")          # crm.view, no crm.edit
+		frappe.set_user(reader)  # nosemgrep: frappe-setuser -- staff who may read the guest, not edit
+		try:
+			rows = crm_api.member_sessions(guest=self.guest)
+			self.assertEqual(len(rows), 2)
+			self.assertTrue(all(r["active"] and r["site"] == site.name and r["expires_at"] for r in rows))
+			self.assertFalse(any("token" in k for r in rows for k in r))                   # never a token or its hash
+			with self.assertRaises(frappe.PermissionError):
+				crm_api.end_member_sessions(guest=self.guest)
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff who may edit the guest
+		try:
+			newest = rows[0]["name"]
+			self.assertEqual(crm_api.end_member_sessions(guest=self.guest, session=newest), {"ended": 1})
+			self.assertEqual(sum(members.session_guest(site, t) == self.guest for t in (first, second)), 1)
+			self.assertEqual(crm_api.end_member_sessions(guest=self.guest), {"ended": 1})
+			self.assertEqual([r["active"] for r in crm_api.member_sessions(guest=self.guest)], [False, False])
+			self.assertEqual(crm_api.end_member_sessions(guest=self.guest), {"ended": 0})
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertIsNone(members.session_guest(site, first))
+		self.assertIsNone(members.session_guest(site, second))
+		audits = frappe.get_all("TEX Audit Event", filters={"action": "member.sessions_end", "reference_name": self.guest},
+		                        pluck="new_value")
+		self.assertEqual(sorted(json.loads(a)["ended"] for a in audits), [0, 1, 1])
+
+	def test_2o_a_session_of_another_guest_is_not_ended(self):
+		from kamra.tex.api import crm as crm_api
+
+		self.ask(self.email)
+		mine = self.verify(self.token())["session"]
+		other = self.profile("other-sessions")
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- staff
+		try:
+			name = frappe.db.get_value("TEX Member Session", {"token_hash": members.digest(mine)})
+			self.assertEqual(crm_api.end_member_sessions(guest=other, session=name), {"ended": 0})
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), mine), self.guest)

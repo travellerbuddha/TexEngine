@@ -183,6 +183,18 @@ export interface LoyaltyAccount {
   membership?: LoyaltyMembership | null
 }
 
+/** kamra.tex.crm.members.staff_sessions (C-04 on the web, ADR-078; batch 2O): a guest's sign-in on a booking site */
+export interface MemberSession {
+  name: string
+  site: string
+  site_name: string
+  hotel: string | null
+  signed_in_at: string
+  expires_at: string | null
+  signed_out_at: string | null
+  active: boolean
+}
+
 /** kamra.tex.crm.loyalty.membership_view (C-04, ADR-077) */
 export interface LoyaltyMembership {
   status: "Active" | "Left"

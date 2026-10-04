@@ -138,6 +138,24 @@ def loyalty_leave(guest: str, program: str, reason: str, property: str | None = 
 	                     block_rejoin=bool(as_int(block_rejoin, 0, lo=0, hi=1)))
 
 
+@frappe.whitelist()
+def member_sessions(guest: str):
+	"""The guest's sessions on the booking sites of the hotels the user sees them through (batch 2O)."""
+	from kamra.tex.crm import members
+
+	return members.staff_sessions(guest, crm.require_guest(guest))
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def end_member_sessions(guest: str, session: str | None = None):
+	"""Sign the guest out on the booking sites: every session the user sees, or the one named (batch 2O)."""
+	from kamra.tex.crm import members
+
+	via = crm.require_guest(guest, "crm.edit")
+	return {"ended": members.staff_end_sessions(guest, via, name=text(session, 140) or None)}
+
+
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def loyalty_redeem(guest: str, booking: str, points, idempotency_key: str):

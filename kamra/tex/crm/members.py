@@ -374,6 +374,56 @@ def sign_out(site, token: str | None) -> None:
 		frappe.db.set_value("TEX Member Session", name, "revoked_at", now_datetime())
 
 
+def _seen_by(row, hotels: set[str], cache: dict) -> bool:
+	"""A session staff see through ``hotels``: its site's hotel's, or on a hotel group's site (no hotel), one of the
+	site's hotels (as ``perm`` reads a site's records)."""
+	if row.property:
+		return row.property in hotels
+	if row.site not in cache:
+		site = frappe.get_doc("TEX Booking Site", row.site) if frappe.db.exists("TEX Booking Site", row.site) else None
+		cache[row.site] = set(site_properties(site)) if site else set()
+	return bool(cache[row.site] & hotels)
+
+
+SESSION_FIELDS = ["name", "site", "property", "creation", "expires_at", "revoked_at"]
+
+
+def staff_sessions(guest: str, hotels: set[str]) -> list[dict]:
+	"""The guest's sessions on the booking sites of ``hotels`` (those the staff member sees the guest through), newest
+	first: where, since when, until when, whether signed out (batch 2O). Never a token or its hash."""
+	now, cache, out = now_datetime(), {}, []
+	for r in frappe.get_all("TEX Member Session", filters={"guest": guest}, fields=SESSION_FIELDS,
+	                        order_by="creation desc, name desc"):
+		if not _seen_by(r, hotels, cache):
+			continue
+		# a nullable end read here, never filtered on (ADR-064): no end yet is open
+		active = not r.revoked_at and bool(r.expires_at) and r.expires_at > now
+		out.append({"name": r.name, "site": r.site,
+		            "site_name": frappe.db.get_value("TEX Booking Site", r.site, "site_name") or r.site,
+		            "hotel": r.property, "signed_in_at": str(r.creation),
+		            "expires_at": str(r.expires_at) if r.expires_at else None,
+		            "signed_out_at": str(r.revoked_at) if r.revoked_at else None, "active": active})
+	return out
+
+
+def staff_end_sessions(guest: str, hotels: set[str], name: str | None = None) -> int:
+	"""Staff sign the guest out (a lost phone, a shared computer): every open session of theirs staff see, or the one
+	named; audited ``member.sessions_end`` on the guest, to the hotels it reached (batch 2O). → how many ended."""
+	from kamra.tex.security.audit import audit
+
+	now, cache, ended, reached = now_datetime(), {}, [], set()
+	for r in frappe.get_all("TEX Member Session", filters={"guest": guest, **({"name": name} if name else {})},
+	                        fields=SESSION_FIELDS):
+		if r.revoked_at or not r.expires_at or r.expires_at <= now or not _seen_by(r, hotels, cache):
+			continue
+		frappe.db.set_value("TEX Member Session", r.name, "revoked_at", now)
+		ended.append(r.name)
+		reached |= {r.property} if r.property else cache.get(r.site, set()) & hotels
+	audit("member.sessions_end", reference_doctype="Guest", reference_name=guest,
+	      property=min(reached) if reached else None, hotels=reached, new={"ended": len(ended), "sessions": ended})
+	return len(ended)
+
+
 def end_sessions(guest: str) -> int:
 	"""Right to erasure: the guest's sessions go (``erase_traces``)."""
 	names = frappe.get_all("TEX Member Session", filters={"guest": guest}, pluck="name")

@@ -7,6 +7,7 @@ import { date, month, num, pct } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Checkbox, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
 import { isInteger, useEvent, useIntentKey } from "../lib"
+import { WebSessions } from "./WebSessions"
 import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyMembership, LoyaltyProgramInfo, Stay } from "../types"
 
 /** Our optional helper module (kamra/tex/api/ui_backoffice_crm_payments.py). */
@@ -167,6 +168,7 @@ export function LoyaltyPanel({
           ))}
         </>
       )}
+      <WebSessions guest={guest.name} canEdit={canEdit} />
       <AdjustDialog
         open={adjust !== null}
         program={adjust ?? ""}
