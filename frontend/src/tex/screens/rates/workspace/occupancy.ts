@@ -963,17 +963,35 @@ export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[],
     const infants = children.filter((c) => infantCodes.has(c)).length
     return children.length - (asChildren ? 0 : infants) <= maxChildren && adults + children.length - (asOccupants ? 0 : infants) <= maxOccupants
   }
-  // the band multisets of n children, lazily (a large room with many bands has very many)
-  function* multisets(n: number, from: number): Generator<string[]> {
+  // how many of n children may be outside the infant bands for the party to fit (-1: none fits). The fit counts the
+  // children and the infants only, and more infants never hurts (§6K6, batch 2Q)
+  const plainAllowed = (adults: number, n: number) => {
+    let plain = n
+    if (asChildren) {
+      if (n > maxChildren) return -1
+    } else plain = Math.min(plain, maxChildren)
+    if (asOccupants) {
+      if (adults + n > maxOccupants) return -1
+    } else plain = Math.min(plain, maxOccupants - adults)
+    return plain < 0 ? -1 : plain
+  }
+  // the band multisets of n children with at most `plain` outside the infant bands, lazily and in band order (a large
+  // room with many bands has very many): a branch with more of them never fits, so it is not walked (batch 2Q)
+  function* multisets(n: number, from: number, plain: number): Generator<string[]> {
     if (n === 0) {
       yield []
       return
     }
-    for (let i = from; i < codes.length; i++) for (const rest of multisets(n - 1, i)) yield [codes[i], ...rest]
+    for (let i = from; i < codes.length; i++) {
+      const infant = infantCodes.has(codes[i])
+      if (!infant && plain <= 0) continue
+      for (const rest of multisets(n - 1, i, infant ? plain : plain - 1)) yield [codes[i], ...rest]
+    }
   }
+  // a party of n children fits when one of its multisets does: all of them infants, where the bands have one
   const some = (n: number, adults: number) => {
-    for (const children of multisets(n, 0)) if (fits(adults, children)) return true
-    return false
+    const plain = plainAllowed(adults, n)
+    return plain >= 0 && (n === 0 || (codes.length > 0 && (plain >= n || infantCodes.size > 0)))
   }
   const combos: { adults: number; children: number }[] = []
   for (let a = Math.max(1, int(capacity.min_adults)); a <= Math.min(int(capacity.max_adults), PARTY_ADULTS_MAX); a++)
@@ -988,7 +1006,7 @@ export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[],
   const kept: { party: PartyOption; combo: number; seq: number }[] = []
   fill: for (const { c, i } of byCommon) {
     let seq = 0
-    for (const children of multisets(c.children, 0)) {
+    for (const children of multisets(c.children, 0, plainAllowed(c.adults, c.children))) {
       if (!fits(c.adults, children)) continue
       if (kept.length >= PARTY_OPTIONS_MAX) break fill
       kept.push({ party: { id: `${c.adults}+${children.join(",")}`, adults: c.adults, children }, combo: i, seq: seq++ })
