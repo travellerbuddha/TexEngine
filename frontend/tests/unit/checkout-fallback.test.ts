@@ -58,3 +58,15 @@ test("a basket read but not usable asks for a refresh with its problem's code, a
   assert.deepEqual(basketExpiry({ status: "done", data: data(false, null) }), { code: null, message: "" })   // an older server
   assert.equal(basketExpiry({ status: "idle", data: null }), null)
 })
+
+// §6K5 (batch 2P): a basket the server refuses as gone (QUOTE_INVALID, SEARCH_AGAIN…) showed "Try again", which fails
+// the same way; it takes the refresh path, the refusal's code with it. A connection or a rate limit still asks to retry
+test("a basket refused as gone asks for a refresh; any other failure still asks to try again", async () => {
+  const { basketExpiry } = await import("../../src/booking/lib/methods.ts")
+  const gone = { kind: "expired", code: "QUOTE_INVALID", message: "Your selection is no longer valid." }
+  assert.deepEqual(basketExpiry({ status: "error", data: null, error: gone }), { code: "QUOTE_INVALID", message: gone.message })
+  assert.deepEqual(basketExpiry({ status: "error", data: null, error: { kind: "expired", code: "SEARCH_AGAIN" } }), { code: "SEARCH_AGAIN", message: "" })
+  assert.equal(basketExpiry({ status: "error", data: null, error: { kind: "network", message: "" } }), null)
+  assert.equal(basketExpiry({ status: "error", data: null, error: { kind: "rate_limit", code: "RATE_LIMITED" } }), null)
+  assert.equal(basketExpiry({ status: "error", data: null }), null)
+})

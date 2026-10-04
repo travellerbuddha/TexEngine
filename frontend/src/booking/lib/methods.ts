@@ -65,10 +65,19 @@ export function basketFailureText(i18n: RefusalI18n, error: (Refused & { kind?: 
 /**
  * The refresh a basket asks for (§5b, §6G3; batch 2P): read, but its quotes used or expired since they were made. The
  * code of its rooms' problem goes with it, a price already booked first: refreshing that one would book the stay a
- * second time. Null when nothing is to refresh.
+ * second time. A basket the server refuses as gone (an "expired" refusal: QUOTE_INVALID, SEARCH_AGAIN…) asks for it
+ * too, with that refusal: trying again would fail the same way (§6K5). Null when nothing is to refresh.
  */
-export function basketExpiry(basket: { status: string; data: Basket | null }): { code: string | null; message: string } | null {
-  if (!basket.data || basket.data.usable) return null
+export function basketExpiry(basket: {
+  status: string
+  data: Basket | null
+  error?: (Refused & { kind?: string }) | null
+}): { code: string | null; message: string } | null {
+  if (!basket.data) {
+    const e = basket.error
+    return basket.status === "error" && e?.kind === "expired" ? { code: e.code ?? null, message: e.message ?? "" } : null
+  }
+  if (basket.data.usable) return null
   const codes = basket.data.rooms.map((r) => r.problem_code).filter((c): c is string => Boolean(c))
   return { code: codes.includes("QUOTE_USED") ? "QUOTE_USED" : (codes[0] ?? null), message: "" }
 }
