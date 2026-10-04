@@ -21,7 +21,7 @@ from kamra.tex.crm import loyalty
 from kamra.tex.crm import segments as seg
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, log_exception
 
 EDITABLE = ("first_name", "last_name", "phone", "email", "nationality", "date_of_birth", "gender", "vip",
             "guest_notes", "address_line", "city", "tex_language", "tex_country", "tex_market", "tex_tags",
@@ -898,6 +898,17 @@ def guest_on_update(doc, method=None) -> None:
 		forget_phone(doc.name)                      # no SMS or WhatsApp consent left: no phone on the cases (O-26)
 
 
+def _drop_links_after_commit(emails) -> None:
+	"""The erasure is on record: a failure here (Redis) is logged, never the request's or the job's answer (review round 2
+	of 2O: the after-commit callbacks run outside Frappe's error handling)."""
+	from kamra.tex.crm import members
+
+	try:
+		members.drop_links(emails)
+	except Exception:
+		log_exception("TEX erasure: member links")
+
+
 def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True) -> dict:
 	"""Right to erasure (``kamra.api.anonymize_guest``), after the profile itself was blanked and its
 	consent withdrawn: its cases and funnel data are forgotten; its bookings and their payment links keep
@@ -943,7 +954,7 @@ def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True)
 	# the sign-in and join links mailed to its address and not opened yet (batch 2O); again once this is committed, for
 	# a link a request filed meanwhile from the profile as it was before (review round 1, NIT 4)
 	pending = members.drop_links(emails)
-	frappe.db.after_commit.add(lambda: members.drop_links(emails))
+	frappe.db.after_commit.add(lambda: _drop_links_after_commit(emails))
 	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
 	       "history_rows_removed": history, "merge_copies_removed": copies, "memberships_ended": ended,
 	       "sessions_ended": sessions, "member_links_dropped": pending}

@@ -739,3 +739,39 @@ class TestStaffSeeAndEndSessions(WebMemberCase):
 		finally:
 			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
 		self.assertEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), mine), self.guest)
+
+
+class TestBatch2OReviewRound2(WebMemberCase):
+	"""Review round 2 of batch 2O (S-1, from 2N-2): the address rule held one way only. A typed address must be ASCII,
+	but the database compares accents away, so ana@muller.de found the profile of ana@müller.de (stored by staff):
+	the link went to the typed address and signed its owner in to someone else's profile."""
+
+	def test_2o_r2_a_look_alike_address_never_finds_an_accented_profile(self):
+		frappe.db.set_value("Guest", self.guest, "email", "mia.r2@exämple.de")
+		self.ask("mia.r2@example.de")
+		to, _subject, html = self.mails[-1]
+		self.assertEqual(to, "mia.r2@example.de")
+		self.assertIsNone(self.token())                                       # no profile here: no link
+		self.assertIn("no membership", html)
+		# a join makes the typed address its own profile, never the accented one's
+		self.ask("mia.r2@example.de", "join", first_name="Other", last_name="Person", accepted=1)
+		signed = self.verify(self.token())
+		self.assertNotEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), signed["session"]),
+		                    self.guest)
+		self.assertEqual(frappe.db.get_value("Guest", self.guest, "first_name"), "Mia")
+
+	def test_2o_r2_the_same_address_in_another_case_is_the_profile(self):
+		frappe.db.set_value("Guest", self.guest, "email", self.email.upper())
+		self.ask(self.email)
+		signed = self.verify(self.token())
+		self.assertEqual(members.session_guest(frappe.get_doc("TEX Booking Site", SLUG), signed["session"]), self.guest)
+
+	def test_2o_r2_a_failed_drop_after_the_erasure_is_logged_not_raised(self):
+		"""Review round 2 of 2O (NIT-A): the second drop runs after the erasure's commit, outside Frappe's error
+		handling: a Redis failure there must not turn a recorded erasure into a 500 or a failed job."""
+		from kamra.tex.crm import service as crm_service
+
+		before = frappe.db.count("Error Log", {"method": "TEX erasure: member links"})
+		with mock.patch.object(members, "drop_links", side_effect=ConnectionError("redis is down")):
+			crm_service._drop_links_after_commit((self.email,))
+		self.assertEqual(frappe.db.count("Error Log", {"method": "TEX erasure: member links"}), before + 1)

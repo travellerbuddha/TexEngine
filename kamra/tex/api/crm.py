@@ -151,7 +151,8 @@ def member_sessions(guest: str):
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def end_member_sessions(guest: str, session: str | None = None):
-	"""Sign the guest out on the booking sites: every session the user sees, or the one named (batch 2O)."""
+	"""Sign the guest out on the booking sites: every open session at a hotel where the user may edit the guest, or the
+	one named (batch 2O)."""
 	from kamra.tex.crm import members
 
 	via = crm.require_guest(guest, "crm.edit")

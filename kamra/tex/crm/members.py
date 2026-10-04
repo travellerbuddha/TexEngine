@@ -95,11 +95,21 @@ def _name(raw, code: str) -> str:
 	return value
 
 
-def _profile(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
-	"""The profile a booking with this e-mail would join (``booking._find_profile``: the e-mail is the identity)."""
-	from kamra.tex.services.booking import _find_profile
+# the profiles of an address in a site's enterprise (or of none), as ``booking._find_profile`` reads them: the database
+# compares accents and case away (utf8mb4_unicode_ci), so the exact address is chosen among them below
+PROFILES_OF = """SELECT g.name, g.email FROM `tabGuest` g WHERE g.email = %(email)s
+                 AND (IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)
+                 ORDER BY g.creation ASC, g.name ASC"""
 
-	return _find_profile({"email": email}, enterprise, staff=False, lock=lock)
+
+def _profile(email: str, enterprise: str | None, *, lock: bool = False) -> str | None:
+	"""The profile of this e-mail, the oldest of the site's enterprise (or of none), as a booking finds it
+	(``booking._find_profile``: the e-mail is the identity), but only one whose stored e-mail is this address, in any
+	case (review round 2 of 2O, S-1: the database compares accents away, so ana@muller.de found the profile of
+	ana@müller.de and its link signed the look-alike's owner in to it). ``lock``: locking reads."""
+	rows = frappe.db.sql(PROFILES_OF + (" FOR UPDATE" if lock else ""), {"email": email, "ent": enterprise or ""},
+	                     as_dict=True)
+	return next((r.name for r in rows if (r.email or "").strip().lower() == email), None)
 
 
 def _cache():
@@ -413,8 +423,9 @@ def staff_sessions(guest: str, hotels: set[str], edit: set[str] | None = None) -
 
 
 def staff_end_sessions(guest: str, hotels: set[str], name: str | None = None) -> int:
-	"""Staff sign the guest out (a lost phone, a shared computer): every open session of theirs staff see, or the one
-	named; audited ``member.sessions_end`` on the guest, to the hotels it reached (batch 2O). → how many ended."""
+	"""Staff sign the guest out (a lost phone, a shared computer): every open session of theirs at the booking sites of
+	``hotels`` (those where the user may edit the guest), or the one named; audited ``member.sessions_end`` on the guest,
+	to the hotels it reached (batch 2O). → how many ended."""
 	from kamra.tex.security.audit import audit
 
 	now, cache, ended, reached = now_datetime(), {}, [], set()
