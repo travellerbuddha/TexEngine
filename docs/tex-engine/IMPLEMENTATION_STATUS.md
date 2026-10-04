@@ -2382,8 +2382,9 @@ nine held, two were dropped (below) and one was left for its own batch (money).
 The owner chose (2026-10-04, "4 numarayı komple yap") every LOW leftover that needs no decision of theirs, and
 answered HANDOFF §2 item 11: a booking made for someone else follows the e-mail address entered in it (the
 confirmation and manage link, the profile, its points, the member price). That is today's behaviour: recorded, no
-code. ADR-081. Three independent read-only reviewers re-verified 27 cards first: 13 held (below), 8 need the owner,
-3 are money, the rest were done already, cannot occur or were dropped (listed at the end).
+code. ADR-081. Three independent read-only reviewers re-verified 27 cards first: 13 held (below), 7 need the owner,
+2 are money (with the duplicate capture already open), 5 were done already, cannot occur or were dropped (listed at
+the end).
 
 - 2Q-1 (§6P) **COMPLETE**: a profile's e-mail is one plain address on every path that stores one (`Guest.validate`
   for a changed address, a merge excepted; the legacy channel manager and migration import leave it out; the legacy
@@ -2419,7 +2420,9 @@ code. ADR-081. Three independent read-only reviewers re-verified 27 cards first:
   committed after filing, review round 1; an erasure counter at first); a link opened by a request that then fails is
   put back on rollback. Tests: `test_member_web.TestPendingLinksAndErasure` (+3). Red: `ValidationError not raised`
   (the link opened); `MEMBER_LINK_INVALID` on opening it again after the rollback; review round 1: `Lists differ:
-  [('c04-mia-…', 'Confirm t…')] != []` (the counter missed a read view older than the erasure).
+  [('c04-mia-…', 'Confirm t…')] != []` (the counter missed a read view older than the erasure); review round 2: a link
+  names its profile and is refused when that one is gone or erased (red: `ValidationError not raised`, the link made
+  the profile again), the put-back's log deferred (red: `None is not true`).
 - 2Q-11 (§6N1) **COMPLETE**: the caller's membership is read once per program, the erasure mark once
   (`loyalty.member_hotels`). Test: `test_loyalty_membership.TestMemberPrices.test_2q_…`. Red: `2 != 1`.
 - 2Q-12 (§6N2) **COMPLETE**: the "Member price" teaser prices a hotel again only where a members-only promotion may
@@ -2447,6 +2450,15 @@ code. ADR-081. Three independent read-only reviewers re-verified 27 cards first:
   `test_member_web.TestPendingLinksAndErasure` (+1, and the first race test erases for real), `TestRejoinBlocked`
   (+2 assertions). Accepted, L3: the legacy channel manager (hotels outside TEX) makes a profile per event for a
   phone-less guest whose address it leaves out.
+- Review round 2 **COMPLETE** (an independent read-only reviewer; no HIGH or MEDIUM; every round-1 finding verified
+  fixed; 1 LOW, 3 NITs): LOW-1, a link names its profile (above); NIT-1, the put-back's failure log deferred; NIT-2, no
+  blocked-rejoin mail to an address erased since the request's read view (red: `Lists differ: [('c04-mia-…', 'About
+  joi…')] != []`); NIT-3, these docs' counts and wording. Tests: `test_member_web` (+3). Not taken: deferring the
+  erasure's after-commit log (2O): `test_2o_r2_a_failed_drop_after_the_erasure_is_logged_not_raised` counts its row
+  (`14 != 15` when deferred), an existing assertion.
+- Local runs on the final head: TEX unit 706; integration 51 modules, 1,438 tests (`test_scheduler_smoke` differs only
+  locally); node unit 461; DOM 45; Playwright 219 tests in 56 spec files (210 passed, 9 skipped by design); eval 76/76;
+  banquet 101; front-desk journey 13/13; i18n complete; ruff clean on the changed files.
 - **Not done:**
   - the owner's (HANDOFF §2): a basket refused as gone offers "Try again" (item 12, LO-14's assertion); Turkish-F
     letters other than ı/İ as shortcuts (`keys.test.ts`, `callcenter-shortcuts.test.ts` assert none); a connection
@@ -2460,4 +2472,6 @@ code. ADR-081. Three independent read-only reviewers re-verified 27 cards first:
     address (now one plain one) to a TEX guest's profile without an audit (LOW; whether TEX hotels use it is the
     owner's, with D-15);
   - an extra added after booking and a change's warnings still name a capacity refusal in text (their messages);
-  - a link taken by a request whose COMMIT statement itself fails is lost (rare).
+  - a link taken by a request whose COMMIT statement itself fails is lost (rare);
+  - the erasure's after-commit drop logs a failure into a transaction nothing commits, so the log is lost (2O; deferring
+    it changes `test_2o_r2_a_failed_drop_after_the_erasure_is_logged_not_raised`'s count: HANDOFF §2 item 21).

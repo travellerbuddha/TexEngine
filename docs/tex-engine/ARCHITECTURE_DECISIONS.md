@@ -10172,8 +10172,9 @@ confirmation and the manage link go to that address; that address's profile is t
 and is checked for the member price (ADR-077, ADR-080). In the call centre a separate booker gets the confirmation at
 `booker_email`, else the guest's address. This is how TEX works today: no code changes for it.
 - Cards. Three independent read-only reviewers re-verified 27 candidate cards against `e8e3333`: 13 held and are this
-  batch; 8 need the owner (they change an existing test assertion or a behaviour rule) and were not started; 3 touch
-  money and go to their own batch; the rest were done already, cannot occur, or were dropped (§6Q lists each).
+  batch; 7 need the owner (they change an existing test assertion or a behaviour rule) and were not started; 2 touch
+  money and join the duplicate capture already open in a money batch of its own; 5 were done already, cannot occur, or
+  were dropped (§6Q lists each).
 - *One plain address on every path* (§6P): `Guest.validate` (`crm.service._one_plain_address`, whoever saves: the Desk
   form, REST, Data Import, banquet, the legacy channel manager) refuses an address that changes and is not one plain
   address (`booking.plain_email`, ADR-080). Only a changed address is checked: a profile stored before keeps saving, and
@@ -10216,9 +10217,11 @@ and is checked for the member price (ADR-077, ADR-080). In the call centre a sep
   share-locked read of its row by name, `members._still_theirs`) and drops the link of a profile erased or merged
   meanwhile, mailing nothing (a join link opened later made the erased profile again); an erasure committed after that
   read drops the link itself, which is pending by then. The profile is still found with a plain read (a locking read by
-  e-mail from an anonymous endpoint was the alternative). A link taken by a request that then fails before its commit
-  is put back by `after_rollback` (a commit clears it; a COMMIT statement that fails itself is not covered, rare; a
-  failure to put it back is logged).
+  e-mail from an anonymous endpoint was the alternative). A link names the profile it was mailed for and is refused
+  when opened after that profile is gone, erased or no longer the address's (review round 2: a link opened during the
+  erasure, or put back after its drop, made a profile again). A link taken by a request that then fails before its
+  commit is put back by `after_rollback` (a commit clears it; a COMMIT statement that fails itself is not covered,
+  rare; a failure to put it back is logged, deferred: nothing commits the rollback's transaction).
 - *Membership reads* (§6N1): `loyalty.member_hotels` reads the profile's erasure mark once and each program once for a
   set of hotels (the call centre's search, the booking site's member hotels); it was once per hotel.
 - *The "Member price" teaser* (§6N2): `promotions.may_apply_to_stay` (pure) rules out a members-only promotion that can
@@ -10246,3 +10249,11 @@ and is checked for the member price (ADR-077, ADR-080). In the call centre a sep
   writes no second audit; N4, the price notice takes the focus only for a change it did not show; N5, a doc comment
   back on its component. Accepted (L3): the legacy channel manager (hotels outside TEX) makes a profile per event for a
   phone-less guest whose address it now leaves out.
+- *Review round 2* (an independent read-only reviewer; no HIGH or MEDIUM; every round-1 finding verified fixed, L3
+  accepted; no interleaving of a request and an erasure leaves a live link, and none deadlocks): LOW-1 (before 2Q, next
+  to L2), a join link opened while its profile was being erased, or put back just after the erasure's drop, made the
+  profile again: a link names its profile (above); NIT-1, a log written in the rollback's transaction is lost: the
+  put-back's is deferred (`log_exception(defer=True)`); NIT-2, the blocked-rejoin mail went to an address erased since
+  the request's read view: read again as committed first; NIT-3, the docs' counts and wording. Not taken: deferring the
+  erasure's own after-commit log (2O), because `test_2o_r2_a_failed_drop_after_the_erasure_is_logged_not_raised`
+  counts its row (an existing assertion: the owner's, HANDOFF §2 item 21).

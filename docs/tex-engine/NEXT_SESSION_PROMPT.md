@@ -19,7 +19,7 @@ Son durum:
   - depozito payı, fiyat uyarısı, ekstra ret kodları, üyelik engeli, bağlantı yarışları ve diğer maddeler.
 - Bekleyen sahip soruları (o iş başlarken bana sor, HANDOFF §2):
   - madde 12: "geçersiz sepet" uyarısındaki "Tekrar dene" (LO-14 e2e testi değişir);
-  - madde 14–20: Türkçe-F kısayolları, etiketsiz kanal adı, çağrı merkezinde promosyon kodundaki boşluk, grup programı ile otel programı çakışması, geleceğe taşınan konaklamanın puanları, eski MCP kaydında hız sınırı, kontrast ölçümü (her biri mevcut bir testi ya da bir kuralı değiştirir).
+  - madde 14–21: Türkçe-F kısayolları, etiketsiz kanal adı, çağrı merkezinde promosyon kodundaki boşluk, grup programı ile otel programı çakışması, geleceğe taşınan konaklamanın puanları, eski MCP kaydında hız sınırı, kontrast ölçümü, silme sonrası hata kaydının kalıcı olması (her biri mevcut bir testi ya da bir kuralı değiştirir).
 - Para partisi (madde 13): mükerrer tahsilat, inceleme sürerken yeni ödeme, LO-09 profil yarışı.
 
 ## İlk adımlar
@@ -29,7 +29,7 @@ Son durum:
    - D-15: her otelde hangi PMS? (PMS adaptörleri, SMS/WhatsApp, PMS'ten gelen olaylar)
    - Dış taraf bekleyen C maddeleri: C-10, C-14, C-15 (belge veya hesap geldiyse)
    - Para partisi (HANDOFF §2 madde 13)
-   - Sahip soruları (HANDOFF §2 madde 12 ve 14–20; önce soruları bana sor)
+   - Sahip soruları (HANDOFF §2 madde 12 ve 14–21; önce soruları bana sor)
 
    Cevabımı almadan, karar bekleyen bir işe başlama.
 

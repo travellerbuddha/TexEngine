@@ -72,7 +72,9 @@ the descriptions of PRs #3–#37 (each has its items, fail-first evidence, revie
   journey 13/13. PR #35's description has its CI runs. After 2P (PR #36, local runs): TEX unit 703; integration 51
   modules, 1,419 tests (`test_scheduler_smoke` differs only locally); node unit 455; DOM 45; Playwright 218 tests in 56
   spec files (9 skipped by design); eval 76/76; banquet 101; front-desk journey 13/13. PR #36's description has its CI
-  runs.
+  runs. After 2Q (PR #37, local runs): TEX unit 706; integration 51 modules, 1,438 tests (`test_scheduler_smoke`
+  differs only locally); node unit 461; DOM 45; Playwright 219 tests in 56 spec files (9 skipped by design); eval
+  76/76; banquet 101; front-desk journey 13/13. PR #37's description has its CI runs.
 
 ## 2. What is left
 
@@ -91,7 +93,7 @@ Nothing planned remains. In order of likely need:
 | 7 | ~~CLP and ISK~~ **answered and done** (2O, PR #35): whole units, as ISO 4217 says | none | §6O, ADR-079 |
 | 8 | ~~G-99: `get_contract` returns `payload_hash` to `price.view` callers~~ **done** (PR #31) | none | §6L, ADR-075 |
 | 9 | ~~About thirty dialogs reset their form in a passive effect after opening~~ **done** (PR #31): the design system's overlays keep their content hidden until a pass after they open | none | §6L, ADR-075 |
-| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" (2O took ten of them, 2P nine, 2Q thirteen: every one that needs no decision; §6Q lists what is left, items 12–20 here) | none (LOW) | §6 … §6Q |
+| 10 | Each batch's "Not done" line in its IMPLEMENTATION_STATUS §6* section and its PR's "Kalanlar" (2O took ten of them, 2P nine, 2Q thirteen: every card that needed no decision; §6Q's "Not done" keeps a few smaller ones, items 12–21 here) | none (LOW) | §6 … §6Q |
 | 11 | ~~A booking made for someone else~~ **answered** (owner, 2026-10-04, 2Q): everything follows the e-mail address entered in the booking (the confirmation and manage link, the profile, its points, the member price); today's behaviour, recorded | none | ADR-081, §7 2Q |
 | 12 | A basket refused as gone (`QUOTE_INVALID`, `SEARCH_AGAIN`) offers "Try again", which fails the same way; the refresh path instead was built in 2P and withdrawn: `booking.spec`'s LO-14 test asserts "Try again" on purpose | **owner**: may that e2e assertion change? | §6K5, §6P |
 | 13 | Money, its own batch: a duplicate capture of a settled charge audited apart (LO-04's optional part: it asks the gateway on every replay); a review recorded while a new charge starts (pays twice, flagged OVERPAID: re-check the review after the checkout is made, lock order link → charges → booking); LO-09's duplicate on a profile created after the revival's read view began (a locking read of profiles by e-mail and phone) | none (money, M) | §6K1, §6K3, §6Q, ADR-081 |
@@ -102,6 +104,7 @@ Nothing planned remains. In order of likely need:
 | 18 | A matured stay's points stay Available when the stay is moved into the future (spendable before the stay; given back if it is cancelled) | **owner** (a points rule; `test_loyalty_admin` asserts today's balance) | §6K2, §6Q |
 | 19 | A rate limit on the legacy MCP `/mcp/oauth/register` (anyone may register a client; redirects limited to claude.ai and loopback), or retiring the legacy MCP | **owner** | §6Z, §6Q |
 | 20 | Contrast measured on screen (R-51, G-63): axe in Playwright (a new dev dependency) or a static scan; light-theme `text-zinc-400` is about 2.6:1 | **owner** | §6Z, §6Q |
+| 21 | The erasure's after-commit drop of member links (2O) logs a failure into a transaction nothing commits, so the log is lost; deferring it (as 2Q's put-back does) changes the count `test_2o_r2_a_failed_drop_after_the_erasure_is_logged_not_raised` asserts | **owner**: may that assertion change? | §6Q, ADR-081 |
 
 Not in scope unless the owner asks: G-41r allotment × channel, G-54 surcharges by LOS/arrival, G-64 CRM campaigns.
 
@@ -332,8 +335,9 @@ the source data and a cut-over date. `GO_LIVE_READINESS.md` tracks them.
 4. Agree the next batch with the owner, in Turkish, with the options of §2 and the consequence of each (plain
    questions worked best, D-14): D-15 (which PMS per hotel: the PMS adapters, SMS / WhatsApp, inbound events), the
    external C-items (C-10, C-14, C-15) when their parties deliver, the money batch (§2 item 13), or the owner's
-   questions of §2 items 12 and 14–20 (each changes an existing test assertion or a rule: ask first). Every LOW
-   leftover that needed no decision was done in 2Q. Never start an item that waits for an answer.
+   questions of §2 items 12 and 14–21 (each changes an existing test assertion or a rule: ask first). 2Q took every
+   LOW card that needed no decision (§6Q's "Not done" keeps a few smaller ones). Never start an item that waits for an
+   answer.
 5. Work as in §3; keep this file current: when a batch merges, mark it in §1 in your next batch's docs commit.
 
 The owner's opening message for a new session is kept in `NEXT_SESSION_PROMPT.md` (Turkish): the same steps and

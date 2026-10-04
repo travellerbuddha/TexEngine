@@ -213,7 +213,10 @@ the guest's manage token.
   the legacy writers; the pre-arrival check-in no longer clears an address); staff block an ended membership's
   online rejoin (`crm.loyalty_block_rejoin`, `crm.edit` through the guest and at a hotel of the program, audited);
   a member link filed after an erasure by a request that read before it is dropped; sold-out names reach the guest
-  in their language, never in the exception's params. Review rounds: see PR #37.
+  in their language, never in the exception's params. Independent review round 1: 3 Low (the legacy banquet
+  address; a read view older than an erasure, closed by reading the profile again as committed after a link is filed;
+  a legacy channel's profile per event, accepted) and NITs; round 2: 1 Low (a link names the profile it was mailed for,
+  so one opened during an erasure makes no profile again) and NITs; fixed with fail-first tests (PR #37).
 
 ## 7. Known gaps (tracked)
 
