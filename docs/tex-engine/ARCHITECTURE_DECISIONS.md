@@ -10047,14 +10047,17 @@ scope prioritised after go-live), and C-13 is D-12's answer (loyalty is live at 
   either currency; their wire format is unchanged.
 - *Links mailed before an erasure.* The erasure blanks the profile's e-mail, so a join link opened after it found no
   profile and made a new one from the name typed before (worse than the LOW the ADR-078 "Not done" listed). Each link's
-  hash is also kept in the address's pending set (Redis, by enterprise and the address's hash; the link, the set and
-  its expiry in one transaction, the set outliving its links); `members.drop_links` deletes them, called by
-  `crm.erase_traces` with the e-mails `anonymize_guest` gives it. A request that failed after taking a link puts it
-  back only while it is still pending, and reads no database to do so (the enterprise travels in the link's data).
-  Not taken: matching the erased profile at verify (its e-mail is gone).
+  hash is also kept in the address's pending set (Redis, by the address's hash only, site-scoped by `make_key`: review
+  round 1 S1, a profile of no enterprise matches every enterprise's site; the link, the set and its expiry in one
+  transaction, the set outliving its links); `members.drop_links` deletes them, called by `crm.erase_traces` with the
+  e-mails `anonymize_guest` gives it, and again once the erasure is committed (a link a request filed meanwhile from
+  the profile as it was). Another enterprise's link to the same address goes too: its owner asks for a new one. A
+  request that failed after taking a link puts it back only while it is still pending, and reads no database to do
+  so. Not taken: matching the erased profile at verify (its e-mail is gone).
 - *Staff and a guest's web sessions.* `crm.member_sessions(guest)` (`crm.view`) lists the guest's sessions on the
   booking sites of the hotels the user sees the guest through (a session of a group site belongs to the site's
-  hotels, as `perm` reads site records): site, since, until, signed out, active; never a token or its hash.
+  hotels, as `perm` reads site records): site, since, until, signed out, active, and `can_end` (open, at a hotel where
+  the user may edit the guest: review round 1); never a token or its hash.
   `crm.end_member_sessions(guest, session=None)` (`crm.edit`) signs the guest out of every open session the user sees,
   or the one named, audited `member.sessions_end` on the guest to the hotels it reached. CRM → Loyalty shows them.
 - *A signed-in join for a profile e-mail that cannot take a link* (staff typed an address that is not one plain ASCII
@@ -10067,8 +10070,9 @@ scope prioritised after go-live), and C-13 is D-12's answer (loyalty is live at 
 - *Money kept on the booking (G-93) is no overpayment.* A "Kept on the booking" close records on the change request
   the whole excess the booking holds on purpose then (`staff_kept_excess`, the booking read under the close's lock)
   and when (`staff_kept_at`). The overpaid check reads the latest decision, as a "Credit on booking" (LO-17): the
-  latest staff keep when it is not older than the latest credit request, else that credit. Not taken: adding staff
-  keeps up (a later credit request already includes what was kept before it).
+  latest staff keep when it is not older than the latest credit, else that credit. A credit is decided when staff
+  approve it (`credit_at`, review round 1 S2), or, applied at once, when the guest made it (its creation). Not taken:
+  adding staff keeps up (a later credit already includes what was kept before it).
 - *Staff re-verification records when it asked* (`payments.mark_reverified`, also the job's): the charge's row only,
   after its question; when the gateway confirms nothing, the step is committed before the refusal, which would undo
   it (the request is not run again after a committed step).
