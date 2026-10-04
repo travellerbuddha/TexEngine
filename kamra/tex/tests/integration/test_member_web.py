@@ -273,6 +273,35 @@ class TestMemberPricesOnTheWeb(WebMemberCase):
 			for r in o["rooms"]:
 				self.assertFalse(quoting.verify(r["offer_key"])["member"])
 
+	def test_2q_the_teaser_prices_again_only_where_a_members_promotion_may_apply(self):
+		"""Batch 2Q (§6N2): the "Member price" teaser priced the whole search a second time, as a member, at every
+		hotel with a members-only promotion live now, whatever the stay: the promotion's stay window, markets and
+		channels were left to the engine, so a search it could never apply to was priced twice for nothing. Such a
+		hotel is left out of the second search; the prices shown are unchanged."""
+		from kamra.tex.services import quoting
+
+		def members_promotion(**values):
+			sets = ", ".join(f"`{k}`=%({k})s" for k in values)
+			frappe.db.sql(f"UPDATE `tabTEX Promotion` SET {sets} WHERE name=%(n)s OR revision_of=%(n)s",
+			              {**values, "n": self.members_ten})
+
+		def searched() -> tuple[int, dict]:
+			with mock.patch.object(quoting, "search", wraps=quoting.search) as spy:
+				offer = self.flex(self.search())
+			return spy.call_count, offer
+
+		calls, offer = searched()
+		self.assertEqual(calls, 2)                                   # it may apply: the teaser's own search
+		self.assertIn("member_total", offer)
+		for values in ({"stay_from": str(fx.d(8, 1)), "stay_to": str(fx.d(8, 31))}, {"markets": "UK"},
+		               {"channels": "OTA"}):
+			with self.subTest(values=values):
+				members_promotion(**values)
+				calls, offer = searched()
+				self.assertEqual(calls, 1)
+				self.assertNotIn("member_total", offer)
+				members_promotion(**dict.fromkeys(values))
+
 	def test_c04f_a_signed_in_member_is_priced_as_one_and_books_at_it(self):
 		self.join(self.guest)
 		session = self.signed_in()

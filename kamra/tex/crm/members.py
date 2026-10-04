@@ -30,7 +30,7 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, get_datetime, now_datetime
+from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.crm import loyalty
 from kamra.tex.services.refusals import refusal
@@ -353,13 +353,25 @@ def member_hotels(site, guest: str | None) -> set[str]:
 	return loyalty.member_hotels(guest, site_properties(site))
 
 
-def teaser_hotels(site, props: list[str]) -> set[str]:
+def teaser_hotels(site, props: list[str], *, check_in=None, check_out=None, market: str | None = None,
+                  channel: str | None = None, promo_codes=()) -> set[str]:
 	"""Of ``props``, the hotels whose program has a members-only promotion live now: where anyone is shown the member
-	price as "Member price" (the owner's choice; applied only to a member signed in)."""
+	price as "Member price" (the owner's choice; applied only to a member signed in). With the search's stay, market
+	and channel, only where such a promotion may apply to it (``promotions.may_apply_to_stay``; batch 2Q): the teaser
+	prices those hotels a second time."""
 	from kamra.tex.commercial import context
+	from kamra.tex.pricing.promotions import code_key, may_apply_to_stay
 
 	now = now_datetime()
-	return {p for p in props if loyalty.program_for(p) and any(x.member_only for x in context.promotions(p, now))}
+	stay = None
+	if check_in and check_out and market and channel:
+		stay = {"check_in": getdate(check_in), "check_out": getdate(check_out), "market": market, "channel": channel,
+		        "codes": frozenset(code_key(c) for c in promo_codes or () if c)}
+
+	def teased(promotion) -> bool:
+		return promotion.member_only and (stay is None or may_apply_to_stay(promotion, **stay))
+
+	return {p for p in props if loyalty.program_for(p) and any(teased(x) for x in context.promotions(p, now))}
 
 
 def status(site, guest: str) -> dict:
