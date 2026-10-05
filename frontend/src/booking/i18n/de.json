@@ -161,6 +161,7 @@
   "policy.depositFixed": "Anzahlung von {amount} bei Buchung",
   "policy.depositFixedBooking": "Anzahlung von {amount} für die ganze Buchung, bei Buchung",
   "policy.depositWithRoom": "Anzahlung: einmal für die Buchung, mit Zimmer {n}",
+  "policy.depositShare": "Anzahlung: {amount} der Anzahlung der Buchung werden mit diesem Zimmer erhoben",
   "policy.depositNights": { "one": "Preis der ersten Nacht als Anzahlung", "other": "Preis von {count} Nächten als Anzahlung" },
   "policy.payNothingNow": "Jetzt nichts zu zahlen",
   "policy.payAtHotelPossible": "Zahlung im Hotel möglich",

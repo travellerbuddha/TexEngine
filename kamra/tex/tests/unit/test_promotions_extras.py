@@ -3,6 +3,7 @@
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
+from types import MappingProxyType
 
 from kamra.tex.pricing import engine, extras, promotions
 from kamra.tex.pricing.enums import (
@@ -433,3 +434,36 @@ class TestMembersPrice(unittest.TestCase):
 		chosen, rejected = promotions.select([P("M", member_only=True)], pctx())[:2]
 		self.assertEqual(chosen, [])
 		self.assertEqual([(o.applied, o.member_only) for o in rejected], [(False, False)])
+
+
+class TestMayApplyToStay(unittest.TestCase):
+	"""Batch 2Q (§6N2): the "Member price" teaser prices a hotel a second time only where a members-only promotion may
+	apply to the search's stay. False only where it never can; what the engine decides per room, day or basket is
+	left to it."""
+
+	P = Promotion("P-2Q", "Members 10", PromoValueType.PERCENT, D("10"), member_only=True)
+	STAY = MappingProxyType({"check_in": date(2027, 6, 10), "check_out": date(2027, 6, 13), "market": "DE",
+	                         "channel": "DIRECT_WEB"})
+
+	def test_never_where_the_stay_market_channel_length_or_code_rule_it_out(self):
+		from dataclasses import replace
+
+		self.assertTrue(promotions.may_apply_to_stay(self.P, **self.STAY))
+		for never in (replace(self.P, stay_from=date(2027, 8, 1), stay_to=date(2027, 8, 31)),
+		              replace(self.P, markets=frozenset({"UK"})), replace(self.P, channels=frozenset({"OTA"})),
+		              replace(self.P, min_nights=4), replace(self.P, max_nights=2), replace(self.P, code="SUMMER"),
+		              replace(self.P, stay_match=StayMatch.ARRIVAL, stay_from=date(2027, 6, 11)),
+		              replace(self.P, value=D("0"))):
+			with self.subTest(promotion=never):
+				self.assertFalse(promotions.may_apply_to_stay(never, **self.STAY))
+
+	def test_maybe_where_the_engine_decides(self):
+		from dataclasses import replace
+
+		for maybe in (replace(self.P, stay_from=date(2027, 6, 12), stay_to=date(2027, 8, 1)),   # one night in it
+		              replace(self.P, room_types=frozenset({"DLX"}), boards=frozenset({"AI"})),
+		              replace(self.P, sale_to=date(2020, 1, 1), min_lead_days=400, min_basket=D("9999"))):
+			with self.subTest(promotion=maybe):
+				self.assertTrue(promotions.may_apply_to_stay(maybe, **self.STAY))
+		self.assertTrue(promotions.may_apply_to_stay(replace(self.P, code="summer"), **self.STAY,
+		                                             codes=frozenset({promotions.code_key("SUMMER")})))

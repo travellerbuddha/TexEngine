@@ -273,6 +273,35 @@ class TestMemberPricesOnTheWeb(WebMemberCase):
 			for r in o["rooms"]:
 				self.assertFalse(quoting.verify(r["offer_key"])["member"])
 
+	def test_2q_the_teaser_prices_again_only_where_a_members_promotion_may_apply(self):
+		"""Batch 2Q (§6N2): the "Member price" teaser priced the whole search a second time, as a member, at every
+		hotel with a members-only promotion live now, whatever the stay: the promotion's stay window, markets and
+		channels were left to the engine, so a search it could never apply to was priced twice for nothing. Such a
+		hotel is left out of the second search; the prices shown are unchanged."""
+		from kamra.tex.services import quoting
+
+		def members_promotion(**values):
+			sets = ", ".join(f"`{k}`=%({k})s" for k in values)
+			frappe.db.sql(f"UPDATE `tabTEX Promotion` SET {sets} WHERE name=%(n)s OR revision_of=%(n)s",
+			              {**values, "n": self.members_ten})
+
+		def searched() -> tuple[int, dict]:
+			with mock.patch.object(quoting, "search", wraps=quoting.search) as spy:
+				offer = self.flex(self.search())
+			return spy.call_count, offer
+
+		calls, offer = searched()
+		self.assertEqual(calls, 2)                                   # it may apply: the teaser's own search
+		self.assertIn("member_total", offer)
+		for values in ({"stay_from": str(fx.d(8, 1)), "stay_to": str(fx.d(8, 31))}, {"markets": "UK"},
+		               {"channels": "OTA"}):
+			with self.subTest(values=values):
+				members_promotion(**values)
+				calls, offer = searched()
+				self.assertEqual(calls, 1)
+				self.assertNotIn("member_total", offer)
+				members_promotion(**dict.fromkeys(values))
+
 	def test_c04f_a_signed_in_member_is_priced_as_one_and_books_at_it(self):
 		self.join(self.guest)
 		session = self.signed_in()
@@ -557,6 +586,85 @@ class TestRejoinBlocked(WebMemberCase):
 		self.assertIn("contact the hotel", self.mails[-1][2])
 		self.assertFalse(loyalty.is_member(self.guest, fx.PROPERTY))
 
+	def block(self, user: str | None = None) -> dict:
+		from kamra.tex.api import crm as crm_api
+
+		frappe.set_user(user or self.desk)  # nosemgrep: frappe-setuser -- staff block an ended membership's rejoin
+		try:
+			return crm_api.loyalty_block_rejoin(guest=self.guest, program=self.club, reason="Abused member prices")
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+	def test_2q_staff_block_the_rejoin_of_a_membership_that_ended(self):
+		"""Batch 2Q (§6O, 2O review round 1 NIT 2): staff could block a rejoin only while ending a membership; for a
+		guest who had left without one, they joined the guest and ended it again (a join on the record, a new end). They
+		block an ended membership's rejoin as it is: its end kept, the block audited, a web join then answered as for a
+		block made when it ended."""
+		from kamra.tex.api import crm as crm_api
+
+		self.join(self.guest)
+		name = self.leave(block=False)["name"]
+		ended = frappe.db.get_value("TEX Loyalty Member", name, ["left_at", "left_reason"])
+		self.assertEqual(self.block(), {"name": name, "status": "Left", "rejoin_blocked": 1})
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Left", 1))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["left_at", "left_reason"]), ended)
+		self.assertTrue(self.audited("loyalty.member_block", name).get("rejoin_blocked"))
+		self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1), {"ok": True})
+		self.assertIsNone(self.token())
+		self.assertIn("contact the hotel", self.mails[-1][2])
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, "status"), "Left")
+		# a viewer may not; an active membership is ended instead (with the block ticked)
+		with self.assertRaises(frappe.PermissionError):
+			self.block(user=self.viewer)
+		frappe.clear_messages()
+		self.join(self.guest)
+		with self.assertRaisesRegex(frappe.ValidationError, "ended"):
+			self.block()
+		frappe.clear_messages()
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Member", name, ["status", "rejoin_blocked"]), ("Active", 0))
+		self.leave(block=False)
+		self.block()
+		self.assertEqual(self.block(), {"name": name, "status": "Left", "rejoin_blocked": 1})   # again: nothing new
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "loyalty.member_block", "reference_name": name}),
+		                 2, "review round 1 (N3): a block already made is not audited again")
+		fn = crm_api.loyalty_block_rejoin                                   # it locks the profile, then its membership
+		while fn is not None and fn.__code__.co_qualname != "retry_on_deadlock.<locals>.wrapper":
+			fn = getattr(fn, "__wrapped__", None)
+		self.assertIsNotNone(fn, "loyalty_block_rejoin runs again on a deadlock")
+
+	def test_2q_r2_no_blocked_mail_reaches_an_erased_profiles_address(self):
+		"""Review round 2 (NIT-2): a request whose read view predates an erasure found the blocked profile as it was and
+		mailed the erased address (no link in it), recorded as a communication of the erased profile. It reads the
+		profile again as committed first."""
+		from kamra.api import anonymize_guest
+
+		self.join(self.guest)
+		self.leave(block=True)
+		anonymize_guest(self.guest)
+		before = len(self.mails)
+		with mock.patch.object(members, "_profile", return_value=self.guest):   # its read view: the profile as it was
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		self.assertEqual(self.mails[before:], [])
+
+	def test_2q_the_blocked_mail_names_only_the_programs_blocked(self):
+		"""Batch 2Q (§6O, 2O review round 1 NIT 6): the mail named every program of a multi-program site, also one the
+		guest is still a member of: "you cannot rejoin Sister Club" for a club they are in. It names the programs the
+		block keeps them out of."""
+		other = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "Sister Club 2Q", "enabled": 1,
+		                        "currency": "EUR", "property": OTHER}).insert(ignore_permissions=True).name
+		frappe.get_doc({"doctype": "TEX Loyalty Member", "guest": self.guest, "program": other,
+		                "status": "Active"}).insert(ignore_permissions=True)
+		self.join(self.guest)
+		self.leave(block=True)
+		with mock.patch.object(members, "site_programs", return_value=[self.club, other]):
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		_to, subject, html = self.mails[-1]
+		self.assertIn("contact the hotel", html)
+		self.assertIn("Resort Club", subject + html)
+		self.assertNotIn("Sister Club 2Q", subject + html)
+
 	def test_c04h_a_join_link_asked_before_the_block_rejoins_nobody(self):
 		self.join(self.guest)
 		self.leave(block=False)                                                # the guest asked to leave
@@ -646,6 +754,82 @@ class TestPendingLinksAndErasure(WebMemberCase):
 		self.erase(self.guest)
 		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=join_link), "MEMBER_LINK_INVALID")
 		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
+
+	def test_2q_a_link_filed_after_an_erasure_by_a_request_that_read_before_it_is_dropped(self):
+		"""Batch 2Q (§6O): a request that read the profile before an erasure committed, and filed its link after the
+		erasure dropped the address's links (in its transaction and after its commit), kept that link for its 30
+		minutes: a join link then made the erased profile again from the name typed before. The request reads the
+		profile again as committed after filing its link and drops it; nothing is mailed."""
+		from kamra.api import anonymize_guest
+
+		real, before = members._profile, len(self.mails)
+
+		def read_then_erased(*a, **kw):
+			found = real(*a, **kw)
+			visitor = frappe.session.user
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff erase the profile meanwhile
+			try:
+				anonymize_guest(self.guest)             # the erasure and its drops, before the link is filed
+			finally:
+				frappe.set_user(visitor)  # nosemgrep: frappe-setuser -- back to the visitor
+			return found
+
+		with mock.patch.object(members, "_profile", side_effect=read_then_erased):
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		sent = self.mails[before:]
+		for found in (re.search(r"#token=([A-Za-z0-9_\-]+)", html) for _to, _subject, html in sent):
+			if found:
+				self.assertEqual(self.refused(public.member_verify, site=SLUG, token=found.group(1)),
+				                 "MEMBER_LINK_INVALID")
+		self.assertEqual(sent, [])
+
+	def test_2q_r1_a_link_filed_for_a_profile_erased_after_the_requests_read_view_is_dropped(self):
+		"""Review round 1 (L2): the request's read view can be older than the erasure (its first read came first), so
+		it finds the profile as it was, and the erasure's drops ran before it filed its link. After filing, the profile
+		is read again as committed (a locking read): an erased one drops the link, and nothing is mailed."""
+		from kamra.api import anonymize_guest
+
+		before = len(self.mails)
+		anonymize_guest(self.guest)                     # committed before the request read anything but its view
+		with mock.patch.object(members, "_profile", return_value=self.guest):   # its read view: the profile as it was
+			self.assertEqual(self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1),
+			                 {"ok": True})
+		self.assertEqual(self.mails[before:], [])
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
+
+	def test_2q_r2_a_link_for_a_profile_erased_since_it_was_mailed_joins_nobody(self):
+		"""Review round 2 (LOW-1): a join link opened while its profile was being erased (after the erasure's lock,
+		before its drop of the address's links) waited for the erasure, found no profile with the address and made a new
+		one from the name typed before; a link put back just after the drop did the same. A link names the profile it
+		was mailed for: opened when that one is gone, erased or no longer the address's, it is refused."""
+		from kamra.api import anonymize_guest
+
+		self.ask(self.email, "join", first_name="Mia", last_name="Member", accepted=1)
+		token = self.token()
+		with mock.patch.object(members, "drop_links", return_value=0):     # the link outlives the erasure's drops
+			anonymize_guest(self.guest)
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
+		self.assertFalse(frappe.db.exists("Guest", {"email": self.email}))
+
+	def test_2q_r2_a_link_put_back_after_a_rollback_logs_a_failure_that_lasts(self):
+		"""Review round 2 (NIT-1): the put-back runs inside the rollback, whose transaction is never committed after it
+		in a web request: a log inserted there is lost. It is deferred (Frappe's own error snapshots are)."""
+		with mock.patch.object(members, "_put_back", side_effect=RuntimeError("redis down")), \
+				mock.patch.object(frappe, "log_error") as logged:
+			members._put_back_quietly("tok", {"email": self.email})
+		self.assertTrue(logged.call_args.kwargs.get("defer_insert"))
+
+	def test_2q_a_link_opened_by_a_request_that_then_fails_can_be_opened_again(self):
+		"""Batch 2Q (§6N2): a link is taken when it is opened; a request that failed after opening it (its answer, its
+		commit) lost it, the session it made rolled back. The link is put back when the request's transaction is."""
+		self.join(self.guest)
+		self.ask(self.email)
+		token = self.token()
+		self.assertTrue(self.verify(token)["status"]["member"])
+		frappe.db.after_rollback.run()             # the request failed after the link was opened: rolled back
+		self.assertTrue(self.verify(token)["status"]["member"])                 # the link works again, once
+		self.assertEqual(self.refused(public.member_verify, site=SLUG, token=token), "MEMBER_LINK_INVALID")
 
 	def test_2o_another_address_keeps_its_link(self):
 		other = self.profile("keeps")

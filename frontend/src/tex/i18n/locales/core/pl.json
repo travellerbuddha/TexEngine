@@ -133,6 +133,7 @@
  "core.login.back": "Wstecz",
  "core.login.password_expired": "Twoje hasło wygasło. Ustaw nowe przez „Nie pamiętasz hasła?”.",
  "core.login.password_expired_mailed": "Twoje hasło wygasło. Link do ustawienia nowego hasła został wysłany na Twój adres e-mail; ważny jest tylko najnowszy link.",
+ "core.login.reset_mail_failed": "Twoje hasło wygasło, a nie udało się wysłać wiadomości e-mail do ustawienia nowego. Skontaktuj się z administratorem.",
  "core.login.incomplete": "Logowanie nie zostało zakończone. Spróbuj innych sposobów logowania.",
  "core.login.session_ended": "Sesja wygasła. Zaloguj się, aby kontynuować tam, gdzie skończono.",
  "core.login.demo.title": "Konta demo: wypróbuj każdą rolę jednym kliknięciem",

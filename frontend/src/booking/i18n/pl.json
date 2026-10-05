@@ -161,6 +161,7 @@
   "policy.depositFixed": "Zaliczka {amount} przy rezerwacji",
   "policy.depositFixedBooking": "Zaliczka {amount} za całą rezerwację, przy rezerwacji",
   "policy.depositWithRoom": "Zaliczka: raz za rezerwację, z pokojem {n}",
+  "policy.depositShare": "Zaliczka: {amount} zaliczki za rezerwację jest pobierane z tym pokojem",
   "policy.depositNights": { "one": "Cena pierwszej nocy jako zaliczka", "few": "Cena {count} nocy jako zaliczka", "many": "Cena {count} nocy jako zaliczka", "other": "Cena {count} nocy jako zaliczka" },
   "policy.payNothingNow": "Teraz nic nie płacisz",
   "policy.payAtHotelPossible": "Możliwa płatność w hotelu",

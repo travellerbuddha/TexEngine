@@ -868,6 +868,7 @@ def guest_validate(doc, method=None) -> None:
 	"""``Guest.validate``, whoever saves: a consent change made outside the CRM and the booking flows
 	(the Desk form, REST, a merge, an erasure) is stamped as theirs are (when, and how: ADR-046) and
 	audited once saved (``guest_on_update``). The CRM and the booking flows record their own."""
+	_one_plain_address(doc)
 	if doc.flags.get("tex_consent_recorded"):
 		return
 	before = doc.get_doc_before_save()
@@ -880,6 +881,19 @@ def guest_validate(doc, method=None) -> None:
 	doc.tex_consent_updated_at = now_datetime()
 	doc.tex_consent_source = how
 	doc.flags.tex_consent_audit = (changed, how)
+
+
+def _one_plain_address(doc) -> None:
+	"""Batch 2Q: an address stored on a profile is one plain address (``booking.plain_email``), whoever saves it: the
+	Desk form, REST, an import, the legacy paths that make a profile. Frappe's own field takes a display name, a Turkish
+	dotted İ or a trailing dot, an address no booking joins (ADR-080). Only an address that changes is checked: a
+	profile stored before keeps saving, and a merge moves an address as it is (nobody typed it)."""
+	if not doc.get("email") or doc.flags.get("tex_merge") or not doc.has_value_changed("email"):
+		return
+	from kamra.tex.services.booking import plain_email
+
+	if not plain_email(doc.email):
+		frappe.throw(_("Please enter one plain e-mail address."))
 
 
 def guest_on_update(doc, method=None) -> None:
@@ -1266,6 +1280,7 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 	for f, v in consent.items():
 		dst.set(f, 1 if v else 0)
 	dst.flags.tex_consent_source = "merge"             # a change is stamped and audited (``guest_validate``)
+	dst.flags.tex_merge = True                         # an address moved as it is stored (``_one_plain_address``)
 	dst.save(ignore_permissions=True)
 	# the duplicate's cases came with the links: each keeps the contact the merged consent allows (C-03)
 	phone_ok = consent["tex_consent_sms"] or consent["tex_consent_whatsapp"]

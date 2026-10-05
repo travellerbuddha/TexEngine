@@ -565,9 +565,10 @@ def sell_prices(property: str, contract: str, start, days: int = 14, *, rate_pla
 	assumed), FX and taxes in force now, for ``market`` (default the contract's) and ``channel``
 	(default the booking engine). The contract price the grid shows is where it starts; this is
 	where it ends. A contract with rate plans prices the one named, else its first, and says which.
-	The hotel's mandatory extras are in it, as the search prices every offer (Y-5). Restrictions and
-	inventory are the grid's other rows: a night closed to sale, or a mandatory limited extra sold
-	out, still has a price here. Read-only: nothing is written, quoted or audited."""
+	The hotel's mandatory extras are in it, as the search prices every offer (Y-5); a mandatory extra
+	cannot have a limited capacity (``TEX Extra.validate``), so none is ever sold out here. Restrictions
+	and inventory are the grid's other rows: a night closed to sale still has a price here. Read-only:
+	nothing is written, quoted or audited."""
 	from frappe.utils import add_days, now_datetime
 
 	from kamra.tex.commercial import context as ctxmod

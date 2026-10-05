@@ -161,6 +161,7 @@
   "policy.depositFixed": "Deposit of {amount} when you book",
   "policy.depositFixedBooking": "Deposit of {amount} for the whole booking, when you book",
   "policy.depositWithRoom": "Deposit: taken once for the booking, with room {n}",
+  "policy.depositShare": "Deposit: {amount} of the booking's deposit is taken with this room",
   "policy.depositNights": { "one": "First night's price as deposit", "other": "Price of {count} nights as deposit" },
   "policy.payNothingNow": "Nothing to pay now",
   "policy.payAtHotelPossible": "Pay at the hotel is possible",

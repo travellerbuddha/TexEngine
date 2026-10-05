@@ -48,3 +48,14 @@ export function priceChange(room: number, res: QuoteResponse, shown: RoomQuote |
       : { room, from: before, to: after, currency: q.currency, basis: "room" }
   return null
 }
+
+/**
+ * The changes of `next` the guest has not been shown: one already on screen (`shown`, the notice's list) is the same
+ * room, prices, currency and basis (§6K5, batch 2Q). The checkout's quotes are made again after 25 minutes; a change
+ * the notice shows, which the guest went on without accepting, is found again and no longer stops the booking.
+ */
+export function unseenChanges(next: PriceChange[], shown: PriceChange[]): PriceChange[] {
+  const same = (a: PriceChange, b: PriceChange) =>
+    a.room === b.room && a.from === b.from && a.to === b.to && a.currency === b.currency && a.basis === b.basis
+  return next.filter((c) => !shown.some((s) => same(c, s)))
+}

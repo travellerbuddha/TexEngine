@@ -48,8 +48,10 @@ Notes: Python 3.14's strict X.509 verification rejects the session proxy CA for
 
 ## Running tests
 ```bash
-# pure pricing/unit tests (no bench needed)
-python3 -m pytest kamra/tex/tests/unit -q
+# pure pricing/unit tests (no site needed; three of them import frappe, so the bench's Python runs them:
+# install pytest there once per container, as the frappe user)
+env/bin/python -m pip install pytest
+env/bin/python -m pytest /home/user/TexEngine/kamra/tex/tests/unit -q -p no:cacheprovider
 # upstream suites
 /home/user/bench/run_baseline.sh /home/user/bench/<outdir>
 # TEX integration tests

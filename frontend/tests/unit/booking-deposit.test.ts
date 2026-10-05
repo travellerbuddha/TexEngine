@@ -62,3 +62,20 @@ test("a fixed deposit only one room carries reads as that room's own, also in a 
   assert.match(four[2]!.text, /^policy\.depositFixed \{.*50 EUR/)
   assert.match(four[3]!.text, /policy\.depositWithRoom \{"n":1\}/)
 })
+
+// §6K5 (batch 2Q): a room takes at most its own total of the booking's fixed deposit, the rest goes with the next room
+// (the server's `deposit_shares`): with a first room of 60 EUR and a deposit of 100 EUR, the second room pays 40 EUR
+// of it, which "taken once for the booking, with room 1" did not say. The basket gives each room's share (`due_now`)
+test("a later room that pays part of the booking's deposit names its share", () => {
+  const lines = bookingPaymentTerms(i18n, [
+    { ...room(deposit100), share: "60.00" },
+    { ...room(deposit100), share: "40.00" },
+    { ...room(deposit100), share: "0.00" },
+  ])
+  assert.match(lines[0]!.text, /policy\.depositFixedBooking.*100 EUR/)
+  assert.match(lines[1]!.text, /^policy\.depositShare \{"amount":"40\.00 EUR"\}/)
+  assert.match(lines[2]!.text, /policy\.depositWithRoom \{"n":1\}/)
+  // without the basket (still loading, or refused) the lines read as before
+  const before = bookingPaymentTerms(i18n, [room(deposit100), { ...room(deposit100), share: null }])
+  assert.match(before[1]!.text, /policy\.depositWithRoom \{"n":1\}/)
+})

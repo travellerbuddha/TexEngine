@@ -392,6 +392,31 @@ class TestMemberPrices(MembershipCase):
 		member = {p["property"]: p["member"] for p in res["properties"]}
 		self.assertEqual(member, {fx.PROPERTY: True, sister: False, OTHER: False})
 
+	def test_2q_the_callers_membership_is_read_once_per_program(self):
+		"""Batch 2Q (§6N1): the call centre's search read the caller's erasure mark, and the membership, once per hotel
+		searched (``loyalty.is_member`` each time): a group search of many hotels sharing one program read the same
+		rows each time. The mark is read once, each program once; who is a member where is unchanged."""
+		self.join(self.guest)
+		sister = fx.ensure("Property", {"property_name": "TEX C04 Sister"},
+		                   {"property_name": "TEX C04 Sister", "city": "Kemer", "country": "Turkey", "currency": "EUR"})
+		frappe.db.set_value("Property", sister, {"tex_hotel_group": None, "tex_enterprise": frappe.db.get_value(
+			"Property", fx.PROPERTY, "tex_enterprise")})
+		frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "Sister Club 2Q", "enabled": 1,
+		                "currency": "EUR", "property": sister}).insert(ignore_permissions=True)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a group search across hotels
+		real, marks = frappe.db.get_value, []
+
+		def counted(doctype, filters=None, fieldname="name", *a, **kw):
+			if doctype == "Guest" and filters == self.guest and fieldname == "tex_erased_at":
+				marks.append(1)
+			return real(doctype, filters, fieldname, *a, **kw)
+
+		with mock.patch.object(frappe.db, "get_value", side_effect=counted):
+			res = crs_api.search(**STAY, properties=[fx.PROPERTY, sister, OTHER], guest=self.guest)
+		self.assertEqual({p["property"]: p["member"] for p in res["properties"]},
+		                 {fx.PROPERTY: True, sister: False, OTHER: False})
+		self.assertEqual(len(marks), 1)
+
 	def change(self, reservation: str, nights: int = 5) -> dict:
 		from kamra.tex.services import modification
 

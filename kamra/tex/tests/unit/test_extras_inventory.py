@@ -78,6 +78,22 @@ class TestEngineCapacity(unittest.TestCase):
 		q = self.quote({"DINNER": days}, ExtraRequest("DINNER"))
 		self.assertEqual(self.outcome(q, "DINNER").reason, "sold out on 2027-06-03")
 
+	def test_2q_a_capacity_refusal_carries_its_code_and_day(self):
+		"""Batch 2Q (§6G3): why a limited extra was not added was text only ("sold out on …"), which the booking app
+		parsed to tell the guest in their language. The outcome carries its code and day (never a count); an outcome
+		without a refusal has neither key, as quotes always had (ADR-061)."""
+		cases = ((ExtraDayAvailability(0), 1, ("SOLD_OUT", "2027-06-02")),
+		         (ExtraDayAvailability(1), 2, ("NOT_ENOUGH", "2027-06-02")),
+		         (ExtraDayAvailability(5, closed=True), 1, ("CLOSED", "2027-06-02")))
+		for day, qty, expected in cases:
+			with self.subTest(expected=expected):
+				spa = self.outcome(self.quote({"SPA": {CI: day}}, ExtraRequest("SPA", qty)), "SPA")
+				self.assertEqual((spa.reason_code, spa.reason_date), expected)
+				out = spa.to_dict()
+				self.assertEqual((out["reason_code"], out["reason_date"]), expected)
+		ok = self.outcome(self.quote({"SPA": {CI: ExtraDayAvailability(5)}}, ExtraRequest("SPA")), "SPA").to_dict()
+		self.assertFalse({"reason_code", "reason_date"} & set(ok))
+
 	def test_untracked_or_unchecked_never_blocks(self):
 		self.assertTrue(self.outcome(self.quote({}, ExtraRequest("SPA")), "SPA").ok)       # not tracked now
 		self.assertTrue(self.outcome(self.quote(None, ExtraRequest("SPA")), "SPA").ok)     # not checked (history)

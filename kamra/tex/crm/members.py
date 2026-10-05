@@ -30,7 +30,7 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, get_datetime, now_datetime
+from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.crm import loyalty
 from kamra.tex.services.refusals import refusal
@@ -155,10 +155,14 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	if purpose == "sign_in" and not profile:
 		notify.member_mail(site, email, "member_none", language=language)
 		return
-	if purpose == "join" and profile and _rejoin_blocked(site, profile):
+	blocked = _rejoin_blocked(site, profile) if purpose == "join" and profile else []
+	if blocked and not _still_theirs(profile, email):
+		return                                         # erased meanwhile: nothing goes to its address (review round 2)
+	if blocked:
 		# staff blocked a rejoin wherever the guest could join here (C-04h): no link; the mail, which only the
-		# address's owner reads, says to ask the hotel. The site's answer is the same as ever
-		notify.member_mail(site, email, "member_blocked", guest=profile, language=language)
+		# address's owner reads, says to ask the hotel, naming the programs blocked (never one the guest is still a
+		# member of; batch 2Q). The site's answer is the same as ever
+		notify.member_mail(site, email, "member_blocked", guest=profile, language=language, programs=blocked)
 		return
 	token = secrets.token_urlsafe(32)
 	# the link's data, by its token's hash, until it is used or expires (a plain string: read and deleted at once); its
@@ -167,21 +171,31 @@ def _send_link(site, email: str, purpose: str, names: dict, language: str, idemp
 	pending = _pending_key(email)
 	pipe = _cache().pipeline(transaction=True)
 	pipe.set(_link_key(token), json.dumps({  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
-		"site": site.name, "purpose": purpose, "email": email, "language": language,
+		"site": site.name, "purpose": purpose, "email": email, "language": language, "profile": profile,
 		"expires_at": str(add_to_date(now_datetime(), minutes=LINK_MINUTES)), **names}), ex=LINK_MINUTES * 60)
 	pipe.sadd(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 	pipe.expire(pending, LINK_MINUTES * 60)  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
 	pipe.execute()
+	if profile and not _still_theirs(profile, email):
+		# erased (or merged away) while this request read it as it was: the erasure's drops may have run before the link
+		# was filed, so its own link goes, and nothing is mailed (batch 2Q, §6O). An erasure committed after this read
+		# drops the link itself (it is pending by then)
+		pipe = _cache().pipeline(transaction=True)
+		pipe.delete(_link_key(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		pipe.srem(pending, digest(token))  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key
+		pipe.execute()
+		return
 	# greeted by the profile's own name, or by none: never by what a visitor typed for an address they may not own
 	notify.member_mail(site, email, "member_join" if purpose == "join" else "member_sign_in", token=token,
 	                   guest=profile, language=language)
 
 
-def _rejoin_blocked(site, guest: str) -> bool:
-	"""Every program of the site the guest is no member of is one staff blocked a rejoin of (C-04h): a join link
-	would join nothing. Opening a link checks again, under the profile's lock (``loyalty.join_web``)."""
+def _rejoin_blocked(site, guest: str) -> list[str]:
+	"""The site's programs the guest is no member of, when staff blocked a rejoin of every one of them (C-04h): a join
+	link would join nothing. Empty otherwise. Opening a link checks again, under the profile's lock
+	(``loyalty.join_web``)."""
 	open_ = [p for p in site_programs(site) if not loyalty.member_of(guest, p)]
-	return bool(open_) and all(loyalty.rejoin_blocked(guest, p) for p in open_)
+	return open_ if open_ and all(loyalty.rejoin_blocked(guest, p) for p in open_) else []
 
 
 def _link_key(token: str) -> str:
@@ -209,6 +223,17 @@ def drop_links(emails) -> int:
 		if hashes:
 			dropped += _cache().delete(*(frappe.cache.make_key(f"{LINK_KEY}{h}") for h in hashes))  # nosemgrep: frappe-cache-breaks-multitenancy -- keys are site-scoped by make_key
 	return dropped
+
+
+# the profile's row as committed now (a locking read: a plain one sees the request's read view)
+PROFILE_NOW = """SELECT email, tex_erased_at FROM `tabGuest` WHERE name=%s LOCK IN SHARE MODE"""
+
+
+def _still_theirs(profile: str, email: str) -> bool:
+	"""The profile a request found, as committed now: not erased, not merged away, still this address's (batch 2Q review
+	round 1: the request's read view can be older than an erasure; the share lock holds it until the request ends)."""
+	row = frappe.db.sql(PROFILE_NOW, profile, as_dict=True)
+	return bool(row) and not row[0].tex_erased_at and (row[0].email or "").strip().lower() == email
 
 
 def _take_link(site, token: str) -> dict:
@@ -254,11 +279,25 @@ def verify(site, token: str) -> dict:
 	database error) leaves it usable."""
 	data = _take_link(site, token)
 	try:
-		return _open(site, data)
+		opened = _open(site, data)
 	except Exception as e:
 		if getattr(e, "code", None) not in FINAL:
 			_put_back(token, data)
 		raise
+	# a request that fails after this (its answer, before its commit) rolls its session back: the link with it (batch
+	# 2Q). A commit clears the callback; a COMMIT statement that fails itself is not covered
+	frappe.db.after_rollback.add(lambda: _put_back_quietly(token, data))
+	return opened
+
+
+def _put_back_quietly(token: str, data: dict) -> None:
+	"""``_put_back`` from a rollback: a failure (Redis) is logged, never the request's answer (review round 1)."""
+	try:
+		_put_back(token, data)
+	except Exception:
+		from kamra.tex.security.audit import log_exception
+
+		log_exception("TEX member link put back", defer=True)
 
 
 @retry_on_deadlock
@@ -267,6 +306,11 @@ def _open(site, data: dict) -> dict:
 
 	enterprise = site_enterprise(site)
 	profile = _profile(data["email"], enterprise, lock=True)
+	if data.get("profile") and profile != data["profile"]:
+		# the profile the link was mailed for is gone, erased or no longer this address's (a link opened while it was
+		# erased, or put back after the erasure's drop): never one made again from the name typed before (review round 2)
+		frappe.throw(_("This link is not valid or has expired. Please ask for a new one."),
+		             refusal("MEMBER_LINK_INVALID"))
 	if not profile:
 		# a sign-in link, or a signed-in guest's join link whose profile is gone since: no profile to make
 		if data["purpose"] != "join" or not data.get("first_name") or not data.get("last_name"):
@@ -315,16 +359,28 @@ def require_session(site, token: str | None) -> str:
 
 def member_hotels(site, guest: str | None) -> set[str]:
 	"""The site's hotels whose program the guest is a member of."""
-	return {p for p in site_properties(site) if loyalty.is_member(guest, p)} if guest else set()
+	return loyalty.member_hotels(guest, site_properties(site))
 
 
-def teaser_hotels(site, props: list[str]) -> set[str]:
+def teaser_hotels(site, props: list[str], *, check_in=None, check_out=None, market: str | None = None,
+                  channel: str | None = None, promo_codes=()) -> set[str]:
 	"""Of ``props``, the hotels whose program has a members-only promotion live now: where anyone is shown the member
-	price as "Member price" (the owner's choice; applied only to a member signed in)."""
+	price as "Member price" (the owner's choice; applied only to a member signed in). With the search's stay, market
+	and channel, only where such a promotion may apply to it (``promotions.may_apply_to_stay``; batch 2Q): the teaser
+	prices those hotels a second time."""
 	from kamra.tex.commercial import context
+	from kamra.tex.pricing.promotions import code_key, may_apply_to_stay
 
 	now = now_datetime()
-	return {p for p in props if loyalty.program_for(p) and any(x.member_only for x in context.promotions(p, now))}
+	stay = None
+	if check_in and check_out and market and channel:
+		stay = {"check_in": getdate(check_in), "check_out": getdate(check_out), "market": market, "channel": channel,
+		        "codes": frozenset(code_key(c) for c in promo_codes or () if c)}
+
+	def teased(promotion) -> bool:
+		return promotion.member_only and (stay is None or may_apply_to_stay(promotion, **stay))
+
+	return {p for p in props if loyalty.program_for(p) and any(teased(x) for x in context.promotions(p, now))}
 
 
 def status(site, guest: str) -> dict:

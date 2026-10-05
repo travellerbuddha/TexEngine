@@ -329,7 +329,9 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	         "promo_codes": [promo_code] if promo_code else (), "internal": False}
 	res = quoting.search(**asked, member=members_at)
 	_member_prices(res, members_at)
-	teaser = members.teaser_hotels(s, [p for p in props if p not in members_at])
+	teaser = members.teaser_hotels(s, [p for p in props if p not in members_at], check_in=check_in,
+	                               check_out=check_out, market=mkt, channel=asked["channel"],
+	                               promo_codes=asked["promo_codes"])
 	if teaser:
 		# the same search as a member's where anyone may be shown the member price: its totals only, never its keys
 		_teaser(res, quoting.search(**{**asked, "properties": sorted(teaser)}, member=True))

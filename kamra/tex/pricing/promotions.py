@@ -24,8 +24,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, quantize
@@ -158,6 +159,23 @@ def eligible_nights(p: Promotion, ctx: PromoContext) -> tuple[date, ...]:
 	if p.stay_match == StayMatch.DEPARTURE:
 		return ctx.nights if lo <= ctx.check_out <= hi else ()
 	return ()
+
+
+def may_apply_to_stay(p: Promotion, *, check_in: date, check_out: date, market: str, channel: str,
+                      codes: frozenset[str] = frozenset()) -> bool:
+	"""Whether ``p`` can apply to a stay at all, from what a search knows before any room is priced: its value, its
+	code, the stay's length and nights (``stay_match``), the market and the channel. False only where it never can;
+	the sale date and lead time (the hotel's day), the room, board, rate plan, contract, extras and basket are the
+	engine's. Batch 2Q: the "Member price" teaser prices a hotel a second time only where a members-only promotion
+	may apply."""
+	if invalid_value(p) or (p.code and code_key(p.code) not in codes):
+		return False
+	nights = tuple(check_in + timedelta(days=i) for i in range((check_out - check_in).days))
+	if (p.min_nights and len(nights) < p.min_nights) or (p.max_nights and len(nights) > p.max_nights):
+		return False
+	if (p.markets is not None and market not in p.markets) or (p.channels is not None and channel not in p.channels):
+		return False
+	return bool(eligible_nights(p, SimpleNamespace(nights=nights, check_in=check_in, check_out=check_out)))
 
 
 def invalid_value(p: Promotion) -> str | None:

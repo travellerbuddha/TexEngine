@@ -86,6 +86,27 @@ class TestExtrasCapacity(ExtrasCase):
 		late = self.extra(self.quotes("g19-c", [{"code": "SPA"}])[0], "SPA")
 		self.assertEqual((late["ok"], late["reason"]), (False, f"sold out on {fx.d(6, 10)}"))
 
+	def test_2q_a_sold_out_extra_is_named_in_the_guests_language(self):
+		"""Batch 2Q (§6G3): the extra a booking found sold out was named in its refusal's params by the hotel's own
+		text, while the quote and the site name it in the guest's language; the exception keeps the hotel's (staff)."""
+		from kamra.tex.api import content as content_api
+
+		spa = frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "SPA"})
+		spa = frappe.db.get_value("TEX Extra", spa, "revision_of") or spa
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- hotel content editor
+		content_api.save(fx.PROPERTY, [{"ref_doctype": "TEX Extra", "ref_name": spa, "field": "extra_name",
+		                                "language": "de", "text": "Wellness"}])
+		first, second = self.quotes("2q-x-a", [{"code": "SPA"}]), self.quotes("2q-x-b", [{"code": "SPA"}])
+		self.book("2q-x-a", first)
+		frappe.local.lang = "de"
+		try:
+			with self.assertRaises(ExtraSoldOut) as cm:
+				self.book("2q-x-b", second)
+		finally:
+			frappe.local.lang = "en"
+		self.assertEqual(frappe.local.response["tex_params"], {"extra": "Wellness", "date": str(fx.d(6, 10))})
+		self.assertEqual(cm.exception.params, {"extra": "Spa", "date": str(fx.d(6, 10))})
+
 	def test_the_rooms_of_one_booking_count_together(self):
 		quotes = self.quotes("g19-rooms", [{"code": "SPA"}], rooms=2)
 		self.assertTrue(all(self.extra(q, "SPA")["ok"] for q in quotes))   # each room alone fits

@@ -138,6 +138,14 @@ def loyalty_leave(guest: str, program: str, reason: str, property: str | None = 
 	                     block_rejoin=bool(as_int(block_rejoin, 0, lo=0, hi=1)))
 
 
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def loyalty_block_rejoin(guest: str, program: str, reason: str, property: str | None = None):
+	"""Keep a membership that ended from being joined again on the web (C-04h; batch 2Q): its end is kept."""
+	_guests_program(guest, program)
+	return loyalty.block_rejoin(guest, program, reason=text(reason, 500) or "", property=text(property, 140) or None)
+
+
 @frappe.whitelist()
 def member_sessions(guest: str):
 	"""The guest's sessions on the booking sites of the hotels the user sees them through (batch 2O)."""

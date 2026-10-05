@@ -244,15 +244,17 @@ def diff(before: dict | None, after: dict | None, fields) -> dict:
 	return out
 
 
-def log_exception(title: str) -> None:
+def log_exception(title: str, *, defer: bool = False) -> None:
 	"""Log the current exception WITHOUT frame variables (Frappe's default traceback
-	includes locals, which can hold guest data, callback headers or link tokens)."""
+	includes locals, which can hold guest data, callback headers or link tokens). ``defer``: from a
+	callback after a commit or a rollback, whose transaction nothing commits (batch 2Q review round 2):
+	inserted later, as Frappe's own error snapshots are."""
 	import sys
 	import traceback
 
 	exc = sys.exc_info()[1]
 	lines = traceback.format_exception(type(exc), exc, exc.__traceback__) if exc else []
-	frappe.log_error(title=title[:140], message=redact_text("".join(lines))[-8000:])
+	frappe.log_error(title=title[:140], message=redact_text("".join(lines))[-8000:], defer_insert=defer)
 
 
 def redact_text(text: str) -> str:

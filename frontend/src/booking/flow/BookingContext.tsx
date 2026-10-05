@@ -12,7 +12,7 @@ import { siteUrl } from "../lib/mount"
 import { getJSON, manageToken, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
 import { armAbandon, disarmAbandon, trackMarketRefused } from "../lib/track"
 import { marketRefusal, refusedLinkPayload, type MarketRefusal } from "../lib/marketLink"
-import { priceChange, type PriceChange } from "../lib/priceChange"
+import { priceChange, unseenChanges, type PriceChange } from "../lib/priceChange"
 import type { Residency } from "../../lib/residency"
 import { useMember } from "../site/Member"
 import { useSite } from "../site/SiteContext"
@@ -61,6 +61,9 @@ export interface RejectedExtra {
   name: string
   /** the server's reason, e.g. "sold out on 2027-06-10" (see lib/extras refusalText) */
   reason: string
+  /** the same by code and day, when the quote has them (batch 2Q) */
+  reasonCode?: string
+  reasonDate?: string
 }
 
 export interface QuoteOutcome {
@@ -225,7 +228,7 @@ function findRejected(quotes: (QuoteResponse | null)[], extras: FlowState["extra
     for (const e of q?.ok ? q.quote?.extras ?? [] : []) {
       const code = codes.get((e.code ?? "").toUpperCase())
       if (e.ok || !code || out.some((r) => r.room === room && r.code === code)) continue
-      out.push({ room, code, name: e.name || code, reason: e.reason ?? "" })
+      out.push({ room, code, name: e.name || code, reason: e.reason ?? "", reasonCode: e.reason_code, reasonDate: e.reason_date })
     }
   })
   return out
@@ -491,7 +494,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       quotes.push(q)
     }
     const seen = (f: FlowState) => quotes.map((r, i) => (changes.some((c) => c.room === i) ? f.seen?.[i] ?? null : r.quote ?? null))
-    setFlow((f) => ({ ...f, quotes, seen: seen(f), quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
+    // the notice's list is kept when nothing new changed, so it does not take the focus again (§6K5, batch 2Q)
+    const kept = (f: FlowState) =>
+      changes.length === f.priceChanges.length && !unseenChanges(changes, f.priceChanges).length ? f.priceChanges : changes
+    setFlow((f) => ({ ...f, quotes, seen: seen(f), quotedAt: Date.now(), priceChanges: kept(f), bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
     return { error: null, rejected: findRejected(quotes, flow.extras), quotes, changes }
   }, [flow.selections, flow.extras, flow.seen, site.slug])

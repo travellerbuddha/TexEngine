@@ -3,6 +3,7 @@
 import type { I18n, MessageKey } from "../i18n"
 import type { OfferReason, RatePlanInfo } from "../types"
 import { addDays, today } from "./dates.ts"
+import { isZero } from "./format.ts"
 
 const BOARDS: Record<string, MessageKey> = {
   RO: "board.RO",
@@ -60,10 +61,12 @@ export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, 
 /** The payment line of each room of one booking, in room order (``null``: a room not chosen yet). A FIXED deposit
  * is taken once per booking and policy, room by room (the server's ``deposit_shares``, ADR-067): where two rooms or
  * more carry the policy, the first names it, for the whole booking, and the others say it is taken with that room
- * (LO-35); a room alone with its policy reads as it would on its own. */
+ * (LO-35); a room alone with its policy reads as it would on its own. ``share``: the room's part of what is due now,
+ * from the basket (its ``due_now``, in the sale's ``currency``): a room takes at most its own total of the deposit and
+ * leaves the rest to the next one, which then names the part it pays (§6K5, batch 2Q). */
 export function bookingPaymentTerms(
   i18n: I18n,
-  rooms: ({ info: RatePlanInfo | null | undefined; currency: string } | null)[],
+  rooms: ({ info: RatePlanInfo | null | undefined; currency: string; share?: string | null } | null)[],
 ) {
   // the server's key of a FIXED policy (deposit_shares), or null for another kind of deposit
   const fixedKey = (info: RatePlanInfo | null | undefined) => {
@@ -86,6 +89,8 @@ export function bookingPaymentTerms(
       first.set(key, i)
       return paymentTerms(i18n, r.info, r.currency, { perBooking: true })
     }
+    if (r.share && !isZero(r.share))
+      return { text: i18n.t("policy.depositShare", { amount: i18n.money(r.share, r.currency) }), payAtHotel: !!p?.allow_pay_at_hotel }
     return { text: i18n.t("policy.depositWithRoom", { n: at + 1 }), payAtHotel: !!p?.allow_pay_at_hotel }
   })
 }

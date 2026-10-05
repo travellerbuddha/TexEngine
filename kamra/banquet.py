@@ -2394,11 +2394,15 @@ def _find_or_create_guest(doc):
 		existing = frappe.db.get_value("Guest", {"phone": phone})
 		if existing:
 			return existing
+	from kamra.tex.services.booking import plain_email
+
+	# one plain address or none: a profile keeps no other (TEX Engine, batch 2Q review round 1, ADR-081)
+	email = (doc.customer_email or "").strip()
 	parts = (doc.customer_name or "Guest").strip().split(" ", 1)
 	g = frappe.get_doc({
 		"doctype": "Guest", "first_name": parts[0][:60],
 		"last_name": (parts[1][:60] if len(parts) > 1 else None),
-		"phone": phone or None, "email": doc.customer_email or None,
+		"phone": phone or None, "email": email if plain_email(email) else None,
 	})
 	g.insert(ignore_permissions=True)
 	return g.name

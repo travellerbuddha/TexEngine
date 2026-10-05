@@ -19,7 +19,8 @@ import type { MemberStatus, PaymentMethod, PaymentStart, QuoteResponse, SiteExtr
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
-import { basketExpiry, basketFailureText, checkoutChoices } from "../lib/methods"
+import { unseenChanges } from "../lib/priceChange"
+import { basketExpiry, basketFailureText, checkoutChoices, searchesAgain } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
 import { plainEmail } from "../../lib/email"
@@ -255,7 +256,7 @@ function ExtraItem({ extra, roomIndex, days }: { extra: SiteExtra; roomIndex: nu
         {rejected && (
           <p className="mt-2 flex items-start gap-1.5 text-sm font-medium text-ink">
             <AlertTriangle className="mt-0.5 size-4 flex-none text-warn" aria-hidden />
-            {refusalText(i18n, rejected.reason)}
+            {refusalText(i18n, rejected.reason, rejected)}
           </p>
         )}
         <div className="mt-2">{control}</div>
@@ -585,8 +586,13 @@ function PaymentStep() {
     choices.find((c) => c.method === flow.method && (!c.account || !flow.providerAccount || c.account === flow.providerAccount)) ?? choices[0] ?? null
   const method: PaymentMethod = current?.method ?? "Card"
   const currency = basket?.currency ?? flow.selections[0]?.currency ?? ""
-  // a fixed deposit is named once per booking and policy, as the server takes it (LO-35)
-  const payLines = bookingPaymentTerms(i18n, flow.selections.map((s) => (s ? { info: s.rateInfo, currency: s.currency } : null)))
+  // a fixed deposit is named once per booking and policy, as the server takes it (LO-35); a later room names the part
+  // of it it pays, the basket's share of that room (§6K5, batch 2Q)
+  const shareOf = (i: number) => basket?.rooms.find((r) => r.quote_id === flow.quotes[i]?.quote_id)?.due_now ?? null
+  const payLines = bookingPaymentTerms(
+    i18n,
+    flow.selections.map((s, i) => (s ? { info: s.rateInfo, currency: s.currency, share: shareOf(i) } : null)),
+  )
   const payingNow = current?.dueNow ? !isZero(current.dueNow) : method !== "Pay at Hotel"
   const bookLabel = payingNow
     ? current?.dueNow
@@ -604,6 +610,14 @@ function PaymentStep() {
   useEffect(() => {
     if (expiry) setFlowError({ kind: "expired", ...expiry })
   }, [expiry, setFlowError])
+
+  // a rate the hotel cannot sell now: trying the basket again fails the same way (§6P; batch 2Q)
+  const searchAgain = async () => {
+    setPending(true)
+    await b.runSearch({ force: true })
+    setPending(false)
+    b.goStep("rooms")
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -631,8 +645,9 @@ function PaymentStep() {
         return setFlowError(error)
       }
       // an extra can no longer be added, or a price changed: the guest sees it (and the new total)
-      // before booking; their next submit books the quotes just made (fresh, in the flow)
-      if (rejected.length || changes.length) return setPending(false)
+      // before booking; their next submit books the quotes just made (fresh, in the flow). A change the
+      // notice already shows was seen: it does not stop the booking again (§6K5, batch 2Q)
+      if (rejected.length || unseenChanges(changes, flow.priceChanges).length) return setPending(false)
       fresh = quotes
     }
     const res = await book({ quotes: fresh })
@@ -742,7 +757,15 @@ function PaymentStep() {
               tone="warn"
               className="mt-3"
               title={basketFailureText(i18n, b.basket.error).title}
-              actions={<Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>}
+              actions={
+                searchesAgain(b.basket.error) ? (
+                  <Button onClick={searchAgain} busy={pending}>
+                    {t("errors.seeAvailable")}
+                  </Button>
+                ) : (
+                  <Button onClick={() => b.reloadBasket()}>{t("common.retry")}</Button>
+                )
+              }
             >
               {basketFailureText(i18n, b.basket.error).body}
             </Alert>

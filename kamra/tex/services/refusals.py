@@ -77,12 +77,15 @@ def _safe(params: dict | None) -> dict:
 	return out
 
 
-def refusal(code: str, base: type[Exception] | None = None, *, staff_detail: str | None = None, **params) -> Exception:
+def refusal(code: str, base: type[Exception] | None = None, *, staff_detail: str | None = None,
+            names: dict | None = None, **params) -> Exception:
 	"""A coded refusal to raise with ``frappe.throw(message, refusal(...))``. ``base`` keeps a refusal's class where
 	callers or its HTTP status depend on it (``frappe.PermissionError`` 403, ``frappe.DoesNotExistError`` 404, an
 	existing subclass); default :class:`Refusal` (417). ``staff_detail``: what staff are told where the guest's message
 	leaves it out (the engine's reasons), kept on the exception only, never in its params or the guest's error body
-	(batch 2P)."""
+	(batch 2P). ``names``: param → (doctype, hotel, record) of hotel content a param names by the hotel's own text
+	(a room type, an extra's code), told to the guest in their language (``coded``; batch 2Q); the exception keeps
+	the hotel's text."""
 	if base is None or issubclass(base, Refusal):
 		e = (base or Refusal)(code=code, params=params)
 	else:
@@ -91,17 +94,46 @@ def refusal(code: str, base: type[Exception] | None = None, *, staff_detail: str
 		e.params = _safe(params)
 	if staff_detail:
 		e.staff_detail = staff_detail
+	if names:
+		e.tex_names = names
 	return e
 
 
-def with_code(e: Exception, code: str | None = None, **params) -> Exception:
+def _localised(params: dict, names: dict | None) -> dict:
+	"""``params`` with the hotel content ``names`` points at in the guest's language (batch 2Q): a room type's name,
+	an extra's name (by its code); the hotel's own text where there is no translation."""
+	if not names:
+		return params
+	from kamra.tex.services import content
+
+	lang = content.guest_language()
+	if not lang:
+		return params
+	loc = content.Localizer(lang)
+	out = dict(params)
+	try:
+		for key, (doctype, property, ref) in names.items():
+			if key in out and doctype == "Room Type":
+				out[key] = loc.room_type_name(property, ref, out[key])
+			elif key in out and doctype == "TEX Extra":
+				out[key] = loc.extra_name(property, ref, out[key])
+	except Exception:
+		return params                      # a refusal is never changed by its names: the hotel's own text stays
+	return out
+
+
+def with_code(e: Exception, code: str | None = None, *, names: dict | None = None, **params) -> Exception:
 	"""``e`` (an instance of an existing exception class, its message kept) with a refusal code (default: its
 	class's) and guest-safe params, for a refusal raised without ``frappe.throw``::
 
-	    raise with_code(ExtraSoldOut(msg), extra=name, date=day.isoformat())"""
+	    raise with_code(ExtraSoldOut(msg), extra=name, date=day.isoformat())
+
+	``names``: as ``refusal``'s."""
 	if code is not None:
 		e.code = _known(code)
 	e.params = _safe(params)
+	if names:
+		e.tex_names = names
 	return e
 
 
@@ -138,6 +170,8 @@ def coded(fn):
 				resp["tex_code"] = code
 				params = {k: v for k, v in _safe(e.params).items() if k not in GUEST_HIDDEN} \
 					if code_of(e) and isinstance(getattr(e, "params", None), dict) else None
+				if params:
+					params = _localised(params, getattr(e, "tex_names", None))
 				if params:
 					resp["tex_params"] = params
 			raise

@@ -3,6 +3,8 @@ multi-room searches (R-29), the hotel "from" price, guest-safe quotes, the baske
 (totals and deposit per payment method before booking), retried bookings, return
 URLs and guest input normalisation."""
 
+from unittest import mock
+
 import frappe
 
 from kamra.tex.api import crs, public
@@ -421,6 +423,37 @@ class TestContentTranslation(TexTestCase):
 		self.assertNotEqual(offer["rate_plan_info"]["name"], "Flexibel")
 		self.assertEqual(content.nights_label(2, "ru"), "2 ночи")
 		self.assertEqual(content.nights_label(5, "pl"), "5 nocy")
+
+	def test_2q_a_sold_out_room_is_named_in_the_guests_language(self):
+		"""Batch 2Q (§6G3): the room a booking found sold out was named in its refusal's params by the hotel's own text,
+		while every other answer to the guest names it in their language (G-70b put the name there for the booking
+		app to show)."""
+		import dataclasses
+
+		from kamra.tex.api import content as content_api
+		from kamra.tex.services import booking as booking_svc
+
+		std = self.f["room_types"]["STD"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- hotel content editor
+		content_api.save(fx.PROPERTY, [{"ref_doctype": "Room Type", "ref_name": std, "field": "room_type_name",
+		                                "language": "de", "text": "Standardzimmer"}])
+		frappe.local.lang = "de"
+		prop = _search([{"adults": 2, "children": []}], session="2q-sold-de")
+		offer = next(o for o in prop["offers"] if o["room_type"] == std and o["board"] == "AI"
+		             and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id="2q-sold-de")["quote_id"]
+		real = booking_svc.avail.stay_availability
+
+		def none_left(*args, **kwargs):
+			_count, days = real(*args, **kwargs)
+			return 0, [dataclasses.replace(d, available=0) for d in days]
+
+		with mock.patch.object(booking_svc.avail, "stay_availability", side_effect=none_left), \
+				self.assertRaises(frappe.ValidationError):
+			public.book(site=SLUG, quote_ids=[q], guest=GUEST, payment_method="Pay at Hotel", session_id="2q-sold-de",
+			            idempotency_key="2q-sold-de")
+		self.assertEqual(frappe.local.response["tex_code"], "SOLD_OUT")
+		self.assertEqual(frappe.local.response["tex_params"], {"room": "Standardzimmer", "date": str(fx.d(6, 10))})
 
 	def test_translations_are_bound_to_the_hotel(self):
 		from kamra.tex.api import content as content_api
@@ -1117,3 +1150,89 @@ class TestBookingIdentity(TexTestCase):
 		from kamra.tex.services import booking
 
 		self.assertEqual([g[3] for g in demo_seed.DEMO_GUESTS if booking.plain_email(g[3]) != g[3]], [])
+
+
+class TestEverySaveKeepsOnePlainAddress(TexTestCase):
+	"""Batch 2Q (§6P): a profile's e-mail is one plain address on every path that stores one, not only in the TEX booking
+	and the CRM (ADR-080). The Desk form, REST, an import and the legacy paths that make a profile kept Frappe's own
+	check, which takes a display name, a Turkish dotted İ or a trailing dot: a profile no booking ever joins."""
+
+	ODD = ("Ana <ana.2q@example.de>", "İNFO.2Q@HOTEL.COM", "ana.2q@example.de.")
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the Desk form's user
+
+	def guest(self, **kw):
+		return frappe.get_doc({"doctype": "Guest", "first_name": "Ana", "last_name": "Plain", **kw})
+
+	def test_2q_the_desk_form_and_rest_refuse_an_address_no_booking_joins(self):
+		for raw in self.ODD:
+			with self.subTest(raw=raw), self.assertRaisesRegex(frappe.ValidationError, "one plain e-mail address"):
+				self.guest(email=raw).insert()
+			frappe.clear_messages()
+		g = self.guest(email="Ana.Plain.2Q@Example.de").insert()                  # kept as typed, as the CRM keeps it
+		self.assertEqual(frappe.db.get_value("Guest", g.name, "email"), "Ana.Plain.2Q@Example.de")
+		g.email = "Ana <ana.plain.2q@example.de>"
+		with self.assertRaisesRegex(frappe.ValidationError, "one plain e-mail address"):
+			g.save()
+		frappe.clear_messages()
+
+	def test_2q_a_profile_stored_before_still_saves_and_merges(self):
+		"""Only an address typed now is checked: a profile stored another way before (a legacy path, a direct write) is
+		still edited, and a merge moves its address as it is (nobody typed it)."""
+		from kamra.tex.crm import service as crm
+
+		old = self.guest().insert().name
+		frappe.db.set_value("Guest", old, "email", "Ana <ana.old.2q@example.de>")
+		g = frappe.get_doc("Guest", old)
+		g.city = "Bremen"
+		g.save()
+		self.assertEqual(frappe.db.get_value("Guest", old, "city"), "Bremen")
+		target = self.guest(first_name="Anna").insert().name
+		crm.merge_guests(old, target)
+		self.assertEqual(frappe.db.get_value("Guest", target, "email"), "Ana <ana.old.2q@example.de>")
+
+	def test_2q_a_legacy_channel_booking_leaves_an_odd_address_out(self):
+		"""The legacy channel manager (hotels outside TEX) makes a profile from the OTA's message: as a TEX channel's
+		booking does (ADR-080), an address no profile may keep is left out, and the message is applied."""
+		from kamra import channel_manager
+
+		odd = channel_manager._find_or_create_guest("Mia Berg", "", "Mia <mia.2q@example.com>")
+		self.assertFalse(frappe.db.get_value("Guest", odd, "email"))
+		plain = channel_manager._find_or_create_guest("Mia Berg", "", "mia.2q@example.com")
+		self.assertEqual(frappe.db.get_value("Guest", plain, "email"), "mia.2q@example.com")
+
+	def test_2q_r1_a_banquet_customer_with_an_odd_address_is_linked_without_it(self):
+		"""Review round 1 (L1): the legacy banquet office links an enquiry's customer to a profile it makes from the
+		enquiry's e-mail, which Frappe's field takes as a list or a display name; the profile refused it, and the
+		customer could not be linked. As the other legacy paths a person did not type the profile on, it is left out."""
+		from kamra import banquet
+
+		enquiry = frappe._dict(customer_name="Ana Plain", customer_phone="", customer_email="a.2q@x.de, b.2q@x.de")
+		odd = banquet._find_or_create_guest(enquiry)
+		self.assertFalse(frappe.db.get_value("Guest", odd, "email"))
+		plain = banquet._find_or_create_guest(frappe._dict(enquiry, customer_email="ana.2q@x.de"))
+		self.assertEqual(frappe.db.get_value("Guest", plain, "email"), "ana.2q@x.de")
+
+	def test_2q_a_pre_check_in_keeps_the_address_and_takes_only_a_plain_one(self):
+		"""The pre-arrival check-in page (legacy, public, by the stay's token) wrote its e-mail field over the profile
+		with a direct write: a blank field took the address away (no audit, no `forget_contact`), and any text was
+		stored. A blank field keeps it now, and only one plain address is taken."""
+		from kamra import public_api
+
+		setup_site_and_payments(self.f)
+		b = guest_books(session="2q-precheckin", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read back
+		res = frappe.get_all("Reservation", filters={"tex_booking": b["booking"]}, fields=["name", "guest"])[0]
+		token = frappe.db.get_value("Reservation", res.name, "precheckin_token")
+		email = frappe.db.get_value("Guest", res.guest, "email")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's pre-check-in page
+		# the page commits its answer: never the test's fixtures
+		with mock.patch.object(frappe.db, "commit"):
+			public_api.precheckin_submit(token, "Passport", "P2Q0001", email="")
+			self.assertEqual(frappe.db.get_value("Guest", res.guest, "email"), email)
+			with self.assertRaisesRegex(frappe.ValidationError, "one plain e-mail address"):
+				public_api.precheckin_submit(token, "Passport", "P2Q0001", email="Ana <ana.2q@example.de>")
+		frappe.clear_messages()
+		self.assertEqual(frappe.db.get_value("Guest", res.guest, "email"), email)

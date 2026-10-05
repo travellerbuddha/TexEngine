@@ -323,8 +323,11 @@ def _import_one(property, row, find_guest, flag_import, insert_imported):
 	validation (overbooking guard, blacklist) and its final status is stamped
 	without side effects (no folio, no HK task); an in-house row is checked as
 	a live stay and stamped Checked In (TEX Engine, ADR-052 review M1)."""
+	from kamra.tex.services.booking import plain_email
+
 	guest = find_guest(row["guest_name"], row["phone"])
-	if row["email"] and not frappe.db.get_value("Guest", guest, "email"):
+	# another system's address is kept only when it is one plain address (TEX Engine, batch 2Q, ADR-081)
+	if plain_email(row["email"]) and not frappe.db.get_value("Guest", guest, "email"):
 		frappe.db.set_value("Guest", guest, "email", row["email"],
 		                    update_modified=False)
 	doc = frappe.get_doc({

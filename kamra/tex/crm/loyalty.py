@@ -523,6 +523,11 @@ def member_of(guest: str | None, program: str | None, *, lock: bool = False) -> 
 		return False
 	if frappe.db.get_value("Guest", guest, "tex_erased_at", for_update=lock):
 		return False
+	return _member_of(guest, program, lock=lock)
+
+
+def _member_of(guest: str, program: str, *, lock: bool = False) -> bool:
+	"""``member_of`` of a profile known not to be erased."""
 	m = membership(guest, program, lock=lock)
 	if m:
 		return m.status == "Active"
@@ -543,6 +548,17 @@ def is_member(guest: str | None, property: str, *, lock: bool = False) -> bool:
 	"""A member of the hotel's program (its own, else its group's): who the program's members-only prices are for.
 	``lock``: as ``member_of``."""
 	return member_of(guest, program_for(property), lock=lock) if guest else False
+
+
+def member_hotels(guest: str | None, properties) -> set[str]:
+	"""Of ``properties``, the hotels whose program (its own, else its group's) the guest is a member of (``is_member``,
+	plain reads): the profile's erasure mark read once, and each program once however many hotels share it (batch 2Q,
+	§6N1: once per hotel before)."""
+	if not guest or frappe.db.get_value("Guest", guest, "tex_erased_at"):
+		return set()
+	programs = {p: program_for(p) for p in properties}
+	member = {prog: _member_of(guest, prog) for prog in set(programs.values()) if prog}
+	return {p for p, prog in programs.items() if prog and member[prog]}
 
 
 def join(guest: str, program: str, *, property: str | None = None) -> dict:
@@ -622,6 +638,29 @@ def leave(guest: str, program: str, *, reason: str, property: str | None = None,
 	audit("loyalty.member_leave", reference_doctype="TEX Loyalty Member", reference_name=name, property=property,
 	      new={"guest": guest, "program": program, "rejoin_blocked": blocked}, reason=reason)
 	return {"name": name, "status": "Left"}
+
+
+def block_rejoin(guest: str, program: str, *, reason: str, property: str | None = None) -> dict:
+	"""Staff keep a membership that ended from being joined again on the web (C-04h), with a reason: as the block made
+	while ending it (``leave(block_rejoin=True)``), its end (when, why) kept. Batch 2Q (§6O): the block could only be
+	made while ending a membership, so a guest who had left was joined and ended again. A membership still active is
+	ended instead, with the block; staff joining the guest lift it."""
+	from kamra.tex.crm.service import require_live_guest
+
+	prog = frappe.get_doc("TEX Loyalty Program", program)
+	property = _staff_hotel(prog, property, _("Choose the hotel the block is made at."))
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required."))
+	require_live_guest(guest)
+	m = membership(guest, program, lock=True)
+	if not m or m.status != "Left":
+		frappe.throw(_("Only a membership that ended can be kept from a rejoin online: end it, with the block."))
+	if m.rejoin_blocked:
+		return {"name": m.name, "status": "Left", "rejoin_blocked": 1}     # nothing new: no second audit (review round 1)
+	frappe.db.set_value("TEX Loyalty Member", m.name, "rejoin_blocked", 1)
+	audit("loyalty.member_block", reference_doctype="TEX Loyalty Member", reference_name=m.name, property=property,
+	      new={"guest": guest, "program": program, "rejoin_blocked": True}, reason=reason)
+	return {"name": m.name, "status": "Left", "rejoin_blocked": 1}
 
 
 # a profile's memberships, read with a lock (what is committed now: a join committed after this request began

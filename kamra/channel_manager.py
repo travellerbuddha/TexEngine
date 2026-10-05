@@ -277,6 +277,11 @@ def _room_type_for(connection: str, external_id: str) -> str | None:
 
 
 def _find_or_create_guest(name: str, phone: str, email: str) -> str:
+	from kamra.tex.services.booking import plain_email
+
+	# one plain address or none: a profile keeps no other (TEX Engine, batch 2Q, ADR-081)
+	email = (email or "").strip()
+	email = email if plain_email(email) else ""
 	for filt in ({"phone": phone} if phone else None,
 	             {"email": email} if email else None):
 		if filt:
